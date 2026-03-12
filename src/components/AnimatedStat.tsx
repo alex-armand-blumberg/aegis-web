@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const DURATION_MS = 700;
+const DURATION_MS = 500;
 
 type Props = {
   value: number;
