@@ -5,80 +5,44 @@ import AnimatedStat from "@/components/AnimatedStat";
 export default function Home() {
   return (
     <>
-      {/* Nav — inline styles so padding and colors apply: substantial inset, #B0B0B0 links, red button */}
-      <nav
-        className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent backdrop-blur-[4px]"
-        style={{
-          paddingTop: "1.5rem",
-          paddingBottom: "1.25rem",
-          paddingLeft: "clamp(1.5rem, 4vw, 4rem)",
-          paddingRight: "clamp(1.5rem, 4vw, 4rem)",
-        }}
-      >
-        <Link
-          href="/"
-          className="font-bebas text-[24px] tracking-[0.12em]"
-          style={{ color: "#f5f5f5" }}
-        >
-          AEG<span style={{ color: "#ef4444" }}>I</span>S
+      {/* Nav — match index.html: 18px 48px, nav links var(--dim), 900px breakpoint */}
+      <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent px-6 py-4 backdrop-blur-[4px] min-[901px]:px-12 min-[901px]:py-[18px]">
+        <Link href="/" className="font-bebas text-[22px] tracking-[0.12em] text-white">
+          AEG<span className="text-[var(--red)]">I</span>S
         </Link>
-        <div className="hidden items-center gap-12 sm:flex">
-          <a
-            href="#features"
-            className="font-barlow-condensed text-sm font-semibold uppercase tracking-[0.14em] transition hover:text-white"
-            style={{ color: "#B0B0B0" }}
-          >
+        <div className="nav-desktop flex items-center gap-8">
+          <a href="#features" className="font-barlow-condensed text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white">
             Features
           </a>
-          <a
-            href="#about"
-            className="font-barlow-condensed text-sm font-semibold uppercase tracking-[0.14em] transition hover:text-white"
-            style={{ color: "#B0B0B0" }}
-          >
+          <a href="#about" className="font-barlow-condensed text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white">
             About
           </a>
-          <a
-            href="#methodology"
-            className="font-barlow-condensed text-sm font-semibold uppercase tracking-[0.14em] transition hover:text-white"
-            style={{ color: "#B0B0B0" }}
-          >
+          <a href="#methodology" className="font-barlow-condensed text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white">
             Methodology
           </a>
           <Link
             href="/escalation"
-            className="ml-6 font-barlow-condensed font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
-            style={{ backgroundColor: "#ef4444", padding: "0.5rem 1.25rem", borderRadius: "5px", fontSize: "0.8125rem", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+            className="ml-6 inline-flex items-center justify-center rounded px-[18px] py-[7px] font-barlow-condensed text-[12px] font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
+            style={{ backgroundColor: "var(--red)" }}
           >
             Launch App
           </Link>
         </div>
       </nav>
 
-      {/* Hero — Image 1: more vertical breathing room, larger title, more spacing, stats well below buttons */}
-      <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-8 pb-32 pt-[140px] text-center sm:px-12">
+      {/* Hero — match index.html: clamp(86px,16vw,180px), hero-sub 0.22em, stats gap 48px */}
+      <section id="hero" className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 pb-20 pt-[120px] text-center sm:px-8">
         <div className="absolute top-[55%] left-1/2 z-0 h-[600px] w-[900px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(59,130,246,0.10)_0%,transparent_70%)] pointer-events-none" />
-        <p
-          className="relative z-10 mb-8 font-barlow-condensed text-[11px] font-semibold uppercase tracking-[0.28em] text-[#ef4444] opacity-0 animate-[fadeUp_0.6s_0.1s_forwards]"
-          style={{ animationFillMode: "forwards" }}
-        >
+        <p className="hero-tag relative z-10 mb-[22px] font-barlow-condensed text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--red)] opacity-0 animate-[fadeUp_0.6s_0.1s_forwards" style={{ animationFillMode: "forwards" }}>
           ■ Palantir Valley Forge Grant Demo
         </p>
-        <h1
-          className="relative z-10 font-bebas text-[clamp(100px,18vw,220px)] leading-[0.9] tracking-[0.04em] text-white opacity-0 animate-[fadeUp_0.7s_0.2s_forwards]"
-          style={{ textShadow: "0 0 120px rgba(59,130,246,0.25)", animationFillMode: "forwards" }}
-        >
+        <h1 className="relative z-10 font-bebas text-[clamp(86px,16vw,180px)] leading-[0.9] tracking-[0.04em] text-white opacity-0 animate-[fadeUp_0.7s_0.2s_forwards] shadow-[0_0_120px_rgba(59,130,246,0.25)]" style={{ animationFillMode: "forwards" }}>
           AEGIS
         </h1>
-        <p
-          className="relative z-10 mt-10 font-barlow-condensed text-[clamp(13px,1.8vw,17px)] font-light uppercase tracking-[0.24em] text-white/65 opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]"
-          style={{ animationFillMode: "forwards", wordSpacing: "0.08em", marginBottom: "48px" }}
-        >
+        <p className="hero-sub relative z-10 mt-[18px] mb-12 font-barlow-condensed text-[clamp(12px,1.6vw,16px)] font-light uppercase tracking-[0.22em] text-[rgba(226,232,240,0.65)] opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]" style={{ animationFillMode: "forwards" }}>
           Advanced Early-Warning &amp; Geostrategic Intelligence System
         </p>
-        <div
-          className="relative z-10 flex flex-wrap items-center justify-center gap-8 opacity-0 animate-[fadeUp_0.7s_0.5s_forwards]"
-          style={{ animationFillMode: "forwards", marginTop: "0" }}
-        >
+        <div className="hero-buttons relative z-10 flex flex-wrap justify-center gap-4 opacity-0 animate-[fadeUp_0.7s_0.5s_forwards]" style={{ animationFillMode: "forwards" }}>
           <Link href="/escalation" className="btn-primary-hero">
             Launch App →
           </Link>
@@ -86,89 +50,74 @@ export default function Home() {
             Learn More
           </a>
         </div>
-        <div
-          className="relative z-10 flex flex-wrap justify-center gap-16 opacity-0 sm:gap-[56px] md:gap-[80px] animate-[fadeUp_0.7s_0.65s_forwards]"
-          style={{ animationFillMode: "forwards", marginTop: "112px" }}
-        >
+        <div className="hero-stats hero-stats-responsive relative z-10 mt-[72px] flex flex-wrap justify-center gap-12 opacity-0 animate-[fadeUp_0.7s_0.65s_forwards]" style={{ animationFillMode: "forwards" }}>
           <AnimatedStat value={50} suffix="+" label="Countries Tracked" redSuffix />
           <AnimatedStat value={6} label="Index Components" />
           <AnimatedStat value={7} suffix="+" label="Years of Data" redSuffix />
-          <div className="text-center min-w-[120px] sm:min-w-[140px]">
-            <div className="font-bebas text-[42px] sm:text-[48px] tracking-[0.06em] leading-none text-white">
-              AI
-            </div>
-            <div className="mt-3 font-barlow-condensed text-[11px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
-              Powered Analysis
-            </div>
+          <div className="stat text-center min-w-[100px]">
+            <div className="stat-num font-bebas text-[36px] tracking-[0.06em] leading-none text-white">AI</div>
+            <div className="stat-label mt-1 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">Powered Analysis</div>
           </div>
         </div>
       </section>
 
       <div className="relative z-10 section-divider" aria-hidden />
 
-      {/* Features */}
-      <section id="features" className="relative z-10 bg-[rgba(6,14,35,0.4)] py-[100px]">
-        <div className="mx-auto max-w-[1200px] px-8 sm:px-16">
+      {/* Features — match index.html: max-width 1200px, padding 100px 48px, grid gap 2px, cards 36px 32px */}
+      <section id="features" className="relative z-10 bg-[rgba(6,14,35,0.4)]">
+        <div className="section section-responsive">
           <Reveal>
-            <p className="mb-4 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
+            <p className="section-tag mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--blue)]">
               — Capabilities
             </p>
           </Reveal>
           <Reveal>
-            <h2 className="font-bebas text-[clamp(42px,6vw,72px)] leading-none tracking-[0.06em] text-white mb-6">
+            <h2 className="font-bebas text-[clamp(42px,6vw,72px)] leading-none tracking-[0.06em] text-white mb-5">
               What AEGIS Does
             </h2>
           </Reveal>
           <Reveal>
-            <p className="max-w-[620px] text-base leading-[1.8] text-white/65 mb-4">
-              A global risk intelligence platform that tracks conflict escalation
-              patterns, surfaces early-warning signals, and delivers AI-powered
-              geopolitical analysis — before situations deteriorate.
+            <p className="section-body max-w-[620px] text-base leading-[1.75] text-[rgba(226,232,240,0.65)]">
+              A global risk intelligence platform that tracks conflict escalation patterns, surfaces early-warning signals, and delivers AI-powered geopolitical analysis — before situations deteriorate.
             </p>
           </Reveal>
           <Reveal>
-            <div className="mt-16 grid gap-px overflow-hidden rounded-lg border border-[var(--dimmer)] sm:grid-cols-3">
-              <Link href="/escalation" className="group relative flex flex-col border-r border-white/[0.06] bg-[var(--card)] p-9 transition-colors hover:bg-[rgba(12,26,65,0.9)] sm:border-r last:border-r-0">
-                <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#ef4444]" aria-hidden />
-                <div className="mb-4 text-[22px]">📊</div>
-                <div className="font-barlow-condensed text-lg font-semibold uppercase tracking-[0.06em] text-white mb-2.5">
+            <div className="features-grid features-grid-responsive mt-14 grid grid-cols-1 gap-0.5 overflow-hidden rounded-lg border border-[var(--dimmer)] min-[901px]:grid-cols-3">
+              <Link href="/escalation" className="feature-card flex flex-col bg-[var(--card)] px-8 py-9" style={{ ["--feature-accent" as string]: "#ef4444" }}>
+                <div className="feature-icon mb-4 text-[22px]">📊</div>
+                <div className="feature-title mb-2.5 font-barlow-condensed text-[18px] font-semibold uppercase tracking-[0.06em] text-white">
                   Escalation Index
                 </div>
-                <p className="text-[14px] leading-[1.7] text-[rgba(226,232,240,0.55)] flex-1">
+                <p className="feature-desc flex-1 text-[14px] leading-[1.7] text-[rgba(226,232,240,0.55)]">
                   A composite monthly index (0–100) built from six leading indicators — event frequency acceleration, explosions, strategic developments, civil unrest, and civilian targeting ratio. Separates intensity from acceleration to catch both sustained conflicts and newly escalating ones.
                 </p>
-                <span className="mt-4 inline-block w-fit rounded border border-[rgba(59,130,246,0.2)] bg-[rgba(59,130,246,0.12)] px-2.5 py-[3px] font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.16em] text-[#60a5fa]">
+                <span className="feature-tag mt-4 inline-block rounded border border-[rgba(59,130,246,0.2)] bg-[rgba(59,130,246,0.12)] px-2.5 py-[3px] font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.16em] text-[#60a5fa]">
                   Leading Indicators
                 </span>
-                <span className="mt-3 opacity-0 transition-opacity group-hover:opacity-100 self-end text-[var(--dim)]">→</span>
               </Link>
-              <Link href="/map" className="group relative flex flex-col border-r border-white/[0.06] bg-[var(--card)] p-9 transition-colors hover:bg-[rgba(12,26,65,0.9)] sm:border-r last:border-r-0">
-                <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#3b82f6]" aria-hidden />
-                <div className="mb-4 text-[22px]">🌐</div>
-                <div className="font-barlow-condensed text-lg font-semibold uppercase tracking-[0.06em] text-white mb-2.5">
+              <Link href="/map" className="feature-card flex flex-col bg-[var(--card)] px-8 py-9" style={{ ["--feature-accent" as string]: "#3b82f6" }}>
+                <div className="feature-icon mb-4 text-[22px]">🌐</div>
+                <div className="feature-title mb-2.5 font-barlow-condensed text-[18px] font-semibold uppercase tracking-[0.06em] text-white">
                   Interactive Map
                 </div>
-                <p className="text-[14px] leading-[1.7] text-[rgba(226,232,240,0.55)] flex-1">
+                <p className="feature-desc flex-1 text-[14px] leading-[1.7] text-[rgba(226,232,240,0.55)]">
                   A 3D globe and 2D map visualizing conflict hotspots globally. Click any data point to see a full breakdown of event types — battles, explosions, strategic developments, protests, riots, and civilian violence — with country-level aggregates.
                 </p>
-                <span className="mt-4 inline-block w-fit rounded border border-[rgba(59,130,246,0.2)] bg-[rgba(59,130,246,0.12)] px-2.5 py-[3px] font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.16em] text-[#60a5fa]">
+                <span className="feature-tag mt-4 inline-block rounded border border-[rgba(59,130,246,0.2)] bg-[rgba(59,130,246,0.12)] px-2.5 py-[3px] font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.16em] text-[#60a5fa]">
                   Real-Time Data
                 </span>
-                <span className="mt-3 opacity-0 transition-opacity group-hover:opacity-100 self-end text-[var(--dim)]">→</span>
               </Link>
-              <Link href="/escalation" className="group relative flex flex-col bg-[var(--card)] p-9 transition-colors hover:bg-[rgba(12,26,65,0.9)]">
-                <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#a78bfa]" aria-hidden />
-                <div className="mb-4 text-[22px]">⚡</div>
-                <div className="font-barlow-condensed text-lg font-semibold uppercase tracking-[0.06em] text-white mb-2.5">
+              <Link href="/escalation" className="feature-card flex flex-col bg-[var(--card)] px-8 py-9" style={{ ["--feature-accent" as string]: "#a78bfa" }}>
+                <div className="feature-icon mb-4 text-[22px]">⚡</div>
+                <div className="feature-title mb-2.5 font-barlow-condensed text-[18px] font-semibold uppercase tracking-[0.06em] text-white">
                   AI Analysis
                 </div>
-                <p className="text-[14px] leading-[1.7] text-[rgba(226,232,240,0.55)] flex-1">
+                <p className="feature-desc flex-1 text-[14px] leading-[1.7] text-[rgba(226,232,240,0.55)]">
                   AI-generated country insights, trend interpretation, and comparative analysis — connecting index data to real-world events. Ask any question about a country&apos;s conflict profile and receive a specific, data-grounded answer.
                 </p>
-                <span className="mt-4 inline-block w-fit rounded border border-[rgba(59,130,246,0.2)] bg-[rgba(59,130,246,0.12)] px-2.5 py-[3px] font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.16em] text-[#60a5fa]">
+                <span className="feature-tag mt-4 inline-block rounded border border-[rgba(59,130,246,0.2)] bg-[rgba(59,130,246,0.12)] px-2.5 py-[3px] font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.16em] text-[#60a5fa]">
                   Groq · Llama 3.1
                 </span>
-                <span className="mt-3 opacity-0 transition-opacity group-hover:opacity-100 self-end text-[var(--dim)]">→</span>
               </Link>
             </div>
           </Reveal>
@@ -177,13 +126,13 @@ export default function Home() {
 
       <div className="relative z-10 section-divider" aria-hidden />
 
-      {/* About — section tag blue; body + mission; buttons 10px 22px, 12px */}
-      <section id="about" className="relative z-10 py-[100px]">
-        <div className="mx-auto max-w-[1200px] px-8 sm:px-16">
-          <div className="grid gap-12 lg:grid-cols-2 lg:gap-[80px]">
+      {/* About — match index.html: section-tag blue, inner gap 80px, card padding 32px */}
+      <section id="about" className="relative z-10">
+        <div className="section section-responsive">
+          <div className="about-inner-responsive grid grid-cols-1 gap-10 min-[901px]:grid-cols-2 min-[901px]:gap-20">
             <div>
               <Reveal>
-                <p className="mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--dim)]">
+                <p className="section-tag mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--blue)]">
                   — Background
                 </p>
               </Reveal>
@@ -230,35 +179,35 @@ export default function Home() {
               </Reveal>
             </div>
             <Reveal>
-            <div className="rounded-lg border border-white/[0.14] bg-[rgba(6,14,35,0.85)] p-8">
-              <div className="mb-5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--dim)]">
+            <div className="about-card rounded-lg border border-[var(--dimmer)] bg-[var(--card)] p-8">
+              <div className="about-card-label mb-5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--dim)]">
                 Sample Index Output — Ukraine
               </div>
-              <div className="flex justify-between border-b border-white/5 py-2 text-sm">
-                <span className="font-barlow-condensed text-xs uppercase tracking-wide text-white/50">Status</span>
-                <span className="font-bebas text-lg tracking-wide text-[#ef4444]">ESCALATION FLAGGED</span>
+              <div className="index-row flex justify-between border-b border-white/5 py-2 text-[13px]">
+                <span className="index-label font-barlow-condensed text-[11px] uppercase tracking-[0.04em] text-white/50">Status</span>
+                <span className="index-val font-bebas text-[18px] tracking-[0.06em] text-[#ef4444]">ESCALATION FLAGGED</span>
               </div>
-              <div className="flex justify-between border-b border-white/5 py-2 text-sm">
-                <span className="font-barlow-condensed text-xs uppercase tracking-wide text-white/50">Smoothed Index</span>
-                <span className="font-bebas text-lg tracking-wide text-white">82.4</span>
+              <div className="index-row flex justify-between border-b border-white/5 py-2 text-[13px]">
+                <span className="index-label font-barlow-condensed text-[11px] uppercase tracking-[0.04em] text-white/50">Smoothed Index</span>
+                <span className="index-val font-bebas text-[18px] tracking-[0.06em] text-white">82.4</span>
               </div>
-              <div className="flex justify-between border-b border-white/5 py-2 text-sm">
-                <span className="font-barlow-condensed text-xs uppercase tracking-wide text-white/50">Trend</span>
-                <span className="font-bebas text-lg tracking-wide text-[#ef4444]">Rising ▲</span>
+              <div className="index-row flex justify-between border-b border-white/5 py-2 text-[13px]">
+                <span className="index-label font-barlow-condensed text-[11px] uppercase tracking-[0.04em] text-white/50">Trend</span>
+                <span className="index-val font-bebas text-[18px] tracking-[0.06em] text-[#ef4444]">Rising ▲</span>
               </div>
-              <div className="flex justify-between border-b border-white/5 py-2 text-sm">
-                <span className="font-barlow-condensed text-xs uppercase tracking-wide text-white/50">Peak Month</span>
-                <span className="font-bebas text-lg tracking-wide text-white">Mar 2022</span>
+              <div className="index-row flex justify-between border-b border-white/5 py-2 text-[13px]">
+                <span className="index-label font-barlow-condensed text-[11px] uppercase tracking-[0.04em] text-white/50">Peak Month</span>
+                <span className="index-val font-bebas text-[18px] tracking-[0.06em] text-white">Mar 2022</span>
               </div>
-              <div className="flex justify-between border-b border-white/5 py-2 text-sm">
-                <span className="font-barlow-condensed text-xs uppercase tracking-wide text-white/50">Flagged Months</span>
-                <span className="font-bebas text-lg tracking-wide text-white">24</span>
+              <div className="index-row flex justify-between border-b border-white/5 py-2 text-[13px]">
+                <span className="index-label font-barlow-condensed text-[11px] uppercase tracking-[0.04em] text-white/50">Flagged Months</span>
+                <span className="index-val font-bebas text-[18px] tracking-[0.06em] text-white">24</span>
               </div>
-              <div className="flex justify-between py-2 text-sm">
-                <span className="font-barlow-condensed text-xs uppercase tracking-wide text-white/50">Recorded Fatalities</span>
-                <span className="font-bebas text-lg tracking-wide text-[#ef4444]">41,203</span>
+              <div className="index-row flex justify-between border-b border-white/5 py-2 text-[13px] last:border-b-0">
+                <span className="index-label font-barlow-condensed text-[11px] uppercase tracking-[0.04em] text-white/50">Recorded Fatalities</span>
+                <span className="index-val font-bebas text-[18px] tracking-[0.06em] text-[#ef4444]">41,203</span>
               </div>
-              <p className="mt-4 text-[11px] text-white/25">
+              <p className="mt-[18px] font-barlow-condensed text-[11px] tracking-[0.06em] text-white/25">
                 Source:{" "}
                 <a href="https://acleddata.com" target="_blank" rel="noreferrer" className="text-white/35 underline">
                   ACLED (acleddata.com)
@@ -272,9 +221,9 @@ export default function Home() {
 
       <div className="relative z-10 section-divider" aria-hidden />
 
-      {/* Methodology — section tag blue; method items padding 24px, gap 24px, 2px left accent red */}
-      <section id="methodology" className="relative z-10 bg-[rgba(6,14,35,0.4)] py-[100px]">
-        <div className="mx-auto max-w-[1200px] px-8 sm:px-16">
+      {/* Methodology — match index.html: padding 24px, gap 16px, method-weight 32px */}
+      <section id="methodology" className="relative z-10 bg-[rgba(6,14,35,0.4)]">
+        <div className="section section-responsive">
           <Reveal>
             <p className="mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               — How It Works
@@ -294,7 +243,7 @@ export default function Home() {
             </p>
           </Reveal>
           <Reveal>
-          <div className="mt-14 grid gap-6 sm:grid-cols-2">
+          <div className="method-grid method-grid-responsive mt-12 grid grid-cols-1 gap-4 min-[901px]:grid-cols-2">
             {[
               { weight: "30%", name: "Raw Conflict Intensity", desc: "Battles + explosions in absolute terms. Ensures sustained wars like Ukraine score high even with flat month-over-month change." },
               { weight: "20%", name: "Event Frequency Acceleration", desc: "Month-over-month % change in total events. Catches countries entering or re-escalating conflict before intensity peaks." },
@@ -305,7 +254,7 @@ export default function Home() {
             ].map((item) => (
               <div
                 key={item.name}
-                className="flex gap-5 items-start rounded-md border border-[var(--dimmer)] bg-[var(--card)] p-6"
+                className="method-item flex gap-5 items-start rounded-md border border-[var(--dimmer)] bg-[var(--card)] p-6"
               >
                 <div className="font-bebas text-[32px] leading-none text-[#ef4444] shrink-0 w-[52px]">
                   {item.weight}
@@ -327,10 +276,10 @@ export default function Home() {
 
       <div className="relative z-10 section-divider" aria-hidden />
 
-      {/* CTA — id="cta", padding 120px 48px, own background to avoid overlap */}
+      {/* CTA — match index.html: padding 120px 48px, centered */}
       <section id="cta" className="relative z-10 bg-[var(--bg)] py-[120px] text-center">
         <div className="absolute top-1/2 left-1/2 h-[400px] w-[600px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(239,68,68,0.08)_0%,transparent_70%)] pointer-events-none" />
-        <div className="relative z-10 mx-auto max-w-[1200px] px-8 sm:px-16">
+        <div className="section section-responsive relative z-10">
           <Reveal>
             <p className="mb-3.5 flex justify-center font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               Get Started
@@ -366,13 +315,13 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Footer — padding 32px 48px; links color --dim, gap 24px per prompt */}
-      <footer className="relative z-10 flex flex-col items-center justify-between gap-6 border-t border-[var(--dimmer)] px-8 py-8 sm:flex-row sm:px-16">
-        <div className="font-bebas text-lg tracking-[0.12em] text-[rgba(255,255,255,0.4)]">
+      {/* Footer — match index.html: padding 32px 48px, links gap 24px */}
+      <footer className="footer-responsive relative z-10 flex items-center justify-between border-t border-[var(--dimmer)] px-6 py-8 min-[901px]:px-12">
+        <div className="footer-logo font-bebas text-lg tracking-[0.12em] text-white/40">
           AEGIS
         </div>
-        <div className="flex gap-8">
-          <Link href="/escalation" className="font-barlow-condensed text-[11px] uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white">
+        <div className="footer-links flex gap-6">
+          <Link href="/escalation" className="font-barlow-condensed text-[11px] uppercase tracking-[0.14em] text-[var(--dim)] transition-colors hover:text-white">
             App
           </Link>
           <a
@@ -400,7 +349,7 @@ export default function Home() {
             Data: ACLED
           </a>
         </div>
-        <div className="font-barlow-condensed text-[11px] tracking-[0.08em] text-[rgba(255,255,255,0.22)]">
+        <div className="footer-copy font-barlow-condensed text-[11px] tracking-[0.08em] text-white/[0.22]">
           © 2026 Alexander Armand-Blumberg · AEGIS
         </div>
       </footer>

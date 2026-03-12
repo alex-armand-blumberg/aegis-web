@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 const DURATION_MS = 700;
-const TICK_INTERVAL_MS = 25;
 
 type Props = {
   value: number;
@@ -14,29 +13,8 @@ type Props = {
 
 export default function AnimatedStat({ value, suffix, label, redSuffix }: Props) {
   const [displayValue, setDisplayValue] = useState(0);
-  const [hasAnimated, setHasAnimated] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
+  // Animate once, from 0 → value, on first client render.
   useEffect(() => {
-    if (hasAnimated) return;
-    const el = ref.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0].isIntersecting) return;
-        setHasAnimated(true);
-      },
-      { threshold: 0.2 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasAnimated]);
-
-  // Animate once, from 0 → value, when hasAnimated flips true.
-  useEffect(() => {
-    if (!hasAnimated) return;
-
     let frameId: number;
     const startTime = performance.now();
 
@@ -44,7 +22,7 @@ export default function AnimatedStat({ value, suffix, label, redSuffix }: Props)
       const elapsed = now - startTime;
       const progress = Math.min(elapsed / DURATION_MS, 1);
       // ease-out: fast start, slow end
-      const eased = 1 - Math.pow(1 - progress, 2);
+      const eased = 1 - Math.pow(1 - progress, 2); // ease-out
       const current = Math.round(eased * value);
       setDisplayValue(current);
       if (progress < 1) {
@@ -55,17 +33,17 @@ export default function AnimatedStat({ value, suffix, label, redSuffix }: Props)
     frameId = window.requestAnimationFrame(tick);
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [hasAnimated, value]);
+  }, [value]);
 
   return (
-    <div ref={ref} className="text-center min-w-[120px] sm:min-w-[140px]">
-      <div className="font-bebas text-[42px] sm:text-[48px] tracking-[0.06em] leading-none text-white">
+    <div className="stat text-center min-w-[100px]">
+      <div className="stat-num font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
         {displayValue}
         {suffix != null && (
           <span className={redSuffix ? "text-[#ef4444]" : undefined}>{suffix}</span>
         )}
       </div>
-      <div className="mt-3 font-barlow-condensed text-[11px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
+      <div className="stat-label mt-1 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
         {label}
       </div>
     </div>

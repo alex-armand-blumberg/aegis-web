@@ -111,20 +111,20 @@ a {
   transform: translateY(-2px);
 }
 
-/* Hero CTA buttons — Image 1: larger, more padding, more prominent */
+/* Hero CTA buttons — match index.html: 14px font, 14px 32px padding */
 .btn-primary-hero {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.625rem;
   background: var(--red);
   color: white;
   font-family: var(--font-barlow-condensed);
-  font-size: 1rem;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  padding: 1rem 2.25rem;
+  padding: 14px 32px;
   border-radius: 5px;
   transition: transform 0.15s, opacity 0.15s;
 }
@@ -136,16 +136,16 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.625rem;
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.22);
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.75);
   font-family: var(--font-barlow-condensed);
-  font-size: 1rem;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  padding: 1rem 2.25rem;
+  padding: 14px 32px;
   border-radius: 5px;
   transition: border-color 0.2s, color 0.2s, transform 0.15s;
 }
@@ -153,6 +153,64 @@ a {
   border-color: rgba(255, 255, 255, 0.55);
   color: white;
   transform: translateY(-2px);
+}
+
+/* Feature card — 2px accent bar on hover (match index.html) */
+.feature-card {
+  position: relative;
+  transition: background 0.25s;
+}
+.feature-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--feature-accent, var(--blue));
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.feature-card:hover {
+  background: rgba(12, 26, 65, 0.9);
+}
+.feature-card:hover::before {
+  opacity: 1;
+}
+
+/* Section layout (match index.html .section) */
+.section {
+  padding: 100px 48px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Responsive — match index.html @media (max-width: 900px) */
+@media (max-width: 900px) {
+  .nav-desktop {
+    display: none;
+  }
+  .section-responsive {
+    padding: 72px 24px !important;
+  }
+  .features-grid-responsive {
+    grid-template-columns: 1fr;
+  }
+  .about-inner-responsive {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+  .method-grid-responsive {
+    grid-template-columns: 1fr;
+  }
+  .hero-stats-responsive {
+    gap: 28px;
+  }
+  .footer-responsive {
+    flex-direction: column;
+    gap: 16px;
+    text-align: center;
+  }
 }
 
 .font-bebas {
