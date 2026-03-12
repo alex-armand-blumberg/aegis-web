@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 
 const DURATION_MS = 700;
 const TICK_INTERVAL_MS = 25;
-const START_DELAY_MS = 700;
 
 type Props = {
   value: number;
@@ -17,9 +16,6 @@ export default function AnimatedStat({ value, suffix, label, redSuffix }: Props)
   const [displayValue, setDisplayValue] = useState(0);
   const [hasAnimated, setHasAnimated] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  // In the browser, window.setTimeout returns a number; using number here avoids
-  // the Node.js Timeout vs DOM number typing mismatch in production builds.
-  const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (hasAnimated) return;
@@ -29,15 +25,12 @@ export default function AnimatedStat({ value, suffix, label, redSuffix }: Props)
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries[0].isIntersecting) return;
-        timeoutRef.current = window.setTimeout(() => setHasAnimated(true), START_DELAY_MS);
+        setHasAnimated(true);
       },
       { threshold: 0.2 }
     );
     observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
-    };
+    return () => observer.disconnect();
   }, [hasAnimated]);
 
   // Animate once, from 0 → value, when hasAnimated flips true.
