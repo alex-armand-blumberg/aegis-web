@@ -1,36 +1,34 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+AEGIS Web — Escalation & Geostrategic Intelligence
+==================================================
 
-## Getting Started
+This is the Next.js implementation of **AEGIS — Advanced Early-Warning & Geostrategic Intelligence System**, rebuilt from the original Streamlit demo.
 
-First, run the development server:
+It exposes:
+
+- A Palantir-style landing page with video background.
+- An **Escalation Index** page backed by ACLED data and TypeScript index computation.
+- An **Interactive Map** view using ACLED’s public ArcGIS layer.
+- AI analysis endpoints backed by Groq (Llama 3).
+
+## Running locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.example` to `.env.local` and set:
 
-## Learn More
+- `GROQ_API_KEY` — Groq API key for AI insight endpoints.
 
-To learn more about Next.js, take a look at the following resources:
+## Deployment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Push this project to GitHub.
+2. Create a new project on Vercel and import the repo.
+3. In Vercel project settings, add `GROQ_API_KEY` as an environment variable.
+4. Point the `aegis-hq.com` domain at the Vercel project.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
