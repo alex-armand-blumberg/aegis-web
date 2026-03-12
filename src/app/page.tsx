@@ -1,110 +1,103 @@
 import Link from "next/link";
 import Reveal from "@/components/Reveal";
+import AnimatedStat from "@/components/AnimatedStat";
 
 export default function Home() {
   return (
     <>
-      {/* Nav — padding 18px 48px, Launch App 7px 18px, border-radius 4px */}
-      <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent px-8 py-[18px] backdrop-blur-[4px] sm:px-16">
+      {/* Nav — inline styles so padding and colors apply: substantial inset, #B0B0B0 links, red button */}
+      <nav
+        className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent backdrop-blur-[4px]"
+        style={{
+          paddingTop: "1.5rem",
+          paddingBottom: "1.25rem",
+          paddingLeft: "clamp(1.5rem, 4vw, 4rem)",
+          paddingRight: "clamp(1.5rem, 4vw, 4rem)",
+        }}
+      >
         <Link
           href="/"
-          className="font-bebas text-[22px] tracking-[0.12em] text-white"
+          className="font-bebas text-[24px] tracking-[0.12em]"
+          style={{ color: "#f5f5f5" }}
         >
-          AEG<span className="text-[#ef4444]">I</span>S
+          AEG<span style={{ color: "#ef4444" }}>I</span>S
         </Link>
-        <div className="hidden items-center gap-10 sm:flex">
+        <div className="hidden items-center gap-12 sm:flex">
           <a
             href="#features"
-            className="font-barlow-condensed text-xs font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white"
+            className="font-barlow-condensed text-sm font-semibold uppercase tracking-[0.14em] transition hover:text-white"
+            style={{ color: "#B0B0B0" }}
           >
             Features
           </a>
           <a
             href="#about"
-            className="font-barlow-condensed text-xs font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white"
+            className="font-barlow-condensed text-sm font-semibold uppercase tracking-[0.14em] transition hover:text-white"
+            style={{ color: "#B0B0B0" }}
           >
             About
           </a>
           <a
             href="#methodology"
-            className="font-barlow-condensed text-xs font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white"
+            className="font-barlow-condensed text-sm font-semibold uppercase tracking-[0.14em] transition hover:text-white"
+            style={{ color: "#B0B0B0" }}
           >
             Methodology
           </a>
           <Link
             href="/escalation"
-            className="ml-8 rounded bg-[#ef4444] py-[7px] px-[18px] font-barlow-condensed text-xs font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
+            className="ml-6 font-barlow-condensed font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
+            style={{ backgroundColor: "#ef4444", padding: "0.5rem 1.25rem", borderRadius: "5px", fontSize: "0.8125rem", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
           >
             Launch App
           </Link>
         </div>
       </nav>
 
-      {/* Hero — spread out like HTML: more padding, generous spacing */}
-      <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-8 pb-24 pt-[120px] text-center sm:px-12">
+      {/* Hero — Image 1: more vertical breathing room, larger title, more spacing, stats well below buttons */}
+      <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-8 pb-32 pt-[140px] text-center sm:px-12">
         <div className="absolute top-[55%] left-1/2 z-0 h-[600px] w-[900px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(59,130,246,0.10)_0%,transparent_70%)] pointer-events-none" />
         <p
-          className="relative z-10 mb-[22px] font-barlow-condensed text-[11px] font-semibold uppercase tracking-[0.28em] text-[#ef4444] opacity-0 animate-[fadeUp_0.6s_0.1s_forwards]"
+          className="relative z-10 mb-8 font-barlow-condensed text-[11px] font-semibold uppercase tracking-[0.28em] text-[#ef4444] opacity-0 animate-[fadeUp_0.6s_0.1s_forwards]"
           style={{ animationFillMode: "forwards" }}
         >
           ■ Palantir Valley Forge Grant Demo
         </p>
         <h1
-          className="relative z-10 font-bebas text-[clamp(86px,16vw,180px)] leading-[0.9] tracking-[0.04em] text-white opacity-0 animate-[fadeUp_0.7s_0.2s_forwards]"
+          className="relative z-10 font-bebas text-[clamp(100px,18vw,220px)] leading-[0.9] tracking-[0.04em] text-white opacity-0 animate-[fadeUp_0.7s_0.2s_forwards]"
           style={{ textShadow: "0 0 120px rgba(59,130,246,0.25)", animationFillMode: "forwards" }}
         >
           AEGIS
         </h1>
         <p
-          className="relative z-10 mt-[18px] mb-14 font-barlow-condensed text-[clamp(12px,1.6vw,16px)] font-light uppercase tracking-[0.24em] text-white/65 opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]"
-          style={{ animationFillMode: "forwards", wordSpacing: "0.08em" }}
+          className="relative z-10 mt-10 font-barlow-condensed text-[clamp(13px,1.8vw,17px)] font-light uppercase tracking-[0.24em] text-white/65 opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]"
+          style={{ animationFillMode: "forwards", wordSpacing: "0.08em", marginBottom: "48px" }}
         >
           Advanced Early-Warning &amp; Geostrategic Intelligence System
         </p>
         <div
-          className="relative z-10 flex flex-wrap items-center justify-center gap-6 opacity-0 animate-[fadeUp_0.7s_0.5s_forwards]"
-          style={{ animationFillMode: "forwards" }}
+          className="relative z-10 flex flex-wrap items-center justify-center gap-8 opacity-0 animate-[fadeUp_0.7s_0.5s_forwards]"
+          style={{ animationFillMode: "forwards", marginTop: "0" }}
         >
-          <Link href="/escalation" className="btn-primary text-sm">
+          <Link href="/escalation" className="btn-primary-hero">
             Launch App →
           </Link>
-          <a href="#features" className="btn-secondary text-sm">
+          <a href="#features" className="btn-secondary-hero">
             Learn More
           </a>
         </div>
         <div
-          className="relative z-10 mt-[72px] flex flex-wrap justify-center gap-16 opacity-0 sm:gap-[56px] md:gap-[72px] animate-[fadeUp_0.7s_0.65s_forwards]"
-          style={{ animationFillMode: "forwards" }}
+          className="relative z-10 flex flex-wrap justify-center gap-16 opacity-0 sm:gap-[56px] md:gap-[80px] animate-[fadeUp_0.7s_0.65s_forwards]"
+          style={{ animationFillMode: "forwards", marginTop: "112px" }}
         >
+          <AnimatedStat value={50} suffix="+" label="Countries Tracked" redSuffix />
+          <AnimatedStat value={6} label="Index Components" />
+          <AnimatedStat value={7} suffix="+" label="Years of Data" redSuffix />
           <div className="text-center min-w-[120px] sm:min-w-[140px]">
-            <div className="font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
-              50<span className="text-[#ef4444]">+</span>
-            </div>
-            <div className="mt-2 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
-              Countries Tracked
-            </div>
-          </div>
-          <div className="text-center min-w-[120px] sm:min-w-[140px]">
-            <div className="font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
-              6
-            </div>
-            <div className="mt-2 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
-              Index Components
-            </div>
-          </div>
-          <div className="text-center min-w-[120px] sm:min-w-[140px]">
-            <div className="font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
-              7<span className="text-[#ef4444]">+</span>
-            </div>
-            <div className="mt-2 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
-              Years of Data
-            </div>
-          </div>
-          <div className="text-center min-w-[120px] sm:min-w-[140px]">
-            <div className="font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
+            <div className="font-bebas text-[42px] sm:text-[48px] tracking-[0.06em] leading-none text-white">
               AI
             </div>
-            <div className="mt-2 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
+            <div className="mt-3 font-barlow-condensed text-[11px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
               Powered Analysis
             </div>
           </div>

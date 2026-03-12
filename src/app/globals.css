@@ -111,6 +111,50 @@ a {
   transform: translateY(-2px);
 }
 
+/* Hero CTA buttons — Image 1: larger, more padding, more prominent */
+.btn-primary-hero {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--red);
+  color: white;
+  font-family: var(--font-barlow-condensed);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1rem 2.25rem;
+  border-radius: 5px;
+  transition: transform 0.15s, opacity 0.15s;
+}
+.btn-primary-hero:hover {
+  transform: translateY(-2px);
+  opacity: 0.9;
+}
+.btn-secondary-hero {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.85);
+  font-family: var(--font-barlow-condensed);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1rem 2.25rem;
+  border-radius: 5px;
+  transition: border-color 0.2s, color 0.2s, transform 0.15s;
+}
+.btn-secondary-hero:hover {
+  border-color: rgba(255, 255, 255, 0.55);
+  color: white;
+  transform: translateY(-2px);
+}
+
 .font-bebas {
   font-family: var(--font-bebas), sans-serif;
 }
