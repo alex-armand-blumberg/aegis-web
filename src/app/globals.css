@@ -25,6 +25,8 @@
 
 html {
   scroll-behavior: smooth;
+  scroll-snap-type: y mandatory;
+  height: 100%;
 }
 
 body {
@@ -178,11 +180,23 @@ a {
   opacity: 1;
 }
 
-/* Section layout (match index.html .section) */
+/* Section layout (match index.html .section) — width 100% so margin auto centers */
 .section {
-  padding: 100px 48px;
+  width: 100%;
   max-width: 1200px;
-  margin: 0 auto;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 100px 48px;
+}
+
+/* Full-viewport scroll snap: one section at a time */
+.snap-section {
+  min-height: 100vh;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+.snap-section-footer {
+  scroll-snap-align: start;
 }
 
 /* Responsive — match index.html @media (max-width: 900px) */

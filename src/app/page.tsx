@@ -30,8 +30,8 @@ export default function Home() {
         </div>
       </nav>
 
-      {/* Hero — match index.html: clamp(86px,16vw,180px), hero-sub 0.22em, stats gap 48px */}
-      <section id="hero" className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 pb-20 pt-[120px] text-center sm:px-8">
+      {/* Hero — full viewport, centered, scroll-snap, 48px padding */}
+      <section id="hero" className="snap-section relative z-10 flex min-h-screen flex-col items-center justify-center px-12 pb-20 pt-[120px] text-center">
         <div className="absolute top-[55%] left-1/2 z-0 h-[600px] w-[900px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(59,130,246,0.10)_0%,transparent_70%)] pointer-events-none" />
         <p className="hero-tag relative z-10 mb-[22px] font-barlow-condensed text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--red)] opacity-0 animate-[fadeUp_0.6s_0.1s_forwards" style={{ animationFillMode: "forwards" }}>
           ■ Palantir Valley Forge Grant Demo
@@ -63,9 +63,9 @@ export default function Home() {
 
       <div className="relative z-10 section-divider" aria-hidden />
 
-      {/* Features — match index.html: max-width 1200px, padding 100px 48px, grid gap 2px, cards 36px 32px */}
-      <section id="features" className="relative z-10 bg-[rgba(6,14,35,0.4)]">
-        <div className="section section-responsive">
+      {/* Features — centered section wrapper, full viewport snap */}
+      <section id="features" className="snap-section relative z-10 flex min-h-screen flex-col items-center justify-center bg-[rgba(6,14,35,0.4)] py-0">
+        <div className="section section-responsive w-full">
           <Reveal>
             <p className="section-tag mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--blue)]">
               — Capabilities
@@ -126,9 +126,9 @@ export default function Home() {
 
       <div className="relative z-10 section-divider" aria-hidden />
 
-      {/* About — match index.html: section-tag blue, inner gap 80px, card padding 32px */}
-      <section id="about" className="relative z-10">
-        <div className="section section-responsive">
+      {/* About — centered section wrapper, full viewport snap */}
+      <section id="about" className="snap-section relative z-10 flex min-h-screen flex-col items-center justify-center py-0">
+        <div className="section section-responsive w-full">
           <div className="about-inner-responsive grid grid-cols-1 gap-10 min-[901px]:grid-cols-2 min-[901px]:gap-20">
             <div>
               <Reveal>
@@ -221,9 +221,9 @@ export default function Home() {
 
       <div className="relative z-10 section-divider" aria-hidden />
 
-      {/* Methodology — match index.html: padding 24px, gap 16px, method-weight 32px */}
-      <section id="methodology" className="relative z-10 bg-[rgba(6,14,35,0.4)]">
-        <div className="section section-responsive">
+      {/* Methodology — centered section wrapper, full viewport snap */}
+      <section id="methodology" className="snap-section relative z-10 flex min-h-screen flex-col items-center justify-center bg-[rgba(6,14,35,0.4)] py-0">
+        <div className="section section-responsive w-full">
           <Reveal>
             <p className="mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               — How It Works
@@ -276,10 +276,10 @@ export default function Home() {
 
       <div className="relative z-10 section-divider" aria-hidden />
 
-      {/* CTA — match index.html: padding 120px 48px, centered */}
-      <section id="cta" className="relative z-10 bg-[var(--bg)] py-[120px] text-center">
+      {/* CTA — full viewport snap, centered */}
+      <section id="cta" className="snap-section relative z-10 flex min-h-screen flex-col items-center justify-center bg-[var(--bg)] py-[120px] text-center">
         <div className="absolute top-1/2 left-1/2 h-[400px] w-[600px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(239,68,68,0.08)_0%,transparent_70%)] pointer-events-none" />
-        <div className="section section-responsive relative z-10">
+        <div className="section section-responsive relative z-10 w-full">
           <Reveal>
             <p className="mb-3.5 flex justify-center font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               Get Started
