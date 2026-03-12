@@ -262,3 +262,9 @@ a {
     transform: translateY(0);
   }
 }
+
+/* Hero AEGIS title: force transparent background, no box/shadow that could look like a block */
+#hero h1 {
+  background: transparent !important;
+  box-shadow: none !important;
+}
