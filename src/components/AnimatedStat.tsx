@@ -17,7 +17,9 @@ export default function AnimatedStat({ value, suffix, label, redSuffix }: Props)
   const [displayValue, setDisplayValue] = useState(0);
   const [hasAnimated, setHasAnimated] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // In the browser, window.setTimeout returns a number; using number here avoids
+  // the Node.js Timeout vs DOM number typing mismatch in production builds.
+  const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (hasAnimated) return;
