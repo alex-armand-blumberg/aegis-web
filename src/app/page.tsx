@@ -4,19 +4,6 @@ import Reveal from "@/components/Reveal";
 export default function Home() {
   return (
     <>
-      {/* Video background — hero only, full viewport */}
-      <div className="fixed inset-0 z-0 h-screen w-full">
-        <video
-          className="h-full w-full object-cover opacity-60"
-          src="/landing.mp4"
-          autoPlay
-          muted
-          loop
-          playsInline
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#020611]/50 via-[#020611]/60 to-[#020611]" />
-      </div>
-
       {/* Nav — padding 18px 48px, Launch App 7px 18px, border-radius 4px */}
       <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent px-6 py-[18px] backdrop-blur-[4px] sm:px-12">
         <Link
@@ -53,7 +40,7 @@ export default function Home() {
         </div>
       </nav>
 
-      {/* Hero — padding 120px 24px 80px; blue radial glow and H1 shadow per prompt */}
+      {/* Hero — static dark bg (no video); blue radial glow behind title */}
       <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 pb-20 pt-[120px] text-center">
         <div className="absolute top-[55%] left-1/2 z-0 h-[600px] w-[900px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(59,130,246,0.10)_0%,transparent_70%)] pointer-events-none" />
         <p
@@ -89,8 +76,8 @@ export default function Home() {
           className="relative z-10 mt-[72px] flex flex-wrap justify-center gap-12 opacity-0 sm:gap-[48px] animate-[fadeUp_0.7s_0.65s_forwards]"
           style={{ animationFillMode: "forwards" }}
         >
-          <div className="text-center min-w-[120px]">
-            <div className="font-bebas text-4xl tracking-wide text-white">
+          <div className="text-center min-w-[100px]">
+            <div className="font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
               50<span className="text-[#ef4444]">+</span>
             </div>
             <div className="mt-1 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
@@ -130,12 +117,12 @@ export default function Home() {
       <section id="features" className="relative z-10 bg-[rgba(6,14,35,0.4)] py-[100px]">
         <div className="mx-auto max-w-[1200px] px-6 sm:px-12">
           <Reveal>
-            <p className="mb-4 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--blue)]">
+            <p className="mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               — Capabilities
             </p>
           </Reveal>
           <Reveal>
-            <h2 className="font-bebas text-[clamp(42px,6vw,72px)] leading-none tracking-wide text-white mb-6">
+            <h2 className="font-bebas text-[clamp(42px,6vw,72px)] leading-none tracking-[0.06em] text-white mb-5">
               What AEGIS Does
             </h2>
           </Reveal>
@@ -149,7 +136,7 @@ export default function Home() {
           <Reveal>
             <div className="mt-14 grid gap-px overflow-hidden rounded-lg border border-[var(--dimmer)] sm:grid-cols-3">
               <Link href="/escalation" className="group relative flex flex-col border-r border-white/[0.06] bg-[var(--card)] p-9 transition-colors hover:bg-[rgba(12,26,65,0.9)] sm:border-r last:border-r-0">
-                <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#ef4444] opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+                <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#ef4444]" aria-hidden />
                 <div className="mb-4 text-[22px]">📊</div>
                 <div className="font-barlow-condensed text-lg font-semibold uppercase tracking-[0.06em] text-white mb-2.5">
                   Escalation Index
@@ -163,7 +150,7 @@ export default function Home() {
                 <span className="mt-3 opacity-0 transition-opacity group-hover:opacity-100 self-end text-[var(--dim)]">→</span>
               </Link>
               <Link href="/map" className="group relative flex flex-col border-r border-white/[0.06] bg-[var(--card)] p-9 transition-colors hover:bg-[rgba(12,26,65,0.9)] sm:border-r last:border-r-0">
-                <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#3b82f6] opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+                <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#3b82f6]" aria-hidden />
                 <div className="mb-4 text-[22px]">🌐</div>
                 <div className="font-barlow-condensed text-lg font-semibold uppercase tracking-[0.06em] text-white mb-2.5">
                   Interactive Map
@@ -177,7 +164,7 @@ export default function Home() {
                 <span className="mt-3 opacity-0 transition-opacity group-hover:opacity-100 self-end text-[var(--dim)]">→</span>
               </Link>
               <Link href="/escalation" className="group relative flex flex-col bg-[var(--card)] p-9 transition-colors hover:bg-[rgba(12,26,65,0.9)]">
-                <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#a78bfa] opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+                <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#a78bfa]" aria-hidden />
                 <div className="mb-4 text-[22px]">⚡</div>
                 <div className="font-barlow-condensed text-lg font-semibold uppercase tracking-[0.06em] text-white mb-2.5">
                   AI Analysis
@@ -203,7 +190,7 @@ export default function Home() {
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-[80px]">
             <div>
               <Reveal>
-                <p className="mb-4 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--blue)]">
+                <p className="mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--dim)]">
                   — Background
                 </p>
               </Reveal>
@@ -251,7 +238,7 @@ export default function Home() {
             </div>
             <Reveal>
             <div className="rounded-lg border border-white/[0.14] bg-[rgba(6,14,35,0.85)] p-8">
-              <div className="mb-5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
+              <div className="mb-5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--dim)]">
                 Sample Index Output — Ukraine
               </div>
               <div className="flex justify-between border-b border-white/5 py-2 text-sm">
@@ -296,7 +283,7 @@ export default function Home() {
       <section id="methodology" className="relative z-10 bg-[rgba(6,14,35,0.4)] py-[100px]">
         <div className="mx-auto max-w-[1200px] px-6 sm:px-12">
           <Reveal>
-            <p className="mb-4 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--blue)]">
+            <p className="mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               — How It Works
             </p>
           </Reveal>
@@ -325,7 +312,7 @@ export default function Home() {
             ].map((item) => (
               <div
                 key={item.name}
-                className="flex gap-5 items-start rounded-md border border-[var(--dimmer)] border-l-[#ef4444] border-l-[2px] bg-[var(--card)] p-6"
+                className="flex gap-5 items-start rounded-md border border-[var(--dimmer)] bg-[var(--card)] p-6"
               >
                 <div className="font-bebas text-[32px] leading-none text-[#ef4444] shrink-0 w-[52px]">
                   {item.weight}
@@ -352,7 +339,7 @@ export default function Home() {
         <div className="absolute top-1/2 left-1/2 h-[400px] w-[600px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(239,68,68,0.08)_0%,transparent_70%)] pointer-events-none" />
         <div className="relative z-10 mx-auto max-w-[1200px] px-6 sm:px-12">
           <Reveal>
-            <p className="mb-4 flex justify-center font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--blue)]">
+            <p className="mb-3.5 flex justify-center font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               Get Started
             </p>
           </Reveal>
@@ -391,7 +378,7 @@ export default function Home() {
         <div className="font-bebas text-lg tracking-[0.12em] text-[rgba(255,255,255,0.4)]">
           AEGIS
         </div>
-        <div className="flex gap-6">
+        <div className="flex gap-8">
           <Link href="/escalation" className="font-barlow-condensed text-[11px] uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white">
             App
           </Link>
@@ -420,7 +407,7 @@ export default function Home() {
             Data: ACLED
           </a>
         </div>
-        <div className="font-barlow-condensed text-[11px] tracking-wider text-white/22">
+        <div className="font-barlow-condensed text-[11px] tracking-[0.08em] text-[rgba(255,255,255,0.22)]">
           © 2026 Alexander Armand-Blumberg · AEGIS
         </div>
       </footer>
