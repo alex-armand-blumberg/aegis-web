@@ -5,14 +5,14 @@ export default function Home() {
   return (
     <>
       {/* Nav — padding 18px 48px, Launch App 7px 18px, border-radius 4px */}
-      <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent px-6 py-[18px] backdrop-blur-[4px] sm:px-12">
+      <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent px-8 py-[18px] backdrop-blur-[4px] sm:px-16">
         <Link
           href="/"
           className="font-bebas text-[22px] tracking-[0.12em] text-white"
         >
           AEG<span className="text-[#ef4444]">I</span>S
         </Link>
-        <div className="hidden items-center gap-8 sm:flex">
+        <div className="hidden items-center gap-10 sm:flex">
           <a
             href="#features"
             className="font-barlow-condensed text-xs font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white"
@@ -33,15 +33,15 @@ export default function Home() {
           </a>
           <Link
             href="/escalation"
-            className="ml-4 rounded bg-[#ef4444] py-[7px] px-[18px] font-barlow-condensed text-xs font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
+            className="ml-8 rounded bg-[#ef4444] py-[7px] px-[18px] font-barlow-condensed text-xs font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
           >
             Launch App
           </Link>
         </div>
       </nav>
 
-      {/* Hero — static dark bg (no video); blue radial glow behind title */}
-      <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 pb-20 pt-[120px] text-center">
+      {/* Hero — spread out like HTML: more padding, generous spacing */}
+      <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-8 pb-24 pt-[120px] text-center sm:px-12">
         <div className="absolute top-[55%] left-1/2 z-0 h-[600px] w-[900px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(59,130,246,0.10)_0%,transparent_70%)] pointer-events-none" />
         <p
           className="relative z-10 mb-[22px] font-barlow-condensed text-[11px] font-semibold uppercase tracking-[0.28em] text-[#ef4444] opacity-0 animate-[fadeUp_0.6s_0.1s_forwards]"
@@ -56,13 +56,13 @@ export default function Home() {
           AEGIS
         </h1>
         <p
-          className="relative z-10 mt-[18px] mb-12 font-barlow-condensed text-[clamp(12px,1.6vw,16px)] font-light uppercase tracking-[0.22em] text-white/65 opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]"
-          style={{ animationFillMode: "forwards" }}
+          className="relative z-10 mt-[18px] mb-14 font-barlow-condensed text-[clamp(12px,1.6vw,16px)] font-light uppercase tracking-[0.24em] text-white/65 opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]"
+          style={{ animationFillMode: "forwards", wordSpacing: "0.08em" }}
         >
           Advanced Early-Warning &amp; Geostrategic Intelligence System
         </p>
         <div
-          className="relative z-10 flex flex-wrap items-center justify-center gap-4 opacity-0 animate-[fadeUp_0.7s_0.5s_forwards]"
+          className="relative z-10 flex flex-wrap items-center justify-center gap-6 opacity-0 animate-[fadeUp_0.7s_0.5s_forwards]"
           style={{ animationFillMode: "forwards" }}
         >
           <Link href="/escalation" className="btn-primary text-sm">
@@ -73,38 +73,38 @@ export default function Home() {
           </a>
         </div>
         <div
-          className="relative z-10 mt-[72px] flex flex-wrap justify-center gap-12 opacity-0 sm:gap-[48px] animate-[fadeUp_0.7s_0.65s_forwards]"
+          className="relative z-10 mt-[72px] flex flex-wrap justify-center gap-16 opacity-0 sm:gap-[56px] md:gap-[72px] animate-[fadeUp_0.7s_0.65s_forwards]"
           style={{ animationFillMode: "forwards" }}
         >
-          <div className="text-center min-w-[100px]">
+          <div className="text-center min-w-[120px] sm:min-w-[140px]">
             <div className="font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
               50<span className="text-[#ef4444]">+</span>
             </div>
-            <div className="mt-1 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
+            <div className="mt-2 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
               Countries Tracked
             </div>
           </div>
-          <div className="text-center min-w-[100px]">
+          <div className="text-center min-w-[120px] sm:min-w-[140px]">
             <div className="font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
               6
             </div>
-            <div className="mt-1 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
+            <div className="mt-2 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
               Index Components
             </div>
           </div>
-          <div className="text-center min-w-[100px]">
+          <div className="text-center min-w-[120px] sm:min-w-[140px]">
             <div className="font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
               7<span className="text-[#ef4444]">+</span>
             </div>
-            <div className="mt-1 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
+            <div className="mt-2 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
               Years of Data
             </div>
           </div>
-          <div className="text-center min-w-[100px]">
+          <div className="text-center min-w-[120px] sm:min-w-[140px]">
             <div className="font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
               AI
             </div>
-            <div className="mt-1 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
+            <div className="mt-2 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">
               Powered Analysis
             </div>
           </div>
@@ -115,26 +115,26 @@ export default function Home() {
 
       {/* Features */}
       <section id="features" className="relative z-10 bg-[rgba(6,14,35,0.4)] py-[100px]">
-        <div className="mx-auto max-w-[1200px] px-6 sm:px-12">
+        <div className="mx-auto max-w-[1200px] px-8 sm:px-16">
           <Reveal>
-            <p className="mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
+            <p className="mb-4 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               — Capabilities
             </p>
           </Reveal>
           <Reveal>
-            <h2 className="font-bebas text-[clamp(42px,6vw,72px)] leading-none tracking-[0.06em] text-white mb-5">
+            <h2 className="font-bebas text-[clamp(42px,6vw,72px)] leading-none tracking-[0.06em] text-white mb-6">
               What AEGIS Does
             </h2>
           </Reveal>
           <Reveal>
-            <p className="max-w-[620px] text-base leading-[1.8] text-white/65 mb-2">
+            <p className="max-w-[620px] text-base leading-[1.8] text-white/65 mb-4">
               A global risk intelligence platform that tracks conflict escalation
               patterns, surfaces early-warning signals, and delivers AI-powered
               geopolitical analysis — before situations deteriorate.
             </p>
           </Reveal>
           <Reveal>
-            <div className="mt-14 grid gap-px overflow-hidden rounded-lg border border-[var(--dimmer)] sm:grid-cols-3">
+            <div className="mt-16 grid gap-px overflow-hidden rounded-lg border border-[var(--dimmer)] sm:grid-cols-3">
               <Link href="/escalation" className="group relative flex flex-col border-r border-white/[0.06] bg-[var(--card)] p-9 transition-colors hover:bg-[rgba(12,26,65,0.9)] sm:border-r last:border-r-0">
                 <span className="absolute top-0 left-0 right-0 h-0.5 bg-[#ef4444]" aria-hidden />
                 <div className="mb-4 text-[22px]">📊</div>
@@ -186,7 +186,7 @@ export default function Home() {
 
       {/* About — section tag blue; body + mission; buttons 10px 22px, 12px */}
       <section id="about" className="relative z-10 py-[100px]">
-        <div className="mx-auto max-w-[1200px] px-6 sm:px-12">
+        <div className="mx-auto max-w-[1200px] px-8 sm:px-16">
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-[80px]">
             <div>
               <Reveal>
@@ -281,7 +281,7 @@ export default function Home() {
 
       {/* Methodology — section tag blue; method items padding 24px, gap 24px, 2px left accent red */}
       <section id="methodology" className="relative z-10 bg-[rgba(6,14,35,0.4)] py-[100px]">
-        <div className="mx-auto max-w-[1200px] px-6 sm:px-12">
+        <div className="mx-auto max-w-[1200px] px-8 sm:px-16">
           <Reveal>
             <p className="mb-3.5 font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               — How It Works
@@ -301,7 +301,7 @@ export default function Home() {
             </p>
           </Reveal>
           <Reveal>
-          <div className="mt-12 grid gap-6 sm:grid-cols-2">
+          <div className="mt-14 grid gap-6 sm:grid-cols-2">
             {[
               { weight: "30%", name: "Raw Conflict Intensity", desc: "Battles + explosions in absolute terms. Ensures sustained wars like Ukraine score high even with flat month-over-month change." },
               { weight: "20%", name: "Event Frequency Acceleration", desc: "Month-over-month % change in total events. Catches countries entering or re-escalating conflict before intensity peaks." },
@@ -337,7 +337,7 @@ export default function Home() {
       {/* CTA — id="cta", padding 120px 48px, own background to avoid overlap */}
       <section id="cta" className="relative z-10 bg-[var(--bg)] py-[120px] text-center">
         <div className="absolute top-1/2 left-1/2 h-[400px] w-[600px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(239,68,68,0.08)_0%,transparent_70%)] pointer-events-none" />
-        <div className="relative z-10 mx-auto max-w-[1200px] px-6 sm:px-12">
+        <div className="relative z-10 mx-auto max-w-[1200px] px-8 sm:px-16">
           <Reveal>
             <p className="mb-3.5 flex justify-center font-barlow-condensed text-[10px] font-semibold uppercase tracking-[0.28em] text-[#3b82f6]">
               Get Started
@@ -349,14 +349,14 @@ export default function Home() {
             </h2>
           </Reveal>
           <Reveal>
-            <p className="mx-auto max-w-[620px] text-center text-base leading-[1.8] text-white/65 mb-12">
+            <p className="mx-auto max-w-[620px] text-center text-base leading-[1.8] text-white/65 mb-14">
               AEGIS is live and free to use. Track any country&apos;s escalation
               index, explore the global conflict map, and generate AI-powered
               intelligence briefings in seconds.
             </p>
           </Reveal>
           <Reveal>
-          <div className="flex flex-wrap justify-center gap-4">
+          <div className="flex flex-wrap justify-center gap-6">
             <Link href="/escalation" className="btn-primary">
               Launch AEGIS →
             </Link>
@@ -374,7 +374,7 @@ export default function Home() {
       </section>
 
       {/* Footer — padding 32px 48px; links color --dim, gap 24px per prompt */}
-      <footer className="relative z-10 flex flex-col items-center justify-between gap-6 border-t border-[var(--dimmer)] px-6 py-8 sm:flex-row sm:px-12">
+      <footer className="relative z-10 flex flex-col items-center justify-between gap-6 border-t border-[var(--dimmer)] px-8 py-8 sm:flex-row sm:px-16">
         <div className="font-bebas text-lg tracking-[0.12em] text-[rgba(255,255,255,0.4)]">
           AEGIS
         </div>
