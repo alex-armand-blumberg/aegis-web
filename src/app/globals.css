@@ -1,27 +1,65 @@
 @import "tailwindcss";
 
+:root {
+  --red: #ef4444;
+  --blue: #3b82f6;
+  --dim: rgba(255, 255, 255, 0.38);
+  --dimmer: rgba(255, 255, 255, 0.14);
+  --bg: #020611;
+  --card: rgba(6, 14, 35, 0.85);
+}
+
 @theme inline {
-  --color-background: #020617;
-  --color-foreground: #e5e7eb;
-  --color-accent: #ef4444;
-  --color-muted: #64748b;
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Inter", sans-serif;
+  --color-background: #020611;
+  --color-foreground: #e2e8f0;
+  --font-sans: var(--font-barlow);
 }
 
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background-color: #020617;
-  color: #e5e7eb;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Inter", sans-serif;
+  background: var(--bg);
+  color: #e2e8f0;
+  font-family: var(--font-barlow);
+  font-weight: 300;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Noise overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
+  opacity: 0.4;
+}
+
+/* Grid lines — blue at 4% (per prompt design system) */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(59, 130, 246, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.04) 1px, transparent 1px);
+  background-size: 60px 60px;
 }
 
 a {
@@ -30,13 +68,81 @@ a {
 }
 
 .btn-primary {
-  @apply inline-flex items-center justify-center gap-2 rounded-md bg-sky-500 px-5 py-2.5 text-sm font-semibold tracking-wide text-slate-950 shadow-sm transition hover:bg-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/80;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  background: var(--red);
+  color: white;
+  font-family: var(--font-barlow-condensed);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.875rem 2rem;
+  border-radius: 5px;
+  transition: transform 0.15s, opacity 0.15s;
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  opacity: 0.9;
 }
 
 .btn-secondary {
-  @apply inline-flex items-center justify-center gap-2 rounded-md border border-slate-600/70 bg-slate-900/60 px-5 py-2.5 text-sm font-semibold tracking-wide text-slate-100 shadow-sm transition hover:border-slate-400 hover:bg-slate-800/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/80;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.75);
+  font-family: var(--font-barlow-condensed);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.875rem 2rem;
+  border-radius: 5px;
+  transition: border-color 0.2s, color 0.2s, transform 0.15s;
+}
+.btn-secondary:hover {
+  border-color: rgba(255, 255, 255, 0.55);
+  color: white;
+  transform: translateY(-2px);
 }
 
-.tagline {
-  letter-spacing: 0.24em;
+.font-bebas {
+  font-family: var(--font-bebas), sans-serif;
+}
+.font-barlow-condensed {
+  font-family: var(--font-barlow-condensed), sans-serif;
+}
+
+/* Scroll reveal (match index.html) */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.65s ease, transform 0.65s ease;
+}
+.reveal.reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Section divider — blue gradient (per prompt) */
+.section-divider {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.3), transparent);
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
