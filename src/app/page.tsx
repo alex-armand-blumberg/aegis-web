@@ -6,7 +6,7 @@ export default function Home() {
   return (
     <>
       {/* Nav — pushed down from top, grey links, Launch App button with more padding */}
-      <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent px-6 pt-10 pb-4 backdrop-blur-[4px] min-[901px]:px-12 min-[901px]:pt-12 min-[901px]:pb-5">
+      <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/70 to-transparent px-6 pt-14 pb-4 backdrop-blur-[4px] min-[901px]:px-12 min-[901px]:pt-16 min-[901px]:pb-5">
         <Link href="/" className="font-bebas text-[22px] tracking-[0.12em] text-white">
           AEG<span className="text-[var(--red)]">I</span>S
         </Link>
@@ -22,7 +22,7 @@ export default function Home() {
           </a>
           <Link
             href="/escalation"
-            className="ml-6 inline-flex items-center justify-center rounded px-10 py-3.5 font-barlow-condensed text-[12px] font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
+            className="nav-cta ml-6 inline-flex items-center justify-center rounded font-barlow-condensed text-[12px] font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
             style={{ backgroundColor: "var(--red)" }}
           >
             Launch App
@@ -38,10 +38,10 @@ export default function Home() {
         <h1 className="hero-title relative z-10 font-bebas text-[clamp(86px,16vw,180px)] leading-[0.9] tracking-[0.04em] text-white opacity-0 animate-[fadeUp_0.7s_0.2s_forwards]" style={{ animationFillMode: "forwards" }}>
           AEGIS
         </h1>
-        <p className="hero-sub relative z-10 mt-[3rem] mb-[5rem] font-barlow-condensed text-[clamp(12px,1.6vw,16px)] font-light uppercase tracking-[0.22em] text-[rgba(226,232,240,0.65)] opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]" style={{ animationFillMode: "forwards" }}>
+        <p className="hero-sub relative z-10 mt-[4.5rem] mb-[8.5rem] font-barlow-condensed text-[clamp(12px,1.6vw,16px)] font-light uppercase tracking-[0.22em] text-[rgba(226,232,240,0.65)] opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]" style={{ animationFillMode: "forwards" }}>
           Advanced Early-Warning &amp; Geostrategic Intelligence System
         </p>
-        <div className="hero-buttons relative z-10 flex flex-wrap justify-center gap-4 opacity-0 animate-[fadeUp_0.7s_0.5s_forwards]" style={{ animationFillMode: "forwards" }}>
+        <div className="hero-buttons relative z-10 mt-2 flex flex-wrap justify-center gap-4 opacity-0 animate-[fadeUp_0.7s_0.5s_forwards]" style={{ animationFillMode: "forwards" }}>
           <Link href="/escalation" className="btn-primary-hero">
             Launch App →
           </Link>
