@@ -112,6 +112,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const country = searchParams.get("country");
   const smoothParam = searchParams.get("smooth");
+  const thresholdParam = searchParams.get("threshold");
 
   if (!country) {
     return NextResponse.json(
@@ -121,6 +122,9 @@ export async function GET(req: NextRequest) {
   }
 
   const smoothWindow = smoothParam ? Number(smoothParam) || 3 : 3;
+  const threshold = thresholdParam
+    ? Math.max(0, Math.min(100, Number(thresholdParam) || 45))
+    : 45;
 
   try {
     const allRows = await fetchAcledMonthlyAllCountries();
@@ -133,7 +137,13 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return NextResponse.json(result, { status: 200 });
+    return NextResponse.json(
+      {
+        ...result,
+        escalationThreshold: threshold,
+      },
+      { status: 200 },
+    );
   } catch (err) {
     console.error("Escalation API error", err);
     return NextResponse.json(

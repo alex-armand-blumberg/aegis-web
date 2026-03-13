@@ -255,14 +255,16 @@ export function computeEscalationIndex(
     );
     for (let step = 1; step <= 3; step++) {
       const monthIndex = n - 1 + step;
-      const yHat = intercept + slope * monthIndex;
+      const yHat = Math.max(0, Math.min(100, intercept + slope * monthIndex));
       const fcDate = new Date(lastDate);
       fcDate.setMonth(fcDate.getMonth() + step);
+      const yyyy = fcDate.getFullYear();
+      const mm = String(fcDate.getMonth() + 1).padStart(2, "0");
       forecast.push({
-        event_month: fcDate.toISOString(),
+        event_month: `${yyyy}-${mm}-01`,
         projected_index: yHat,
-        band_low: yHat - 2 * stdErr,
-        band_high: yHat + 2 * stdErr,
+        band_low: Math.max(0, yHat - 2 * stdErr),
+        band_high: Math.min(100, yHat + 2 * stdErr),
       });
     }
   }
