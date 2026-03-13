@@ -263,8 +263,11 @@ a {
   }
 }
 
-/* Hero AEGIS title: force transparent background, no box/shadow that could look like a block */
+/* Hero AEGIS title: fully transparent, no shadow/glow that could look like a dark block */
+.hero-title,
 #hero h1 {
   background: transparent !important;
+  background-color: transparent !important;
   box-shadow: none !important;
+  text-shadow: none !important;
 }

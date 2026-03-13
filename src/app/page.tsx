@@ -5,24 +5,24 @@ import AnimatedStat from "@/components/AnimatedStat";
 export default function Home() {
   return (
     <>
-      {/* Nav — more top padding, grey links, Launch App button with better proportions */}
-      <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent px-6 pt-8 pb-4 backdrop-blur-[4px] min-[901px]:px-12 min-[901px]:pt-10 min-[901px]:pb-5">
+      {/* Nav — pushed down from top, grey links, Launch App button with more padding */}
+      <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/95 to-transparent px-6 pt-10 pb-4 backdrop-blur-[4px] min-[901px]:px-12 min-[901px]:pt-12 min-[901px]:pb-5">
         <Link href="/" className="font-bebas text-[22px] tracking-[0.12em] text-white">
           AEG<span className="text-[var(--red)]">I</span>S
         </Link>
         <div className="nav-desktop flex items-center gap-8">
-          <a href="#features" className="font-barlow-condensed text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white">
+          <a href="#features" className="font-barlow-condensed text-[12px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8] transition hover:text-white">
             Features
           </a>
-          <a href="#about" className="font-barlow-condensed text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white">
+          <a href="#about" className="font-barlow-condensed text-[12px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8] transition hover:text-white">
             About
           </a>
-          <a href="#methodology" className="font-barlow-condensed text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--dim)] transition hover:text-white">
+          <a href="#methodology" className="font-barlow-condensed text-[12px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8] transition hover:text-white">
             Methodology
           </a>
           <Link
             href="/escalation"
-            className="ml-6 inline-flex items-center justify-center rounded px-8 py-3 font-barlow-condensed text-[12px] font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
+            className="ml-6 inline-flex items-center justify-center rounded px-10 py-3.5 font-barlow-condensed text-[12px] font-semibold uppercase tracking-wider text-white transition hover:opacity-90"
             style={{ backgroundColor: "var(--red)" }}
           >
             Launch App
@@ -30,16 +30,15 @@ export default function Home() {
         </div>
       </nav>
 
-      {/* Hero — full viewport, centered, scroll-snap, 48px padding */}
+      {/* Hero — no glow behind title (transparent), extra spacing, scroll-snap */}
       <section id="hero" className="snap-section relative z-10 flex min-h-screen flex-col items-center justify-center px-12 pb-20 pt-[120px] text-center">
-        <div className="absolute top-[55%] left-1/2 z-0 h-[600px] w-[900px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse,rgba(59,130,246,0.06)_0%,transparent_60%)] pointer-events-none" aria-hidden />
         <p className="hero-tag relative z-10 mb-[22px] font-barlow-condensed text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--red)] opacity-0 animate-[fadeUp_0.6s_0.1s_forwards" style={{ animationFillMode: "forwards" }}>
           ■ Palantir Valley Forge Grant Demo
         </p>
-        <h1 className="relative z-10 bg-transparent font-bebas text-[clamp(86px,16vw,180px)] leading-[0.9] tracking-[0.04em] text-white opacity-0 animate-[fadeUp_0.7s_0.2s_forwards]" style={{ animationFillMode: "forwards" }}>
+        <h1 className="hero-title relative z-10 font-bebas text-[clamp(86px,16vw,180px)] leading-[0.9] tracking-[0.04em] text-white opacity-0 animate-[fadeUp_0.7s_0.2s_forwards]" style={{ animationFillMode: "forwards" }}>
           AEGIS
         </h1>
-        <p className="hero-sub relative z-10 mt-12 mb-20 font-barlow-condensed text-[clamp(12px,1.6vw,16px)] font-light uppercase tracking-[0.22em] text-[rgba(226,232,240,0.65)] opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]" style={{ animationFillMode: "forwards" }}>
+        <p className="hero-sub relative z-10 mt-[3rem] mb-[5rem] font-barlow-condensed text-[clamp(12px,1.6vw,16px)] font-light uppercase tracking-[0.22em] text-[rgba(226,232,240,0.65)] opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]" style={{ animationFillMode: "forwards" }}>
           Advanced Early-Warning &amp; Geostrategic Intelligence System
         </p>
         <div className="hero-buttons relative z-10 flex flex-wrap justify-center gap-4 opacity-0 animate-[fadeUp_0.7s_0.5s_forwards]" style={{ animationFillMode: "forwards" }}>
