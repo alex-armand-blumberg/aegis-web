@@ -5,6 +5,19 @@ import AnimatedStat from "@/components/AnimatedStat";
 export default function Home() {
   return (
     <>
+      {/* Full-viewport background video — muted, loop, behind content */}
+      <div className="fixed inset-0 z-[1] overflow-hidden" aria-hidden>
+        <video
+          autoPlay
+          muted
+          loop
+          playsInline
+          className="absolute inset-0 h-full w-full object-cover opacity-[0.35]"
+          src="/landing-bg.mp4"
+        />
+        <div className="absolute inset-0 bg-[#020611]/60" />
+      </div>
+
       {/* Nav — pushed down from top, grey links, Launch App button with more padding */}
       <nav className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-between bg-gradient-to-b from-[#020611]/70 to-transparent px-6 pt-14 pb-4 backdrop-blur-[4px] min-[901px]:px-12 min-[901px]:pt-16 min-[901px]:pb-5">
         <Link href="/" className="font-bebas text-[22px] tracking-[0.12em] text-white">
