@@ -36,7 +36,7 @@ export default function Home() {
           ■ Palantir Valley Forge Grant Demo
         </p>
         <h1 className="hero-title relative z-10 font-bebas text-[clamp(86px,16vw,180px)] leading-[0.9] tracking-[0.04em] text-white opacity-0 animate-[fadeUp_0.7s_0.2s_forwards]" style={{ animationFillMode: "forwards" }}>
-          AEGIS
+          AegisHQ.
         </h1>
         <p className="hero-sub relative z-10 mt-[4.5rem] mb-[8.5rem] font-barlow-condensed text-[clamp(12px,1.6vw,16px)] font-light uppercase tracking-[0.22em] text-[rgba(226,232,240,0.65)] opacity-0 animate-[fadeUp_0.7s_0.35s_forwards]" style={{ animationFillMode: "forwards" }}>
           Advanced Early-Warning &amp; Geostrategic Intelligence System
