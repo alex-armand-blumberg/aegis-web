@@ -33,36 +33,45 @@ const ARCGIS_JS_URL = "https://js.arcgis.com/4.29/";
 
 declare global {
   interface Window {
-    require?: (modules: string[], callback: (...args: unknown[]) => void) => void;
-    __arcgis_loaded?: Promise<void>;
+    __arcgisRequire?: (modules: string[], callback: (...args: unknown[]) => void) => void;
   }
 }
 
 function loadArcGIS(): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
-  if (window.__arcgis_loaded) return window.__arcgis_loaded;
-  const apiKey =
-    typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ARCGIS_API_KEY ?? "" : "";
-  const url = apiKey
-    ? `${ARCGIS_JS_URL}?api_key=${encodeURIComponent(apiKey)}`
-    : ARCGIS_JS_URL;
-  window.__arcgis_loaded = new Promise((resolve, reject) => {
-    function tryResolve() {
-      if (typeof window.require === "function") return resolve();
-      setTimeout(tryResolve, 50);
-    }
+  if (window.__arcgisRequire) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const apiKey =
+      typeof process !== "undefined" ? process.env.NEXT_PUBLIC_ARCGIS_API_KEY ?? "" : "";
+    const url = apiKey
+      ? `${ARCGIS_JS_URL}?api_key=${encodeURIComponent(apiKey)}`
+      : ARCGIS_JS_URL;
+
     if (document.querySelector(`script[src^="${ARCGIS_JS_URL}"]`)) {
-      tryResolve();
+      if (typeof window.__arcgisRequire === "function") return resolve();
+      const check = () => {
+        if (typeof window.require === "function") {
+          window.__arcgisRequire = window.require as unknown as (modules: string[], callback: (...args: unknown[]) => void) => void;
+          resolve();
+        } else setTimeout(check, 50);
+      };
+      check();
       return;
     }
+
     const script = document.createElement("script");
     script.src = url;
-    script.async = true;
-    script.onload = tryResolve;
+    script.async = false;
+    script.onload = () => {
+      if (typeof window.require === "function") {
+        window.__arcgisRequire = window.require as unknown as (modules: string[], callback: (...args: unknown[]) => void) => void;
+      }
+      resolve();
+    };
     script.onerror = () => reject(new Error("Failed to load ArcGIS"));
     document.head.appendChild(script);
   });
-  return window.__arcgis_loaded;
 }
 
 type ConflictMapProps = {
@@ -90,8 +99,11 @@ export default function ConflictMap({
     if (!containerRef.current) return;
 
     await loadArcGIS();
-    const require = window.require;
-    if (!require) return;
+    const require = window.__arcgisRequire;
+    if (!require) {
+      onError?.("ArcGIS failed to load");
+      return;
+    }
 
     return new Promise<() => void>((resolve, reject) => {
       require(
@@ -108,11 +120,10 @@ export default function ConflictMap({
           type Ctor = new (opts?: object) => object;
           const getCtor = (m: unknown): Ctor | null => {
             if (m == null) return null;
-            const fn =
-              typeof (m as { default?: unknown }).default === "function"
-                ? (m as { default: Ctor }).default
-                : m;
-            return typeof fn === "function" ? (fn as Ctor) : null;
+            if (typeof m === "function") return m as Ctor;
+            const d = (m as { default?: unknown }).default;
+            if (typeof d === "function") return d as Ctor;
+            return null;
           };
 
           const MapC = getCtor(Map);
@@ -132,7 +143,7 @@ export default function ConflictMap({
             ["Point", PointC],
             ["SimpleMarkerSymbol", SimpleMarkerSymbolC],
           ] as const;
-          const missing = modules.find(([, c]) => typeof c !== "function");
+          const missing = modules.find(([, c]) => c == null || typeof c !== "function");
           if (missing) {
             const msg = `ArcGIS module failed to load: ${missing[0]}`;
             onError?.(msg);
@@ -311,8 +322,8 @@ export default function ConflictMap({
       .then((d) => {
         destroy = d;
       })
-      .catch((err) => {
-        onError?.(err instanceof Error ? err.message : "Map failed to load");
+      .catch(() => {
+        onError?.("Map failed to load");
       });
     return () => {
       if (typeof destroy === "function") destroy();
