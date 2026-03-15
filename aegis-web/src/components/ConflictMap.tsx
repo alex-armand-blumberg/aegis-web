@@ -105,38 +105,62 @@ export default function ConflictMap({
           "esri/symbols/SimpleMarkerSymbol",
         ],
         (Map: unknown, MapView: unknown, SceneView: unknown, Graphic: unknown, GraphicsLayer: unknown, Point: unknown, SimpleMarkerSymbol: unknown) => {
-          const ctor = (m: unknown) =>
-            m != null && typeof (m as { default?: unknown }).default === "function"
-              ? ((m as { default: new (opts?: object) => object }).default as new (opts?: object) => object)
-              : (m as new (opts?: object) => object);
+          type Ctor = new (opts?: object) => object;
+          const getCtor = (m: unknown): Ctor | null => {
+            if (m == null) return null;
+            const fn =
+              typeof (m as { default?: unknown }).default === "function"
+                ? (m as { default: Ctor }).default
+                : m;
+            return typeof fn === "function" ? (fn as Ctor) : null;
+          };
 
-          const MapC = ctor(Map);
-          const MapViewC = ctor(MapView);
-          const SceneViewC = ctor(SceneView);
-          const GraphicC = ctor(Graphic);
-          const GraphicsLayerC = ctor(GraphicsLayer);
-          const PointC = ctor(Point);
-          const SimpleMarkerSymbolC = ctor(SimpleMarkerSymbol);
+          const MapC = getCtor(Map);
+          const MapViewC = getCtor(MapView);
+          const SceneViewC = getCtor(SceneView);
+          const GraphicC = getCtor(Graphic);
+          const GraphicsLayerC = getCtor(GraphicsLayer);
+          const PointC = getCtor(Point);
+          const SimpleMarkerSymbolC = getCtor(SimpleMarkerSymbol);
 
-          if (typeof MapC !== "function") {
-            onError?.("Map module failed to load");
-            reject(new Error("Map module failed to load"));
+          const modules = [
+            ["Map", MapC],
+            ["MapView", MapViewC],
+            ["SceneView", SceneViewC],
+            ["Graphic", GraphicC],
+            ["GraphicsLayer", GraphicsLayerC],
+            ["Point", PointC],
+            ["SimpleMarkerSymbol", SimpleMarkerSymbolC],
+          ] as const;
+          const missing = modules.find(([, c]) => typeof c !== "function");
+          if (missing) {
+            const msg = `ArcGIS module failed to load: ${missing[0]}`;
+            onError?.(msg);
+            reject(new Error(msg));
             return;
           }
 
+          const MapConstructor = MapC as Ctor;
+          const MapViewConstructor = MapViewC as Ctor;
+          const SceneViewConstructor = SceneViewC as Ctor;
+          const GraphicConstructor = GraphicC as Ctor;
+          const GraphicsLayerConstructor = GraphicsLayerC as Ctor;
+          const PointConstructor = PointC as Ctor;
+          const SimpleMarkerSymbolConstructor = SimpleMarkerSymbolC as Ctor;
+
           try {
-            const map = new (MapC as new (opts: { basemap: string }) => object)({ basemap: "dark-gray-vector" });
+            const map = new (MapConstructor as new (opts: { basemap: string }) => object)({ basemap: "dark-gray-vector" });
 
             const graphics = (points || []).map((p) => {
               const color =
                 CATEGORY_COLORS[p.dominant_category] ?? "rgba(255,255,255,0.6)";
-              const symbol = new (SimpleMarkerSymbolC as new (opts: object) => object)({
+              const symbol = new (SimpleMarkerSymbolConstructor as new (opts: object) => object)({
                 color,
                 size: 8,
                 outline: { color: [255, 255, 255, 0.4], width: 1 },
               });
-              return new GraphicC({
-                geometry: new PointC({
+              return new GraphicConstructor({
+                geometry: new PointConstructor({
                   longitude: p.lon,
                   latitude: p.lat,
                 }),
@@ -158,7 +182,7 @@ export default function ConflictMap({
               });
             });
 
-            const layer = new GraphicsLayerC({ graphics });
+            const layer = new GraphicsLayerConstructor({ graphics });
             (map as { add: (l: object) => void }).add(layer);
 
             const center = [
@@ -169,7 +193,7 @@ export default function ConflictMap({
 
             const view: ArcGISView =
               (mode === "3d"
-                ? new SceneViewC({
+                ? new SceneViewConstructor({
                     container: containerRef.current,
                     map,
                     center,
@@ -180,7 +204,7 @@ export default function ConflictMap({
                       atmosphereEnabled: true,
                     },
                   })
-                : new MapViewC({
+                : new MapViewConstructor({
                     container: containerRef.current,
                     map,
                     center,
