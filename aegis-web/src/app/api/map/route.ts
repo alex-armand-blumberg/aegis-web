@@ -35,10 +35,26 @@ function getMonthBounds(ym: string): { startMs: number; endMs: number } {
   return { startMs, endMs };
 }
 
-function buildWhereClause(startMonth: string, endMonth: string): string {
-  const { startMs } = getMonthBounds(startMonth);
-  const { endMs } = getMonthBounds(endMonth);
-  return `event_month >= ${startMs} AND event_month <= ${endMs}`;
+/** Filter features by event_month (ArcGIS often rejects date in where clause, so we filter client-side). */
+function filterByDateRange(
+  features: { attributes: Record<string, unknown> }[],
+  startMonth: string,
+  endMonth: string
+): { attributes: Record<string, unknown> }[] {
+  if (!startMonth || !endMonth) return features;
+  const { startMs, endMs } = getMonthBounds(startMonth);
+  const endMsBound = getMonthBounds(endMonth).endMs;
+  return features.filter((f) => {
+    const raw = f.attributes.event_month;
+    const ms =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string"
+          ? new Date(raw).getTime()
+          : NaN;
+    if (Number.isNaN(ms)) return false;
+    return ms >= startMs && ms <= endMsBound;
+  });
 }
 
 function dominantCategory(attrs: Record<string, unknown>): string {
@@ -68,18 +84,13 @@ export async function GET(request: Request) {
     const startMonth = searchParams.get("startMonth") ?? "";
     const endMonth = searchParams.get("endMonth") ?? "";
 
-    const where =
-      startMonth && endMonth
-        ? buildWhereClause(startMonth, endMonth)
-        : "1=1";
-
     const points: MapPoint[] = [];
     const pageSize = 2000;
     let offset = 0;
 
     while (true) {
       const params = new URLSearchParams({
-        where,
+        where: "1=1",
         outFields: ACLED_FIELDS,
         returnGeometry: "false",
         orderByFields: "ObjectId ASC",
@@ -116,8 +127,12 @@ export async function GET(request: Request) {
         );
       }
 
-      const features = json.features ?? [];
-      if (features.length === 0) break;
+      const rawFeatures = json.features ?? [];
+      const features = filterByDateRange(
+        rawFeatures,
+        startMonth || "1900-01",
+        endMonth || "2100-12"
+      );
 
       for (const f of features) {
         const a = f.attributes;
@@ -159,7 +174,7 @@ export async function GET(request: Request) {
         });
       }
 
-      if (features.length < pageSize) break;
+      if (rawFeatures.length < pageSize) break;
       offset += pageSize;
       if (offset > 50000) break;
     }
