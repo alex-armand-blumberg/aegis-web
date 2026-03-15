@@ -51,6 +51,8 @@ export default function MapPage() {
   const [points, setPoints] = useState<MapPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const recenterRef = useRef<(() => void) | null>(null);
@@ -58,6 +60,8 @@ export default function MapPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setMapReady(false);
+    setMapError(null);
     try {
       const params = new URLSearchParams({
         startMonth,
@@ -80,6 +84,19 @@ export default function MapPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    setMapReady(false);
+  }, [mode]);
+
+  const handleMapReady = useCallback(() => {
+    setMapReady(true);
+    setMapError(null);
+  }, []);
+  const handleMapError = useCallback((message: string) => {
+    setMapError(message);
+    setMapReady(false);
+  }, []);
 
   const handleFullscreen = useCallback(() => {
     const el = mapContainerRef.current;
@@ -255,12 +272,69 @@ export default function MapPage() {
               Loading map data…
             </div>
           ) : (
-            <div ref={mapContainerRef} className="map-container">
+            <div ref={mapContainerRef} className="map-container" style={{ position: "relative" }}>
+              {!mapReady && !mapError && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "var(--bg)",
+                    color: "var(--dim)",
+                    fontSize: "14px",
+                    zIndex: 5,
+                  }}
+                >
+                  Loading map…
+                </div>
+              )}
+              {mapError && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "12px",
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    padding: "10px 16px",
+                    background: "rgba(239, 68, 68, 0.15)",
+                    border: "1px solid rgba(239, 68, 68, 0.4)",
+                    borderRadius: "6px",
+                    color: "#ef4444",
+                    fontSize: "13px",
+                    zIndex: 10,
+                  }}
+                >
+                  {mapError}
+                </div>
+              )}
+              {!loading && points.length === 0 && mapReady && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "12px",
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    padding: "8px 14px",
+                    background: "var(--card)",
+                    border: "1px solid var(--dimmer)",
+                    borderRadius: "6px",
+                    color: "var(--dim)",
+                    fontSize: "12px",
+                    zIndex: 10,
+                  }}
+                >
+                  No data for this period. Try another date range.
+                </div>
+              )}
               <ConflictMap
                 containerRef={mapContainerRef}
                 points={points}
                 mode={mode}
                 recenterRef={recenterRef}
+                onReady={handleMapReady}
+                onError={handleMapError}
               />
             </div>
           )}

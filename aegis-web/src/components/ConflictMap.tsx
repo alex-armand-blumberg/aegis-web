@@ -56,6 +56,8 @@ type ConflictMapProps = {
   mode: "2d" | "3d";
   containerRef?: React.RefObject<HTMLDivElement | null>;
   recenterRef?: React.MutableRefObject<(() => void) | null>;
+  onReady?: () => void;
+  onError?: (message: string) => void;
 };
 
 export default function ConflictMap({
@@ -63,13 +65,15 @@ export default function ConflictMap({
   mode,
   containerRef: externalContainerRef,
   recenterRef,
+  onReady,
+  onError,
 }: ConflictMapProps) {
   const internalRef = useRef<HTMLDivElement>(null);
   const containerRef = externalContainerRef ?? internalRef;
   const viewRef = useRef<{ destroy: () => void } | null>(null);
 
   const initView = useCallback(async () => {
-    if (!containerRef.current || !points.length) return;
+    if (!containerRef.current) return;
 
     await loadArcGIS();
     const require = window.require;
@@ -111,7 +115,7 @@ export default function ConflictMap({
           try {
             const map = new MapC({ basemap: "dark-gray-vector" });
 
-            const graphics = points.map((p) => {
+            const graphics = (points || []).map((p) => {
               const color =
                 CATEGORY_COLORS[p.dominant_category] ?? "rgba(255,255,255,0.6)";
               const symbol = new (SimpleMarkerSymbolC as new (opts: object) => object)({
@@ -249,18 +253,21 @@ export default function ConflictMap({
             };
             if (recenterRef) recenterRef.current = recenter;
 
+            onReady?.();
             resolve(() => {
               view.destroy();
               viewRef.current = null;
               if (recenterRef) recenterRef.current = null;
             });
           } catch (err) {
+            const msg = err instanceof Error ? err.message : "Map failed to load";
+            onError?.(msg);
             reject(err);
           }
         }
       );
     });
-  }, [points, mode, containerRef, recenterRef]);
+  }, [points, mode, containerRef, recenterRef, onReady, onError]);
 
   useEffect(() => {
     let destroy: (() => void) | void;
@@ -268,11 +275,13 @@ export default function ConflictMap({
       .then((d) => {
         destroy = d;
       })
-      .catch(() => {});
+      .catch((err) => {
+        onError?.(err instanceof Error ? err.message : "Map failed to load");
+      });
     return () => {
       if (typeof destroy === "function") destroy();
     };
-  }, [initView]);
+  }, [initView, onError]);
 
   if (externalContainerRef) {
     return null;
