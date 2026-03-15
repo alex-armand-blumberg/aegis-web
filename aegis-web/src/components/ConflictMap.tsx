@@ -15,6 +15,20 @@ const CATEGORY_COLORS: Record<string, string> = {
 const DEFAULT_CENTER = { longitude: 10, latitude: 20 };
 const DEFAULT_ZOOM = 2;
 
+type ArcGISView = {
+  destroy: () => void;
+  popup?: {
+    dockEnabled?: boolean;
+    dockOptions?: object;
+    defaultPopupTemplateEnabled?: boolean;
+    open: (opts: object) => void;
+  };
+  on: (e: string, fn: (ev: { mapPoint: object }) => void) => void;
+  hitTest: (ev: object) => Promise<{ results: { graphic?: { attributes: Record<string, unknown>; geometry?: object; layer: object } }[] }>;
+  goTo: (target: object, opts?: object) => Promise<void>;
+  zoom: number;
+};
+
 const ARCGIS_JS_URL = "https://js.arcgis.com/4.29/";
 
 declare global {
@@ -70,7 +84,7 @@ export default function ConflictMap({
 }: ConflictMapProps) {
   const internalRef = useRef<HTMLDivElement>(null);
   const containerRef = externalContainerRef ?? internalRef;
-  const viewRef = useRef<{ destroy: () => void } | null>(null);
+  const viewRef = useRef<ArcGISView | null>(null);
 
   const initView = useCallback(async () => {
     if (!containerRef.current) return;
@@ -153,8 +167,8 @@ export default function ConflictMap({
             ] as [number, number];
             const zoom = DEFAULT_ZOOM;
 
-            const view =
-              mode === "3d"
+            const view: ArcGISView =
+              (mode === "3d"
                 ? new SceneViewC({
                     container: containerRef.current,
                     map,
@@ -171,7 +185,7 @@ export default function ConflictMap({
                     map,
                     center,
                     zoom,
-                  });
+                  })) as ArcGISView;
 
             viewRef.current = view;
 
