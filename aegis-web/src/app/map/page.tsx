@@ -258,38 +258,42 @@ export default function MapPage() {
             </div>
           )}
 
-          {loading ? (
-            <div
-              className="map-container"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "var(--dim)",
-                fontSize: "14px",
-              }}
-            >
-              Loading map data…
-            </div>
-          ) : (
-            <div ref={mapContainerRef} className="map-container" style={{ position: "relative" }}>
-              {!mapReady && !mapError && (
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: "var(--bg)",
-                    color: "var(--dim)",
-                    fontSize: "14px",
-                    zIndex: 5,
-                  }}
-                >
-                  Loading map…
-                </div>
-              )}
+          <div ref={mapContainerRef} className="map-container" style={{ position: "relative" }}>
+            {loading && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "12px",
+                  right: "12px",
+                  padding: "8px 14px",
+                  background: "var(--card)",
+                  border: "1px solid var(--dimmer)",
+                  borderRadius: "6px",
+                  color: "var(--dim)",
+                  fontSize: "12px",
+                  zIndex: 10,
+                }}
+              >
+                Loading points…
+              </div>
+            )}
+            {!mapReady && !mapError && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "var(--bg)",
+                  color: "var(--dim)",
+                  fontSize: "14px",
+                  zIndex: 5,
+                }}
+              >
+                Loading map…
+              </div>
+            )}
               {mapError && (
                 <div
                   style={{
@@ -328,16 +332,15 @@ export default function MapPage() {
                   No data for this period. Try another date range.
                 </div>
               )}
-              <ConflictMap
-                containerRef={mapContainerRef}
-                points={points}
-                mode={mode}
-                recenterRef={recenterRef}
-                onReady={handleMapReady}
-                onError={handleMapError}
-              />
-            </div>
-          )}
+            <ConflictMap
+              containerRef={mapContainerRef}
+              points={loading ? [] : points}
+              mode={mode}
+              recenterRef={recenterRef}
+              onReady={handleMapReady}
+              onError={handleMapError}
+            />
+          </div>
         </div>
       </main>
 

@@ -91,29 +91,27 @@ export default function ConflictMap({
           "esri/symbols/SimpleMarkerSymbol",
         ],
         (Map: unknown, MapView: unknown, SceneView: unknown, Graphic: unknown, GraphicsLayer: unknown, Point: unknown, SimpleMarkerSymbol: unknown) => {
-          const MapC = Map as new (opts: { basemap: string }) => object;
-          const MapViewC = MapView as new (opts: object) => {
-            destroy: () => void;
-            popup?: { dockEnabled?: boolean; dockOptions?: object; defaultPopupTemplateEnabled?: boolean; open: (opts: object) => void };
-            on: (e: string, fn: (ev: { mapPoint: object }) => void) => void;
-            hitTest: (ev: object) => Promise<{ results: { graphic?: { attributes: Record<string, unknown>; geometry?: object; layer: object } }[] }>;
-            goTo: (target: object, opts?: object) => Promise<void>;
-            zoom: number;
-          };
-          const SceneViewC = SceneView as new (opts: object) => {
-            destroy: () => void;
-            popup?: { dockEnabled?: boolean; dockOptions?: object; defaultPopupTemplateEnabled?: boolean; open: (opts: object) => void };
-            on: (e: string, fn: (ev: { mapPoint: object }) => void) => void;
-            hitTest: (ev: object) => Promise<{ results: { graphic?: { attributes: Record<string, unknown>; geometry?: object; layer: object } }[] }>;
-            goTo: (target: object, opts?: object) => Promise<void>;
-            zoom: number;
-          };
-          const GraphicC = Graphic as new (opts: object) => object;
-          const GraphicsLayerC = GraphicsLayer as new (opts: { graphics: object[] }) => object;
-          const PointC = Point as new (opts: { longitude: number; latitude: number }) => object;
-          const SimpleMarkerSymbolC = SimpleMarkerSymbol as new (opts: object) => object;
+          const ctor = (m: unknown) =>
+            m != null && typeof (m as { default?: unknown }).default === "function"
+              ? ((m as { default: new (opts?: object) => object }).default as new (opts?: object) => object)
+              : (m as new (opts?: object) => object);
+
+          const MapC = ctor(Map);
+          const MapViewC = ctor(MapView);
+          const SceneViewC = ctor(SceneView);
+          const GraphicC = ctor(Graphic);
+          const GraphicsLayerC = ctor(GraphicsLayer);
+          const PointC = ctor(Point);
+          const SimpleMarkerSymbolC = ctor(SimpleMarkerSymbol);
+
+          if (typeof MapC !== "function") {
+            onError?.("Map module failed to load");
+            reject(new Error("Map module failed to load"));
+            return;
+          }
+
           try {
-            const map = new MapC({ basemap: "dark-gray-vector" });
+            const map = new (MapC as new (opts: { basemap: string }) => object)({ basemap: "dark-gray-vector" });
 
             const graphics = (points || []).map((p) => {
               const color =
