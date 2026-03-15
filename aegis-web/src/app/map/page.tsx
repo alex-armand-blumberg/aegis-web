@@ -4,7 +4,6 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MapPoint } from "@/app/api/map/route";
-import { CATEGORY_COLORS } from "@/lib/mapConstants";
 
 const ConflictMap = dynamic(() => import("@/components/ConflictMap"), {
   ssr: false,
@@ -27,21 +26,12 @@ function formatMonthLabel(ym: string): string {
 }
 
 const LEGEND_ENTRIES = [
-  { label: "Battles", color: CATEGORY_COLORS["Battles"] ?? "#ef4444" },
-  {
-    label: "Explosions / Remote Violence",
-    color: CATEGORY_COLORS["Explosions / Remote Violence"] ?? "#f59e0b",
-  },
-  {
-    label: "Violence Against Civilians",
-    color: CATEGORY_COLORS["Violence Against Civilians"] ?? "#fde047",
-  },
-  {
-    label: "Strategic Developments",
-    color: CATEGORY_COLORS["Strategic Developments"] ?? "#60a5fa",
-  },
-  { label: "Protests", color: CATEGORY_COLORS["Protests"] ?? "#a78bfa" },
-  { label: "Riots", color: CATEGORY_COLORS["Riots"] ?? "#ec4899" },
+  { label: "Battles", color: "#ef4444" },
+  { label: "Explosions / Remote Violence", color: "#f59e0b" },
+  { label: "Violence Against Civilians", color: "#fde047" },
+  { label: "Strategic Developments", color: "#60a5fa" },
+  { label: "Protests", color: "#a78bfa" },
+  { label: "Riots", color: "#ec4899" },
 ];
 
 export default function MapPage() {

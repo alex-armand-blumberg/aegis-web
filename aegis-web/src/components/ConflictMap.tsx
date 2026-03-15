@@ -3,8 +3,16 @@
 import { useEffect, useRef } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
 import type { MapPoint } from "@/app/api/map/route";
-import { CATEGORY_COLORS } from "@/lib/mapConstants";
 import "leaflet/dist/leaflet.css";
+
+const CATEGORY_COLORS: Record<string, string> = {
+  Battles: "#ef4444",
+  "Explosions / Remote Violence": "#f59e0b",
+  "Violence Against Civilians": "#fde047",
+  "Strategic Developments": "#60a5fa",
+  Protests: "#a78bfa",
+  Riots: "#ec4899",
+};
 
 const DEFAULT_CENTER: [number, number] = [20, 10];
 const DEFAULT_ZOOM = 2;
@@ -152,4 +160,4 @@ export default function ConflictMap({
   );
 }
 
-export { CATEGORY_COLORS } from "@/lib/mapConstants";
+export { CATEGORY_COLORS };
