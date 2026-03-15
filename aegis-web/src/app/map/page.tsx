@@ -4,7 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MapPoint } from "@/app/api/map/route";
-import { CATEGORY_COLORS } from "@/components/ConflictMap";
+import { CATEGORY_COLORS } from "@/lib/mapConstants";
 
 const ConflictMap = dynamic(() => import("@/components/ConflictMap"), {
   ssr: false,
