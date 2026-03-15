@@ -2,10 +2,16 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapPoint } from "@/app/api/map/route";
+import { aggregatePointsByCountry, getBoundsForCountry } from "@/lib/mapUtils";
+import type { CountryBoundsMap } from "@/components/ConflictMap";
+import CountryInfoPanel from "@/components/CountryInfoPanel";
 
 const ConflictMap = dynamic(() => import("@/components/ConflictMap"), {
+  ssr: false,
+});
+const ConflictGlobe = dynamic(() => import("@/components/ConflictGlobe"), {
   ssr: false,
 });
 
@@ -31,7 +37,7 @@ const LEGEND_ENTRIES = [
   { label: "Violence Against Civilians", color: "#fde047" },
   { label: "Strategic Developments", color: "#60a5fa" },
   { label: "Protests", color: "#a78bfa" },
-  { label: "Riots", color: "#ec4899" },
+  { label: "Riots", color: "#f472b6" },
 ];
 
 export default function MapPage() {
@@ -43,9 +49,32 @@ export default function MapPage() {
   const [error, setError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [countryFilter, setCountryFilter] = useState("");
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const recenterRef = useRef<(() => void) | null>(null);
+
+  const filteredPoints = useMemo(() => {
+    if (!countryFilter.trim()) return points;
+    return points.filter(
+      (p) => (p.country?.trim() ?? "").toLowerCase() === countryFilter.trim().toLowerCase()
+    );
+  }, [points, countryFilter]);
+
+  const countrySummaries = useMemo(
+    () => aggregatePointsByCountry(filteredPoints),
+    [filteredPoints]
+  );
+
+  const countryBoundsMap = useMemo<CountryBoundsMap>(() => {
+    const m: CountryBoundsMap = {};
+    for (const c of Object.keys(countrySummaries)) {
+      const b = getBoundsForCountry(c, filteredPoints);
+      if (b) m[c] = b;
+    }
+    return m;
+  }, [filteredPoints, countrySummaries]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -217,11 +246,41 @@ export default function MapPage() {
             <button
               type="button"
               className="btn-secondary"
-              onClick={() => recenterRef.current?.()}
+              onClick={() => {
+                setSelectedCountry(null);
+                recenterRef.current?.();
+              }}
               style={{ padding: "8px 14px", fontSize: "12px" }}
             >
               Recenter
             </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <label
+                style={{
+                  fontSize: "11px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                  color: "var(--dim)",
+                }}
+              >
+                Country (exact match)
+              </label>
+              <input
+                type="text"
+                value={countryFilter}
+                onChange={(e) => setCountryFilter(e.target.value)}
+                placeholder="Try 'Israel' or 'Ukraine'"
+                style={{
+                  background: "var(--card)",
+                  border: "1px solid var(--dimmer)",
+                  borderRadius: 6,
+                  padding: "8px 12px",
+                  color: "#e2e8f0",
+                  fontSize: 13,
+                  minWidth: 160,
+                }}
+              />
+            </div>
           </div>
 
           <div className="map-legend" style={{ marginBottom: "16px" }}>
@@ -249,6 +308,33 @@ export default function MapPage() {
           )}
 
           <div ref={mapContainerRef} className="map-container" style={{ position: "relative" }}>
+            <div
+              className="map-title-overlay"
+              style={{
+                position: "absolute",
+                top: 14,
+                left: "50%",
+                transform: "translateX(-50%)",
+                color: "#e2e8f0",
+                fontSize: 16,
+                fontWeight: 600,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                zIndex: 1000,
+                whiteSpace: "nowrap",
+                textShadow: "0 0 20px rgba(96,165,250,0.6)",
+                pointerEvents: "none",
+              }}
+            >
+              ■ {dateRangeLabel} CONFLICT HOTSPOTS
+            </div>
+            {selectedCountry && countrySummaries[selectedCountry] && (
+              <CountryInfoPanel
+                country={selectedCountry}
+                summary={countrySummaries[selectedCountry]}
+                onClose={() => setSelectedCountry(null)}
+              />
+            )}
             {loading && (
               <div
                 style={{
@@ -322,14 +408,27 @@ export default function MapPage() {
                   No data for this period. Try another date range.
                 </div>
               )}
-            <ConflictMap
-              containerRef={mapContainerRef}
-              points={loading ? [] : points}
-              mode={mode}
-              recenterRef={recenterRef}
-              onReady={handleMapReady}
-              onError={handleMapError}
-            />
+            {mode === "2d" ? (
+              <ConflictMap
+                containerRef={mapContainerRef}
+                points={loading ? [] : filteredPoints}
+                mode="2d"
+                recenterRef={recenterRef}
+                onReady={handleMapReady}
+                onError={handleMapError}
+                onCountrySelect={setSelectedCountry}
+                countryBoundsMap={countryBoundsMap}
+              />
+            ) : (
+              <ConflictGlobe
+                containerRef={mapContainerRef}
+                points={loading ? [] : filteredPoints}
+                recenterRef={recenterRef}
+                onReady={handleMapReady}
+                onError={handleMapError}
+                onCountrySelect={setSelectedCountry}
+              />
+            )}
           </div>
         </div>
       </main>

@@ -11,7 +11,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Violence Against Civilians": "#fde047",
   "Strategic Developments": "#60a5fa",
   Protests: "#a78bfa",
-  Riots: "#ec4899",
+  Riots: "#f472b6",
 };
 
 const DEFAULT_CENTER: [number, number] = [20, 10];
@@ -37,6 +37,8 @@ function popupContent(p: MapPoint): string {
   `;
 }
 
+export type CountryBoundsMap = Record<string, [[number, number], [number, number]]>;
+
 type ConflictMapProps = {
   points: MapPoint[];
   mode: "2d" | "3d";
@@ -44,6 +46,10 @@ type ConflictMapProps = {
   recenterRef?: React.MutableRefObject<(() => void) | null>;
   onReady?: () => void;
   onError?: (message: string) => void;
+  /** Called when user clicks a point; pass country name to zoom and show panel. */
+  onCountrySelect?: (country: string) => void;
+  /** Bounds per country for flyToBounds: [[south, west], [north, east]]. */
+  countryBoundsMap?: CountryBoundsMap;
 };
 
 function RecenterControl({
@@ -64,18 +70,36 @@ function RecenterControl({
   return null;
 }
 
+function totalEvents(p: MapPoint): number {
+  return (
+    (p.battles ?? 0) +
+    (p.explosions_remote_violence ?? 0) +
+    (p.violence_against_civilians ?? 0) +
+    (p.strategic_developments ?? 0) +
+    (p.protests ?? 0) +
+    (p.riots ?? 0)
+  );
+}
+
 function MapContent({
   points,
   recenterRef,
   onReady,
+  onCountrySelect,
+  countryBoundsMap,
 }: {
   points: MapPoint[];
   recenterRef?: React.MutableRefObject<(() => void) | null>;
   onReady?: () => void;
+  onCountrySelect?: (country: string) => void;
+  countryBoundsMap?: CountryBoundsMap;
 }) {
+  const map = useMap();
   useEffect(() => {
     onReady?.();
   }, [onReady]);
+
+  const maxEvents = Math.max(1, ...points.map(totalEvents));
 
   return (
     <>
@@ -86,17 +110,28 @@ function MapContent({
       <RecenterControl recenterRef={recenterRef} />
       {points.map((p, i) => {
         const color = CATEGORY_COLORS[p.dominant_category] ?? "rgba(255,255,255,0.6)";
+        const events = totalEvents(p);
+        const radius = Math.min(12, 4 + (events / maxEvents) * 8);
+        const country = (p.country ?? "").trim() || "Unknown";
+        const handleClick = () => {
+          onCountrySelect?.(country);
+          const bounds = countryBoundsMap?.[country];
+          if (bounds && map) {
+            map.flyToBounds(bounds, { duration: 1, maxZoom: 9 });
+          }
+        };
         return (
           <CircleMarker
             key={`${p.lon}-${p.lat}-${i}`}
             center={[p.lat, p.lon]}
-            radius={6}
+            radius={radius}
             pathOptions={{
               fillColor: color,
               color: "rgba(255,255,255,0.4)",
               weight: 1,
-              fillOpacity: 0.8,
+              fillOpacity: 0.85,
             }}
+            eventHandlers={{ click: handleClick }}
           >
             <Popup>
               <div dangerouslySetInnerHTML={{ __html: popupContent(p) }} />
@@ -115,6 +150,8 @@ export default function ConflictMap({
   recenterRef,
   onReady,
   onError,
+  onCountrySelect,
+  countryBoundsMap,
 }: ConflictMapProps) {
   const internalRef = useRef<HTMLDivElement>(null);
 
@@ -142,6 +179,8 @@ export default function ConflictMap({
         points={points}
         recenterRef={recenterRef}
         onReady={onReady}
+        onCountrySelect={onCountrySelect}
+        countryBoundsMap={countryBoundsMap}
       />
     </MapContainer>
   );
