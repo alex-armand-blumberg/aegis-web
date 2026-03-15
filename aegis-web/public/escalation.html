@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AEGIS — Escalation Index</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;1,300&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --red:    #ef4444;
+      --blue:   #3b82f6;
+      --dim:    rgba(255,255,255,0.38);
+      --dimmer: rgba(255,255,255,0.14);
+      --bg:     #020611;
+      --card:   rgba(6,14,35,0.85);
+    }
+    html { scroll-behavior: smooth; overflow-x: hidden; }
+    body {
+      background: var(--bg);
+      color: #e2e8f0;
+      font-family: 'Barlow', sans-serif;
+      font-weight: 300;
+      overflow-x: hidden;
+      min-width: 320px;
+    }
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
+      opacity: 0.4;
+    }
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+      background-size: 60px 60px;
+    }
+    section, nav, footer { position: relative; z-index: 1; }
+
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 48px;
+      background: linear-gradient(180deg, rgba(2,6,17,0.95) 0%, transparent 100%);
+      backdrop-filter: blur(4px);
+    }
+    .nav-logo {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 22px; letter-spacing: 0.12em;
+      color: white; text-decoration: none; flex-shrink: 0;
+    }
+    .nav-logo span { color: var(--red); }
+    .nav-links { display: flex; gap: 32px; align-items: center; }
+    .nav-links a {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--dim);
+      text-decoration: none; transition: color .2s; white-space: nowrap;
+    }
+    .nav-links a:hover { color: white; }
+    .nav-cta {
+      background: var(--red) !important; color: white !important;
+      padding: 7px 18px; border-radius: 4px;
+    }
+    .nav-cta:hover { opacity: 0.88 !important; color: white !important; }
+
+    .divider { width: 100%; height: 1px; background: linear-gradient(90deg, transparent, rgba(59,130,246,0.3), transparent); }
+
+    .section { padding: 100px 48px; max-width: 1200px; margin: 0 auto; }
+    .section-tag { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.28em; text-transform: uppercase; color: var(--blue); margin-bottom: 14px; }
+    .section-tag::before { content: '— '; }
+    h2 { font-family: 'Bebas Neue', sans-serif; font-size: clamp(36px, 5vw, 72px); letter-spacing: 0.06em; line-height: 1; color: white; margin-bottom: 20px; }
+    .section-body { font-size: 16px; line-height: 1.75; color: rgba(226,232,240,0.65); max-width: 620px; }
+
+    #methodology { background: rgba(6,14,35,0.4); }
+    .method-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-top: 48px; }
+    .method-item { display: flex; gap: 20px; align-items: flex-start; padding: 24px; background: var(--card); border: 1px solid var(--dimmer); border-left: 2px solid var(--red); border-radius: 6px; }
+    .method-weight { font-family: 'Bebas Neue', sans-serif; font-size: 32px; line-height: 1; color: var(--red); flex-shrink: 0; width: 52px; }
+    .method-inner { flex: 1; min-width: 0; }
+    .method-name { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: white; margin-bottom: 8px; }
+    .method-bar-track { width: 100%; height: 3px; background: rgba(255,255,255,0.07); border-radius: 2px; margin-bottom: 8px; overflow: hidden; }
+    .method-bar-fill { height: 100%; background: var(--red); border-radius: 2px; transform-origin: left; }
+    .method-desc { font-size: 13px; color: rgba(226,232,240,0.5); line-height: 1.6; }
+
+    .control-card { background: var(--card); border: 1px solid var(--dimmer); border-radius: 8px; padding: 36px 32px; margin-top: 24px; }
+    .control-row { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-end; }
+    .control-group { display: flex; flex-direction: column; gap: 8px; }
+    .control-group label {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.7);
+    }
+    .control-group input[type="text"],
+    .control-group input[type="number"],
+    .control-group input[type="date"] {
+      background: rgba(15,23,42,0.8); border: 1px solid rgba(255,255,255,0.15);
+      color: white; padding: 10px 14px; border-radius: 6px; font-size: 14px; min-width: 140px;
+    }
+    .control-group input:focus { outline: none; border-color: #60a5fa; }
+    .control-group input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--red); }
+    .control-group.checkbox-row { flex-direction: row; align-items: center; }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: var(--red); color: white; border: none; cursor: pointer;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 14px; font-weight: 600; letter-spacing: 0.10em;
+      text-transform: uppercase; padding: 14px 32px; border-radius: 5px;
+      transition: transform .15s, opacity .15s;
+    }
+    .btn-primary:hover { transform: translateY(-2px); opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .control-note { margin-top: 16px; font-size: 12px; color: rgba(255,255,255,0.45); }
+    .control-hint { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 4px; }
+    .progress-wrap { margin-top: 12px; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--red); border-radius: 3px; width: 0%; transition: width 0.2s ease; }
+    .progress-wrap.hidden { display: none; }
+
+    .chart-card { background: var(--card); border: 1px solid var(--dimmer); border-radius: 8px; padding: 32px; margin-top: 24px; }
+    .chart-title { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 600; letter-spacing: 0.06em; color: white; margin-bottom: 8px; }
+    .chart-meta { font-size: 12px; color: var(--dim); margin-bottom: 20px; }
+    .chart-wrap { position: relative; height: 480px; width: 100%; }
+    .chart-error { color: var(--red); margin-top: 12px; font-size: 14px; }
+    .chart-placeholder { color: var(--dim); font-size: 14px; margin-top: 12px; }
+
+    .about-card { background: var(--card); border: 1px solid var(--dimmer); border-radius: 8px; padding: 32px; min-width: 0; }
+    .about-card-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--dim); margin-bottom: 20px; }
+    .index-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .index-row:last-of-type { border-bottom: none; }
+    .index-label { color: rgba(255,255,255,0.5); font-size: 11px; font-family: 'Barlow Condensed', sans-serif; text-transform: uppercase; letter-spacing: 0.06em; }
+    .index-val { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 0.06em; }
+    .drill-select { width: 100%; max-width: 400px; padding: 10px 14px; margin-bottom: 20px; background: rgba(15,23,42,0.8); border: 1px solid rgba(255,255,255,0.15); color: white; border-radius: 6px; font-size: 14px; }
+    .drill-detail { margin-top: 16px; }
+    .status-badge { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700; margin-left: 12px; }
+    .status-flagged { background: var(--red); color: white; }
+    .status-pre { background: #f97316; color: white; }
+    .status-below { background: #334155; color: #94a3b8; }
+    .drill-component { margin-bottom: 16px; }
+    .drill-component .label { font-size: 13px; color: #94a3b8; margin-bottom: 4px; }
+    .drill-component .bar-wrap { height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+    .drill-component .bar-fill { height: 100%; border-radius: 4px; }
+
+    .signals-card { background: var(--card); border: 1px solid var(--dimmer); border-radius: 8px; padding: 24px; margin-top: 24px; }
+    .signals-card .section-body { max-width: none; font-size: 13px; }
+
+    footer { border-top: 1px solid var(--dimmer); padding: 32px 48px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    .footer-logo { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 0.12em; color: rgba(255,255,255,0.4); }
+    .footer-links { display: flex; gap: 32px; flex-wrap: wrap; }
+    .footer-links a { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); text-decoration: none; transition: color .2s; }
+    .footer-links a:hover { color: white; }
+    .footer-copy { font-size: 11px; color: rgba(255,255,255,0.22); font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.08em; }
+
+    .hidden { display: none !important; }
+    .reveal { opacity: 0; transform: translateY(24px); transition: opacity .65s ease, transform .65s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+    @media (max-width: 640px) {
+      .section-body[style*="white-space: nowrap"] { white-space: normal !important; }
+    }
+
+    @media (max-width: 960px) {
+      .section { padding: 72px 32px; }
+      .method-grid { grid-template-columns: 1fr; }
+      .control-row { flex-direction: column; align-items: flex-start; }
+    }
+    @media (max-width: 640px) {
+      nav { padding: 16px 20px; }
+      .nav-links a:not(.nav-cta) { display: none; }
+      .section { padding: 64px 20px; }
+      footer { padding: 24px 20px; flex-direction: column; text-align: center; }
+      .footer-links { justify-content: center; }
+      .chart-wrap { height: 360px; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">AEG<span>I</span>S</a>
+  <div class="nav-links">
+    <a href="/#features">Features</a>
+    <a href="/#about">About</a>
+    <a href="/#methodology">Methodology</a>
+    <a href="/" class="nav-cta">Back to Home</a>
+  </div>
+</nav>
+
+<section id="how-it-works">
+  <div class="section">
+    <p class="section-tag reveal">How It Works</p>
+    <h2 class="reveal">The Escalation Index</h2>
+    <p class="section-body reveal">A composite monthly index (0–100) built from six weighted components, normalized globally and smoothed over time. The plot shows the raw and smoothed index, an alert threshold line, months where the index exceeded the threshold (red dots), pre-escalation warnings when leading indicators spike before the line crosses the threshold (orange), and a 3‑month forecast (purple dashed).</p>
+    <div class="method-grid">
+      <div class="method-item reveal">
+        <div class="method-weight">30%</div>
+        <div class="method-inner">
+          <div class="method-name">Raw Conflict Intensity</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:30%;"></div></div>
+          <div class="method-desc">Battles + explosions in absolute terms. Ensures sustained wars score high even with flat month-over-month change.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight">20%</div>
+        <div class="method-inner">
+          <div class="method-name">Event Frequency Acceleration</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:20%;"></div></div>
+          <div class="method-desc">Month-over-month % change in total events. Catches countries entering or re-escalating conflict before intensity peaks.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight">20%</div>
+        <div class="method-inner">
+          <div class="method-name">Explosions / Remote Violence</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:20%;"></div></div>
+          <div class="method-desc">Shelling, airstrikes, drone strikes, IEDs. Precede ground battle fatalities — a leading signal of escalating military operations.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight">15%</div>
+        <div class="method-inner">
+          <div class="method-name">Strategic Developments</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:15%;"></div></div>
+          <div class="method-desc">Troop movements, HQ changes, ceasefire collapses, territorial control shifts. Signal intent and capability changes.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight">10%</div>
+        <div class="method-inner">
+          <div class="method-name">Civil Unrest</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:10%;"></div></div>
+          <div class="method-desc">Protests + riots. Social instability often precedes armed conflict escalation — a leading indicator of political breakdown.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight">5%</div>
+        <div class="method-inner">
+          <div class="method-name">Civilian Targeting Ratio</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:5%;"></div></div>
+          <div class="method-desc">Violence against civilians as a proportion of total violent events. A shift toward civilians signals strategic deterioration.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="controls">
+  <div class="section">
+    <p class="section-tag reveal">Run the Index</p>
+    <h2 class="reveal">Generate a plot</h2>
+    <p class="section-body reveal" style="white-space: nowrap;">Choose a country and date range. Data: ACLED (2018 to one year ago with research-tier access).</p>
+    <div class="control-card reveal">
+      <div class="control-row">
+        <div class="control-group">
+          <label>Country (exact match)</label>
+          <input type="text" id="country" placeholder="e.g. Israel, Ukraine" />
+        </div>
+        <div class="control-group">
+          <label>Alert threshold (0–100)</label>
+          <input type="number" id="threshold" min="0" max="100" value="45" />
+          <span class="control-hint">Recommended: keep at 45.</span>
+        </div>
+        <div class="control-group">
+          <label>Smoothing (months)</label>
+          <input type="number" id="smooth" min="1" max="12" value="3" />
+          <span class="control-hint">Recommended: keep at 3.</span>
+        </div>
+        <div class="control-group">
+          <label>From</label>
+          <input type="date" id="start" value="2018-01-01" />
+        </div>
+        <div class="control-group">
+          <label>To (default: 1 year ago)</label>
+          <input type="date" id="end" />
+        </div>
+        <div class="control-group checkbox-row">
+          <input type="checkbox" id="showComponents" />
+          <label for="showComponents" style="margin-bottom:0;">Show component breakdown</label>
+        </div>
+        <div class="control-group">
+          <button type="button" class="btn-primary" id="btnGenerate">Generate plot</button>
+        </div>
+      </div>
+      <p class="control-note">Depending on the date range, computing the index may take several seconds while ACLED data is loaded and processed.</p>
+      <div id="progressWrap" class="progress-wrap hidden">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="chart-section" class="hidden">
+  <div class="section">
+    <div class="chart-card">
+      <h2 class="chart-title" id="chartTitle">AEGIS Escalation Index</h2>
+      <p class="chart-meta" id="chartMeta"></p>
+      <div id="chartError" class="chart-error hidden"></div>
+      <div class="chart-wrap">
+        <canvas id="mainChart"></canvas>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="component-section" class="hidden">
+  <div class="section">
+    <div class="chart-card">
+      <h2 class="chart-title">Index component breakdown (weighted contribution per month)</h2>
+      <div style="position:relative; height:280px; width:100%;">
+        <canvas id="componentChart"></canvas>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="drill-section">
+  <div class="section">
+    <p class="section-tag reveal">Drill down</p>
+    <h2 class="reveal">What drove a specific month?</h2>
+    <p class="section-body reveal">Select a month to see the breakdown of event types and index components.</p>
+    <div class="about-card reveal">
+      <div class="about-card-label">Select a month</div>
+      <select id="drillSelect" class="drill-select">
+        <option value="">— Select a month after generating a plot —</option>
+      </select>
+      <div id="drillDetail" class="drill-detail hidden"></div>
+    </div>
+  </div>
+</section>
+
+<section id="signals">
+  <div class="section">
+    <p class="section-tag reveal">How to read the signals</p>
+    <h2 class="reveal">Legend</h2>
+    <div class="signals-card reveal">
+      <p class="section-body"><strong style="color:#60a5fa;">Blue line</strong> — Smoothed escalation index (0–100) combining six conflict indicators. <strong style="color:#ef4444;">Red dots</strong> — Months where the index exceeded your alert threshold. <strong style="color:#f97316;">Orange markers</strong> — Pre-escalation warnings when leading indicators spike before the index crosses the threshold. <strong style="color:#a78bfa;">Purple dotted line</strong> — 3‑month forecast from the last 6 months.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<footer>
+  <div class="footer-logo">AEGIS</div>
+  <div class="footer-links">
+    <a href="/">App</a>
+    <a href="https://www.linkedin.com/in/alexanderbab/" target="_blank" rel="noopener">LinkedIn</a>
+    <a href="https://github.com" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://acleddata.com" target="_blank" rel="noopener">Data: ACLED</a>
+  </div>
+  <div class="footer-copy">&copy; 2026 Alexander Armand-Blumberg &middot; AEGIS</div>
+</footer>
+
+<script>
+(function() {
+  function defaultEnd() {
+    var d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.toISOString().slice(0, 10);
+  }
+  var endEl = document.getElementById('end');
+  if (endEl && !endEl.value) endEl.value = defaultEnd();
+
+  var mainChartInstance = null;
+  var componentChartInstance = null;
+  var lastData = null;
+
+  function revealObs() {
+    var obs = new IntersectionObserver(function(entries) {
+      entries.forEach(function(e) {
+        if (e.isIntersecting) e.target.classList.add('visible');
+        else e.target.classList.remove('visible');
+      });
+    }, { threshold: 0.12 });
+    document.querySelectorAll('.reveal').forEach(function(el) { obs.observe(el); });
+  }
+  revealObs();
+
+  document.getElementById('btnGenerate').addEventListener('click', function() {
+    var country = document.getElementById('country').value.trim();
+    if (!country) {
+      document.getElementById('chartError').textContent = 'Please enter a country name.';
+      document.getElementById('chartError').classList.remove('hidden');
+      return;
+    }
+    var threshold = Math.max(0, Math.min(100, parseInt(document.getElementById('threshold').value, 10) || 45));
+    var smooth = Math.max(1, Math.min(12, parseInt(document.getElementById('smooth').value, 10) || 3));
+    var start = document.getElementById('start').value || '2018-01-01';
+    var end = document.getElementById('end').value || defaultEnd();
+    var btn = document.getElementById('btnGenerate');
+    btn.disabled = true;
+    btn.textContent = 'Computing…';
+    document.getElementById('chartError').classList.add('hidden');
+    var progressWrap = document.getElementById('progressWrap');
+    var progressFill = document.getElementById('progressFill');
+    progressWrap.classList.remove('hidden');
+    progressFill.style.width = '0%';
+    var progressInterval = null;
+    progressInterval = setInterval(function() {
+      var w = parseFloat(progressFill.style.width) || 0;
+      if (w < 88) progressFill.style.width = Math.min(88, w + 4) + '%';
+    }, 400);
+    var params = new URLSearchParams({ country: country, smooth: smooth, threshold: threshold, start: start, end: end });
+    fetch('/api/escalation?' + params.toString())
+      .then(function(r) { return r.json(); })
+      .then(function(json) {
+        if (progressInterval) clearInterval(progressInterval);
+        progressFill.style.width = '100%';
+        setTimeout(function() {
+          progressWrap.classList.add('hidden');
+          progressFill.style.width = '0%';
+        }, 400);
+        btn.disabled = false;
+        btn.textContent = 'Generate plot';
+        if (json.error) {
+          document.getElementById('chartError').textContent = json.error + ' Try a different country name such as Israel or Ukraine.';
+          document.getElementById('chartError').classList.remove('hidden');
+          document.getElementById('chart-section').classList.add('hidden');
+          return;
+        }
+        lastData = json;
+        document.getElementById('chartTitle').textContent = 'AEGIS Escalation Index — ' + country;
+        document.getElementById('chartMeta').textContent = (json.dataSource || 'ACLED') + (json.series && json.series.length ? ' · ' + json.series.length + ' country-month rows' : '');
+        document.getElementById('chart-section').classList.remove('hidden');
+        document.getElementById('chartError').classList.add('hidden');
+        if (document.getElementById('showComponents').checked && json.series && json.series.length) {
+          document.getElementById('component-section').classList.remove('hidden');
+          drawComponentChart(json);
+        } else {
+          document.getElementById('component-section').classList.add('hidden');
+          if (componentChartInstance) {
+            componentChartInstance.destroy();
+            componentChartInstance = null;
+          }
+        }
+        drawMainChart(json);
+        fillDrillSelect(json);
+      })
+      .catch(function(err) {
+        if (progressInterval) clearInterval(progressInterval);
+        if (progressWrap) {
+          progressWrap.classList.add('hidden');
+          progressFill.style.width = '0%';
+        }
+        btn.disabled = false;
+        btn.textContent = 'Generate plot';
+        document.getElementById('chartError').textContent = 'Failed to load escalation index. ' + (err.message || '');
+        document.getElementById('chartError').classList.remove('hidden');
+        document.getElementById('chart-section').classList.add('hidden');
+      });
+  });
+
+  function formatMonthLabel(ym) {
+    if (!ym || ym.length < 7) return ym;
+    var d = new Date(ym.slice(0, 4) + '-' + ym.slice(5, 7) + '-01');
+    return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  }
+
+  function drawMainChart(json) {
+    var canvas = document.getElementById('mainChart');
+    if (!canvas || !json.series || !json.series.length) return;
+    if (mainChartInstance) mainChartInstance.destroy();
+    var series = json.series;
+    var forecast = json.forecast || [];
+    var threshold = json.escalationThreshold != null ? json.escalationThreshold : 45;
+    var flaggedSet = new Set(json.escalationFlaggedMonths || []);
+    var preSet = new Set(json.preEscalationMonths || []);
+
+    var labels = series.map(function(d) { return d.event_month.slice(0, 7); });
+    var smoothed = series.map(function(d) { return d.index_smoothed; });
+    var raw = series.map(function(d) { return d.escalation_index; });
+
+    var escalationY = series.map(function(d, i) {
+      var key = d.event_month.slice(0, 7);
+      return flaggedSet.has(key) ? d.index_smoothed : null;
+    });
+    var preY = series.map(function(d, i) {
+      var key = d.event_month.slice(0, 7);
+      return preSet.has(key) ? d.index_smoothed : null;
+    });
+
+    var thresholdY = labels.map(function() { return threshold; });
+
+    var allLabels = labels.slice();
+    var forecastData = null;
+    var pad = function(arr, len) {
+      var out = arr.slice();
+      while (out.length < len) out.push(null);
+      return out;
+    };
+    if (forecast.length && series.length) {
+      forecast.forEach(function(f) { allLabels.push(f.event_month.slice(0, 7)); });
+      var lastSmoothed = series[series.length - 1].index_smoothed;
+      forecastData = labels.map(function(_, i) { return i === labels.length - 1 ? lastSmoothed : null; }).concat(forecast.map(function(f) { return f.projected_index; }));
+    }
+    var rawLabelList = forecastData ? allLabels : labels;
+    var useLabels = rawLabelList.map(formatMonthLabel);
+    var n = rawLabelList.length;
+    var padTo = function(arr) { return pad(arr, n); };
+
+    var datasets = [
+      { label: 'Escalation Index (smoothed)', data: padTo(smoothed), borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.15)', fill: true, tension: 0.2, pointRadius: 0 },
+      { label: 'Raw ACLED Index', data: padTo(raw), borderColor: 'rgba(96,165,250,0.4)', borderWidth: 1, fill: false, tension: 0.2, pointRadius: 0 },
+      { label: 'Alert threshold (' + threshold + ')', data: padTo(thresholdY), borderColor: '#ef4444', borderDash: [4, 4], borderWidth: 1.5, fill: false, pointRadius: 0 },
+      { label: 'Escalation flagged', data: padTo(escalationY), borderColor: '#ef4444', backgroundColor: '#ef4444', fill: false, pointRadius: 5, pointHoverRadius: 7, showLine: false },
+      { label: 'Pre-escalation warning', data: padTo(preY), borderColor: '#f97316', backgroundColor: '#f97316', fill: false, pointRadius: 6, pointStyle: 'rectRot', pointHoverRadius: 8, showLine: false }
+    ];
+    if (forecastData) {
+      datasets.push({ label: '3-month forecast', data: forecastData, borderColor: '#a78bfa', borderDash: [6, 4], borderWidth: 2.5, fill: false, pointRadius: 3, tension: 0.2, spanGaps: false });
+    }
+
+    mainChartInstance = new Chart(canvas, {
+      type: 'line',
+      data: { labels: useLabels, datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 800 },
+        animations: { tension: { duration: 800 } },
+        plugins: {
+          legend: {
+            labels: { color: '#e2e8f0', font: { size: 11 } }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: 'rgba(30,41,59,0.6)' },
+            ticks: { color: '#94a3b8', maxRotation: 35 }
+          },
+          y: {
+            min: 0,
+            max: 105,
+            grid: { color: 'rgba(30,41,59,0.6)' },
+            ticks: { color: '#94a3b8' }
+          }
+        }
+      }
+    });
+  }
+
+  function drawComponentChart(json) {
+    var canvas = document.getElementById('componentChart');
+    if (!canvas || !json.series || !json.series.length) return;
+    if (componentChartInstance) componentChartInstance.destroy();
+    var series = json.series;
+    var labels = series.map(function(d) { return formatMonthLabel(d.event_month.slice(0, 7)); });
+    var colors = ['#ef4444', '#f59e0b', '#f97316', '#60a5fa', '#a78bfa', '#fde047'];
+    var stacks = [
+      { key: 'c_intensity', label: 'Conflict intensity (30%)', mult: 30, color: colors[0] },
+      { key: 'c_accel', label: 'Event accel. (20%)', mult: 20, color: colors[1] },
+      { key: 'c_explosion', label: 'Explosions (20%)', mult: 20, color: colors[2] },
+      { key: 'c_strategic', label: 'Strategic devs (15%)', mult: 15, color: colors[3] },
+      { key: 'c_unrest', label: 'Unrest (10%)', mult: 10, color: colors[4] },
+      { key: 'c_civilian', label: 'Civilian targeting (5%)', mult: 5, color: colors[5] }
+    ];
+    var datasets = stacks.map(function(s, i) {
+      return {
+        label: s.label,
+        data: series.map(function(d) { return (d[s.key] != null ? d[s.key] : 0) * s.mult; }),
+        backgroundColor: s.color,
+        stack: 'stack'
+      };
+    });
+    componentChartInstance = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: labels, datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { color: '#94a3b8', maxRotation: 35 }
+          },
+          y: {
+            stacked: true,
+            grid: { color: 'rgba(30,41,59,0.6)' },
+            ticks: { color: '#94a3b8' }
+          }
+        },
+        plugins: {
+          legend: { labels: { color: '#e2e8f0', font: { size: 10 } } }
+        }
+      }
+    });
+  }
+
+  function fillDrillSelect(json) {
+    var sel = document.getElementById('drillSelect');
+    var detail = document.getElementById('drillDetail');
+    detail.classList.add('hidden');
+    detail.innerHTML = '';
+    sel.innerHTML = '<option value="">— Select a month —</option>';
+    if (!json.series || !json.series.length) return;
+    var flaggedSet = new Set(json.escalationFlaggedMonths || []);
+    var preSet = new Set(json.preEscalationMonths || []);
+    json.series.forEach(function(d) {
+      var key = d.event_month.slice(0, 7);
+      var label = new Date(d.event_month).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      var opt = document.createElement('option');
+      opt.value = key;
+      if (flaggedSet.has(key)) opt.textContent = '\uD83D\uDD34 ' + label + ' — escalation flagged';
+      else if (preSet.has(key)) opt.textContent = '\uD83D\uDFE0 ' + label + ' — pre-escalation warning';
+      else opt.textContent = '\u2B1C ' + label;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', function() {
+      var key = sel.value;
+      if (!key || !json.series) return;
+      var row = json.series.find(function(d) { return d.event_month.slice(0, 7) === key; });
+      if (!row) return;
+      var flaggedSet = new Set(json.escalationFlaggedMonths || []);
+      var preSet = new Set(json.preEscalationMonths || []);
+      var status = 'Below threshold';
+      var statusClass = 'status-below';
+      if (flaggedSet.has(key)) { status = 'ESCALATION FLAGGED'; statusClass = 'status-flagged'; }
+      else if (preSet.has(key)) { status = 'PRE-ESCALATION WARNING'; statusClass = 'status-pre'; }
+      var label = new Date(row.event_month).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      var components = [
+        { key: 'battles', label: 'Battles', weight: '30%', color: '#ef4444', desc: 'Direct armed confrontations.' },
+        { key: 'explosions_remote_violence', label: 'Explosions / Remote violence', weight: '20%', color: '#f97316', desc: 'Shelling, airstrikes, IEDs.' },
+        { key: 'strategic_developments', label: 'Strategic developments', weight: '15%', color: '#60a5fa', desc: 'Troop movements, ceasefires.' },
+        { key: 'protests', label: 'Protests', weight: '10%', color: '#a78bfa', desc: 'Non-violent demonstrations.' },
+        { key: 'riots', label: 'Riots', weight: '10%', color: '#fde047', desc: 'Violent demonstrations.' },
+        { key: 'violence_against_civilians', label: 'Violence vs. civilians', weight: '5%', color: '#f59e0b', desc: 'Targeted attacks on non-combatants.' }
+      ];
+      var maxCount = 1;
+      components.forEach(function(c) { maxCount = Math.max(maxCount, row[c.key] || 0); });
+      var html = '<p style="margin-bottom:12px;"><strong style="color:white;">' + label + '</strong> <span class="status-badge ' + statusClass + '">' + status + '</span> <span style="color:#94a3b8;font-size:13px;">Index: <strong style="color:white;">' + (row.escalation_index != null ? row.escalation_index.toFixed(1) : '—') + '</strong> (smoothed: <strong style="color:white;">' + (row.index_smoothed != null ? row.index_smoothed.toFixed(1) : '—') + '</strong>)</span></p>';
+      html += '<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:16px; margin-bottom:16px;">';
+      components.forEach(function(c) {
+        var count = row[c.key] != null ? row[c.key] : 0;
+        var pct = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
+        html += '<div class="drill-component"><div class="label" style="color:' + c.color + ';font-weight:600;">' + c.label + '</div><div style="display:flex;justify-content:space-between;font-size:12px;color:#94a3b8;"><span><b style="color:white;">' + Number(count).toLocaleString() + '</b> events</span><span>' + c.weight + '</span></div><div class="bar-wrap"><div class="bar-fill" style="width:' + pct + '%;background:' + c.color + ';"></div></div><div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:4px;">' + c.desc + '</div></div>';
+      });
+      html += '</div>';
+      html += '<div class="index-row"><span class="index-label">Total events</span><span class="index-val">' + (row.total_events != null ? Number(row.total_events).toLocaleString() : '—') + '</span></div>';
+      html += '<div class="index-row"><span class="index-label">Recorded fatalities</span><span class="index-val" style="color:var(--red);">' + (row.fatalities != null ? Number(row.fatalities).toLocaleString() : '—') + '</span></div>';
+      detail.innerHTML = html;
+      detail.classList.remove('hidden');
+    });
+  }
+})();
+</script>
+</body>
+</html>

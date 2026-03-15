@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AEGIS — Global Risk Intelligence</title>
+  <meta name="description" content="AEGIS is a global risk intelligence platform that tracks conflict escalation patterns, surfaces early-warning signals, and delivers AI-powered geopolitical analysis." />
+  <link rel="icon" href="/icon.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;1,300&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --red:    #ef4444;
+      --blue:   #3b82f6;
+      --dim:    rgba(255,255,255,0.38);
+      --dimmer: rgba(255,255,255,0.14);
+      --bg:     #020611;
+      --card:   rgba(6,14,35,0.85);
+    }
+
+    html {
+      scroll-behavior: smooth;
+      overflow-x: hidden;
+    }
+
+    body {
+      background: var(--bg);
+      color: #e2e8f0;
+      font-family: 'Barlow', sans-serif;
+      font-weight: 300;
+      overflow-x: hidden;
+      min-width: 320px;
+    }
+
+    /* ── NOISE OVERLAY ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
+      opacity: 0.4;
+    }
+
+    /* ── GRID LINES ── */
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+      background-size: 60px 60px;
+    }
+
+    section, nav, footer { position: relative; z-index: 1; }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 48px;
+      background: linear-gradient(180deg, rgba(2,6,17,0.95) 0%, transparent 100%);
+      backdrop-filter: blur(4px);
+    }
+    .nav-logo {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 22px; letter-spacing: 0.12em;
+      color: white; text-decoration: none; flex-shrink: 0;
+    }
+    .nav-logo span { color: var(--red); }
+    .nav-logo-sub {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: lowercase;
+      margin-left: 4px;
+      position: relative;
+      top: 3px;
+      color: rgba(148,163,184,0.9);
+    }
+    .nav-links { display: flex; gap: 32px; align-items: center; }
+    .nav-links a {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--dim);
+      text-decoration: none; transition: color .2s; white-space: nowrap;
+    }
+    .nav-links a:hover { color: white; }
+    .nav-cta {
+      background: var(--red) !important; color: white !important;
+      padding: 7px 18px; border-radius: 4px;
+    }
+    .nav-cta:hover { opacity: 0.88 !important; color: white !important; }
+
+    /* ── HERO ── */
+    #hero {
+      min-height: 100vh;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center;
+      padding: 120px 24px 80px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-bg-video {
+      position: absolute; inset: 0; z-index: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    .hero-bg-overlay {
+      position: absolute; inset: 0; z-index: 0;
+      background: rgba(2,6,17,0.55);
+      pointer-events: none;
+    }
+    .hero-content { position: relative; z-index: 1; }
+    #hero::before {
+      content: '';
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -55%);
+      width: 900px; height: 600px;
+      background: radial-gradient(ellipse, rgba(59,130,246,0.10) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-tag {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.28em;
+      text-transform: uppercase; color: var(--red);
+      margin-bottom: 22px;
+      opacity: 0; animation: fadeUp .6s .1s forwards;
+    }
+    .hero-tag::before { content: '■  '; }
+    h1 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(86px, 16vw, 180px);
+      line-height: 0.9; letter-spacing: 0.04em; color: white;
+      text-shadow: 0 0 120px rgba(59,130,246,0.25);
+      opacity: 0; animation: fadeUp .7s .2s forwards;
+    }
+    h1 .h1-lower {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-weight: 600;
+      text-transform: none;
+      letter-spacing: 0.02em;
+    }
+    .hero-sub {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: clamp(11px, 1.6vw, 16px);
+      font-weight: 300; letter-spacing: 0.22em;
+      text-transform: uppercase; color: rgba(226,232,240,0.65);
+      margin-top: 18px; margin-bottom: 48px;
+      opacity: 0; animation: fadeUp .7s .35s forwards;
+      max-width: 700px;
+    }
+    .hero-buttons {
+      display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
+      opacity: 0; animation: fadeUp .7s .5s forwards;
+    }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: var(--red); color: white;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 14px; font-weight: 600; letter-spacing: 0.10em;
+      text-transform: uppercase; padding: 14px 32px; border-radius: 5px;
+      text-decoration: none; transition: transform .15s, opacity .15s;
+      white-space: nowrap;
+    }
+    .btn-primary:hover { transform: translateY(-2px); opacity: 0.9; }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: transparent; border: 1px solid rgba(255,255,255,0.22);
+      color: rgba(255,255,255,0.75);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 14px; font-weight: 600; letter-spacing: 0.10em;
+      text-transform: uppercase; padding: 14px 32px; border-radius: 5px;
+      text-decoration: none; transition: border-color .2s, color .2s, transform .15s;
+      white-space: nowrap;
+    }
+    .btn-secondary:hover { border-color: rgba(255,255,255,0.55); color: white; transform: translateY(-2px); }
+    .hero-stats {
+      display: flex; gap: 48px; margin-top: 72px;
+      opacity: 0; animation: fadeUp .7s .65s forwards;
+      flex-wrap: wrap; justify-content: center;
+    }
+    .stat { text-align: center; }
+    .stat-num { font-family: 'Bebas Neue', sans-serif; font-size: 36px; letter-spacing: 0.06em; color: white; line-height: 1; }
+    .stat-num span { color: var(--red); }
+    .stat-num .stat-anim { color: white; }
+    .stat-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-top: 4px; }
+
+    /* ── DIVIDER ── */
+    .divider { width: 100%; height: 1px; background: linear-gradient(90deg, transparent, rgba(59,130,246,0.3), transparent); }
+
+    /* ── SECTION ── */
+    .section { padding: 100px 48px; max-width: 1200px; margin: 0 auto; }
+    .section-tag { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.28em; text-transform: uppercase; color: var(--blue); margin-bottom: 14px; }
+    .section-tag::before { content: '— '; }
+    h2 { font-family: 'Bebas Neue', sans-serif; font-size: clamp(36px, 5vw, 72px); letter-spacing: 0.06em; line-height: 1; color: white; margin-bottom: 20px; }
+    .section-body { font-size: 16px; line-height: 1.75; color: rgba(226,232,240,0.65); max-width: 620px; }
+
+    /* ── FEATURES ── */
+    #features { background: rgba(6,14,35,0.4); }
+    .features-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      margin-top: 56px; border: 1px solid var(--dimmer);
+      border-radius: 8px; overflow: hidden;
+    }
+    .feature-card {
+      background: var(--card); padding: 36px 32px; position: relative;
+      transition: background .25s;
+      border-right: 1px solid rgba(255,255,255,0.06);
+    }
+    .feature-card:last-child { border-right: none; }
+    .feature-card:hover { background: rgba(12,26,65,0.9); }
+    .feature-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: var(--accent, var(--blue)); opacity: 0; transition: opacity .25s;
+    }
+    .feature-card:hover::before { opacity: 1; }
+    .feature-icon { font-size: 22px; margin-bottom: 16px; }
+    .feature-title { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: white; margin-bottom: 10px; }
+    .feature-desc { font-size: 14px; line-height: 1.7; color: rgba(226,232,240,0.55); }
+    .feature-tag { display: inline-block; margin-top: 16px; font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; padding: 3px 10px; border-radius: 3px; background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
+
+    /* ── ABOUT ── */
+    #about .inner { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center; }
+    .about-text .section-body { margin-bottom: 16px; }
+    .about-card { background: var(--card); border: 1px solid var(--dimmer); border-radius: 8px; padding: 32px; min-width: 0; }
+    .about-card-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--dim); margin-bottom: 20px; }
+    .index-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .index-row:last-of-type { border-bottom: none; }
+    .index-label { color: rgba(255,255,255,0.5); font-size: 11px; font-family: 'Barlow Condensed', sans-serif; text-transform: uppercase; letter-spacing: 0.06em; }
+    .index-val { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 0.06em; }
+
+    /* ── METHODOLOGY ── */
+    #methodology { background: rgba(6,14,35,0.4); position: relative; }
+    .method-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-top: 48px; }
+    .method-item { display: flex; gap: 20px; align-items: flex-start; padding: 24px; background: var(--card); border: 1px solid var(--dimmer); border-left: 2px solid var(--red); border-radius: 6px; }
+    .method-weight { font-family: 'Bebas Neue', sans-serif; font-size: 32px; line-height: 1; color: var(--red); flex-shrink: 0; width: 52px; }
+    .method-inner { flex: 1; min-width: 0; }
+    .method-name { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: white; margin-bottom: 8px; }
+    .method-bar-track { width: 100%; height: 3px; background: rgba(255,255,255,0.07); border-radius: 2px; margin-bottom: 8px; overflow: hidden; }
+    .method-bar-fill { height: 100%; background: var(--red); border-radius: 2px; transform: scaleX(0); transform-origin: left; transition: transform 1s ease 0.2s; }
+    .method-item.bar-visible .method-bar-fill { transform: scaleX(1); }
+    .method-desc { font-size: 13px; color: rgba(226,232,240,0.5); line-height: 1.6; }
+    .method-logo {
+      position: absolute;
+      top: 140px;
+      right: 260px;
+      width: 170px;
+      opacity: 0.92;
+    }
+
+    /* ── CTA / CONTACT ── */
+    #cta { text-align: center; padding: 120px 48px; position: relative; background: linear-gradient(rgba(2,6,17,0.72), rgba(2,6,17,0.72)), url(/cta-bg.png) center/cover no-repeat; }
+    #cta::before { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(239,68,68,0.08) 0%, transparent 70%); pointer-events: none; }
+    #cta h2 { margin-bottom: 16px; }
+    #cta .section-body { margin: 0 auto 40px; text-align: center; max-width: 520px; }
+    .contact-form {
+      margin: 36px auto 0;
+      max-width: 520px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      text-align: left;
+    }
+    .contact-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .contact-input,
+    .contact-textarea {
+      width: 100%;
+      border-radius: 4px;
+      border: 1px solid rgba(148,163,184,0.4);
+      background: rgba(15,23,42,0.9);
+      padding: 10px 12px;
+      color: #e2e8f0;
+      font-family: 'Barlow', sans-serif;
+      font-size: 14px;
+    }
+    .contact-input::placeholder,
+    .contact-textarea::placeholder {
+      color: rgba(148,163,184,0.8);
+    }
+    .contact-textarea {
+      min-height: 110px;
+      resize: vertical;
+    }
+    .contact-submit {
+      align-self: flex-start;
+      margin-top: 4px;
+    }
+
+    /* ── FOOTER ── */
+    footer { border-top: 1px solid var(--dimmer); padding: 32px 48px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    .footer-logo { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 0.12em; color: rgba(255,255,255,0.4); }
+    .footer-links { display: flex; gap: 32px; flex-wrap: wrap; }
+    .footer-links a { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); text-decoration: none; transition: color .2s; }
+    .footer-links a:hover { color: white; }
+    .footer-copy { font-size: 11px; color: rgba(255,255,255,0.22); font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.08em; }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .reveal { opacity: 0; transform: translateY(24px); transition: opacity .65s ease, transform .65s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 960px) {
+      .section { padding: 72px 32px; }
+      .features-grid { grid-template-columns: 1fr; }
+      .feature-card { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
+      .feature-card:last-child { border-bottom: none; }
+      #about .inner { grid-template-columns: 1fr; gap: 40px; }
+      .method-grid { grid-template-columns: 1fr; }
+      .method-logo { position: static; margin: 24px auto 0; display: block; }
+    }
+    @media (max-width: 640px) {
+      nav { padding: 16px 20px; }
+      .nav-links a:not(.nav-cta) { display: none; }
+      .section { padding: 64px 20px; }
+      #cta { padding: 80px 20px; }
+      footer { padding: 24px 20px; flex-direction: column; text-align: center; }
+      .footer-links { justify-content: center; }
+      .hero-buttons { flex-direction: column; align-items: center; }
+      .hero-stats { gap: 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">AEG<span>I</span>S<span class="nav-logo-sub">hq</span></a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#about">About</a>
+    <a href="#methodology">Methodology</a>
+    <a href="#contact-form">Contact</a>
+    <a href="/escalation.html" class="nav-cta">Launch Demo</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <video class="hero-bg-video" autoplay muted loop playsinline>
+    <source src="/landing-bg.mp4" type="video/mp4" />
+  </video>
+  <div class="hero-bg-overlay" aria-hidden="true"></div>
+  <div class="hero-content">
+    <div class="hero-tag">Palantir Valley Forge Grant Demo</div>
+    <h1>A<span class="h1-lower">egis</span>HQ</h1>
+    <p class="hero-sub">Advanced Early-Warning &amp; Geostrategic Intelligence System</p>
+    <div class="hero-buttons">
+    <a href="/escalation.html" class="btn-primary">Launch Demo &rarr;</a>
+      <a href="#features" class="btn-secondary">Learn More</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat"><div class="stat-num" data-end="50" data-suffix="+"><span class="stat-anim">0</span><span>+</span></div><div class="stat-label">Countries Tracked</div></div>
+      <div class="stat"><div class="stat-num" data-end="6"><span class="stat-anim">0</span></div><div class="stat-label">Index Components</div></div>
+      <div class="stat"><div class="stat-num" data-end="7" data-suffix="+"><span class="stat-anim">0</span><span>+</span></div><div class="stat-label">Years of Data</div></div>
+      <div class="stat"><div class="stat-num stat-num-ai">AI</div><div class="stat-label">Powered Analysis</div></div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="section">
+    <p class="section-tag reveal">Capabilities</p>
+    <h2 class="reveal">What AEGIS Does</h2>
+    <p class="section-body reveal">A global risk intelligence platform that tracks conflict escalation patterns, surfaces early-warning signals, and delivers AI-powered geopolitical analysis — before situations deteriorate.</p>
+    <div class="features-grid reveal">
+      <div class="feature-card" style="--accent:#ef4444;">
+        <div class="feature-icon">📊</div>
+        <div class="feature-title">Escalation Index</div>
+        <div class="feature-desc">A composite monthly index (0–100) built from six leading indicators — event frequency acceleration, explosions, strategic developments, civil unrest, and civilian targeting ratio. Separates intensity from acceleration to catch both sustained conflicts and newly escalating ones.</div>
+        <span class="feature-tag">Leading Indicators</span>
+      </div>
+      <div class="feature-card" style="--accent:#3b82f6;">
+        <div class="feature-icon">🌐</div>
+        <div class="feature-title">Interactive Map</div>
+        <div class="feature-desc">A 3D globe and 2D map visualizing conflict hotspots globally. Click any data point to see a full breakdown of event types — battles, explosions, strategic developments, protests, riots, and civilian violence — with country-level aggregates.</div>
+        <span class="feature-tag">Real-Time Data</span>
+      </div>
+      <div class="feature-card" style="--accent:#a78bfa;">
+        <div class="feature-icon">⚡</div>
+        <div class="feature-title">AI Analysis</div>
+        <div class="feature-desc">AI-generated country insights, trend interpretation, and comparative analysis — connecting index data to real-world events. Ask any question about a country's conflict profile and receive a specific, data-grounded answer.</div>
+        <span class="feature-tag">Groq · Llama 3.1</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ABOUT -->
+<section id="about">
+  <div class="section">
+    <div class="inner">
+      <div class="about-text">
+        <p class="section-tag reveal">Background</p>
+        <h2 class="reveal">Built by a Student.<br>Serious by Design.</h2>
+        <p class="section-body reveal">AEGIS was built independently by Alexander Armand-Blumberg, a high school student with a lifelong passion for defense policy, geopolitics, and security research. What started as a question — <em>what signals precede a conflict escalating?</em> — became a full-stack intelligence platform.</p>
+        <p class="section-body reveal" style="margin-top:16px;">The name comes from Greek mythology. The Aegis was the divine shield of Athena — not just armor, but an instrument of foreknowledge and strategic clarity. That's the mission: give decision-makers clarity before the crisis arrives.</p>
+        <div class="reveal" style="margin-top:32px; display:flex; gap:16px; flex-wrap:wrap;">
+          <a href="https://www.linkedin.com/in/alexanderbab/" target="_blank" class="btn-secondary" style="padding:10px 22px; font-size:12px;">LinkedIn</a>
+          <a href="https://github.com" target="_blank" class="btn-secondary" style="padding:10px 22px; font-size:12px;">GitHub</a>
+        </div>
+      </div>
+      <div class="about-card reveal">
+        <div class="about-card-label">Sample Index Output — Ukraine</div>
+        <div class="index-row"><span class="index-label">Status</span><span class="index-val" style="color:#ef4444;">ESCALATION FLAGGED</span></div>
+        <div class="index-row"><span class="index-label">Smoothed Index</span><span class="index-val" data-end="82.4" data-decimals="1"><span class="index-anim">0</span></span></div>
+        <div class="index-row"><span class="index-label">Trend</span><span class="index-val" style="color:#ef4444;">Rising ▲</span></div>
+        <div class="index-row"><span class="index-label">Peak Month</span><span class="index-val">Mar 2022</span></div>
+        <div class="index-row"><span class="index-label">Flagged Months</span><span class="index-val" data-end="24"><span class="index-anim">0</span></span></div>
+        <div class="index-row"><span class="index-label">Recorded Fatalities</span><span class="index-val" style="color:#ef4444;" data-end="41203"><span class="index-anim">0</span></span></div>
+        <div style="margin-top:18px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.07); font-size:11px; color:rgba(255,255,255,0.25); font-family:'Barlow Condensed',sans-serif; letter-spacing:0.06em;">
+          Source: <a href="https://acleddata.com" target="_blank" style="color:rgba(255,255,255,0.38); text-decoration:underline;">ACLED (acleddata.com)</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- METHODOLOGY -->
+<section id="methodology">
+  <div class="section">
+    <p class="section-tag reveal">How It Works</p>
+    <h2 class="reveal">The Index Methodology</h2>
+    <img src="/aegis-logo.png" alt="AEGIS logo" class="method-logo" />
+    <p class="section-body reveal">Six components, each normalized globally by percentile rank, combined into a single weighted score. The design separates <em>intensity</em> (how bad is it now?) from <em>acceleration</em> (is it getting worse?) — because both matter for different reasons.</p>
+    <div class="method-grid">
+      <div class="method-item reveal">
+        <div class="method-weight" data-end="30"><span class="method-anim">0</span>%</div>
+        <div class="method-inner">
+          <div class="method-name">Raw Conflict Intensity</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:30%;"></div></div>
+          <div class="method-desc">Battles + explosions in absolute terms. Ensures sustained wars like Ukraine score high even with flat month-over-month change.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight" data-end="20"><span class="method-anim">0</span>%</div>
+        <div class="method-inner">
+          <div class="method-name">Event Frequency Acceleration</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:20%;"></div></div>
+          <div class="method-desc">Month-over-month % change in total events. Catches countries entering or re-escalating conflict before intensity peaks.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight" data-end="20"><span class="method-anim">0</span>%</div>
+        <div class="method-inner">
+          <div class="method-name">Explosions / Remote Violence</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:20%;"></div></div>
+          <div class="method-desc">Shelling, airstrikes, drone strikes, IEDs. Precede ground battle fatalities — a leading signal of escalating military operations.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight" data-end="15"><span class="method-anim">0</span>%</div>
+        <div class="method-inner">
+          <div class="method-name">Strategic Developments</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:15%;"></div></div>
+          <div class="method-desc">Troop movements, HQ changes, ceasefire collapses, territorial control shifts. Signal intent and capability changes.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight" data-end="10"><span class="method-anim">0</span>%</div>
+        <div class="method-inner">
+          <div class="method-name">Civil Unrest</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:10%;"></div></div>
+          <div class="method-desc">Protests + riots. Social instability often precedes armed conflict escalation — a leading indicator of political breakdown.</div>
+        </div>
+      </div>
+      <div class="method-item reveal">
+        <div class="method-weight" data-end="5"><span class="method-anim">0</span>%</div>
+        <div class="method-inner">
+          <div class="method-name">Civilian Targeting Ratio</div>
+          <div class="method-bar-track"><div class="method-bar-fill" style="width:5%;"></div></div>
+          <div class="method-desc">Violence against civilians as a proportion of total violent events. A shift toward civilians signals strategic deterioration.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- CTA -->
+<section id="cta">
+  <div class="section" style="text-align:center;">
+    <p class="section-tag reveal" style="display:flex; justify-content:center;">Get Started</p>
+    <h2 class="reveal">See It Before It Happens.</h2>
+    <p class="section-body reveal">AEGIS is live and free to use. Track any country's escalation index, explore the global conflict map, and generate AI-powered intelligence briefings in seconds.</p>
+    <div class="reveal" style="display:flex; gap:16px; flex-wrap:wrap; justify-content:center; margin-top:0;">
+      <a href="/escalation.html" class="btn-primary">Launch AEGIS &rarr;</a>
+      <a href="#contact-form" class="btn-secondary">Contact</a>
+    </div>
+    <form id="contact-form" class="contact-form" action="https://formsubmit.co/alex.armandblumberg@gmail.com" method="POST">
+      <div class="contact-row">
+        <input class="contact-input" type="text" name="name" placeholder="Name" required />
+        <input class="contact-input" type="email" name="email" placeholder="Email" required />
+      </div>
+      <textarea class="contact-textarea" name="message" placeholder="How can AEGIS help you?" required></textarea>
+      <button type="submit" class="btn-primary contact-submit">Send Message &rarr;</button>
+      <input type="hidden" name="_captcha" value="false" />
+    </form>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-logo">AEGIS</div>
+  <div class="footer-links">
+    <a href="/escalation.html">App</a>
+    <a href="https://www.linkedin.com/in/alexanderbab/" target="_blank">LinkedIn</a>
+    <a href="https://github.com" target="_blank">GitHub</a>
+    <a href="https://acleddata.com" target="_blank">Data: ACLED</a>
+  </div>
+  <div class="footer-copy">&copy; 2026 Alexander Armand-Blumberg &middot; AEGIS</div>
+</footer>
+
+<script>
+  // ── Hero stat count-up animation ────────────────────────────────
+  (function() {
+    var duration = 2800;
+    var delay = 700;
+    var startTime = null;
+    function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
+    function tick(now) {
+      if (!startTime) startTime = now;
+      var elapsed = now - startTime;
+      if (elapsed < delay) { requestAnimationFrame(tick); return; }
+      var progress = Math.min((elapsed - delay) / duration, 1);
+      var t = easeOutQuart(progress);
+      document.querySelectorAll('.hero-stats .stat-num[data-end]').forEach(function(el) {
+        var end = parseInt(el.getAttribute('data-end'), 10);
+        var current = Math.round(t * end);
+        var span = el.querySelector('.stat-anim');
+        if (span) span.textContent = current;
+      });
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  })();
+
+  // ── Scroll reveal ──────────────────────────────────────────────
+  const revealObs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) e.target.classList.add('visible');
+      else e.target.classList.remove('visible');
+    });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach(el => revealObs.observe(el));
+
+  // ── Method bar animation ───────────────────────────────────────
+  const barObs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) e.target.classList.add('bar-visible');
+      else e.target.classList.remove('bar-visible');
+    });
+  }, { threshold: 0.3 });
+  document.querySelectorAll('.method-item').forEach(el => barObs.observe(el));
+
+  // ── Index card count-up (About section) ─────────────────────────
+  function animateIndexCard() {
+    var duration = 2800;
+    var startTime = null;
+    function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
+    function formatVal(end, current, decimals) {
+      if (decimals === 1) return (current).toFixed(1);
+      var n = Math.round(current);
+      return n >= 1000 ? n.toLocaleString() : String(n);
+    }
+    function tick(now) {
+      if (!startTime) startTime = now;
+      var elapsed = now - startTime;
+      var progress = Math.min(elapsed / duration, 1);
+      var t = easeOutQuart(progress);
+      document.querySelectorAll('.about-card .index-val[data-end]').forEach(function(el) {
+        var end = parseFloat(el.getAttribute('data-end'), 10);
+        var decimals = el.getAttribute('data-decimals');
+        var current = decimals === '1' ? t * end : Math.round(t * end);
+        var span = el.querySelector('.index-anim');
+        if (span) span.textContent = formatVal(end, current, decimals);
+      });
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  var indexCardObs = new IntersectionObserver(function(entries) {
+    entries.forEach(function(e) {
+      if (e.isIntersecting) {
+        animateIndexCard();
+      } else {
+        document.querySelectorAll('.about-card .index-val[data-end]').forEach(function(el) {
+          var span = el.querySelector('.index-anim');
+          if (span) span.textContent = '0';
+        });
+      }
+    });
+  }, { threshold: 0.2 });
+  var aboutCard = document.querySelector('.about-card');
+  if (aboutCard) indexCardObs.observe(aboutCard);
+
+  // ── Methodology percentage count-up ───────────────────────────
+  function animateMethodologyPct() {
+    var duration = 2800;
+    var startTime = null;
+    function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
+    function tick(now) {
+      if (!startTime) startTime = now;
+      var elapsed = now - startTime;
+      var progress = Math.min(elapsed / duration, 1);
+      var t = easeOutQuart(progress);
+      document.querySelectorAll('.method-weight[data-end]').forEach(function(el) {
+        var end = parseInt(el.getAttribute('data-end'), 10);
+        var current = Math.round(t * end);
+        var span = el.querySelector('.method-anim');
+        if (span) span.textContent = current;
+      });
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  var methodSectionObs = new IntersectionObserver(function(entries) {
+    entries.forEach(function(e) {
+      if (e.isIntersecting) {
+        animateMethodologyPct();
+      } else {
+        document.querySelectorAll('.method-weight[data-end]').forEach(function(el) {
+          var span = el.querySelector('.method-anim');
+          if (span) span.textContent = '0';
+        });
+      }
+    });
+  }, { threshold: 0.15 });
+  var methodSection = document.querySelector('#methodology');
+  if (methodSection) methodSectionObs.observe(methodSection);
+
+  // ── Smooth scroll with nav offset ─────────────────────────────
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+      const id = a.getAttribute('href');
+      if (id === '#') return;
+      const target = document.querySelector(id);
+      if (target) {
+        e.preventDefault();
+        const top = target.getBoundingClientRect().top + window.scrollY - 72;
+        window.scrollTo({ top, behavior: 'smooth' });
+      }
+    });
+  });
+</script>
+
+</body>
+</html>

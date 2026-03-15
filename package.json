@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "recover-from-vercel": "node scripts/recover-from-vercel.mjs"
   },
   "dependencies": {
     "leaflet": "^1.9.4",
