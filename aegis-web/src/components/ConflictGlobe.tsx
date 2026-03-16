@@ -1,141 +1,155 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import type { MapPoint } from "@/app/api/map/route";
-import { CATEGORY_COLORS } from "./ConflictMap";
 import type { GlobeMethods } from "react-globe.gl";
+import type { IntelLayerKey, IntelPoint } from "@/lib/intel/types";
+import { LAYER_COLORS } from "@/lib/intel/colors";
 
 const Globe = dynamic(() => import("react-globe.gl"), { ssr: false });
 
-type GlobePoint = {
-  lat: number;
-  lng: number;
+type GlobePoint = IntelPoint & {
   color: string;
-  country: string;
-  size: number;
+  radius: number;
 };
 
-const DEFAULT_POV = { lat: 20, lng: 10, altitude: 2.2 };
-
 type ConflictGlobeProps = {
-  points: MapPoint[];
-  containerRef?: React.RefObject<HTMLDivElement | null>;
+  layers: Record<IntelLayerKey, IntelPoint[]>;
+  activeLayers: Record<IntelLayerKey, boolean>;
   recenterRef?: React.MutableRefObject<(() => void) | null>;
   onReady?: () => void;
   onError?: (message: string) => void;
-  onCountrySelect?: (country: string) => void;
+  onPointSelect?: (point: IntelPoint) => void;
+  autoRotate?: boolean;
 };
 
-function totalEvents(p: MapPoint): number {
-  return (
-    (p.battles ?? 0) +
-    (p.explosions_remote_violence ?? 0) +
-    (p.violence_against_civilians ?? 0) +
-    (p.strategic_developments ?? 0) +
-    (p.protests ?? 0) +
-    (p.riots ?? 0)
-  );
+const DEFAULT_POV = { lat: 20, lng: 10, altitude: 2.05 };
+
+function asRgbCss([r, g, b]: [number, number, number], alpha = 0.95): string {
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 export default function ConflictGlobe({
-  points,
-  containerRef,
+  layers,
+  activeLayers,
   recenterRef,
   onReady,
   onError,
-  onCountrySelect,
+  onPointSelect,
+  autoRotate = false,
 }: ConflictGlobeProps) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-
-  const globePoints = useMemo<GlobePoint[]>(() => {
-    const maxEvents = Math.max(1, ...points.map(totalEvents));
-    return points
-      .filter((p) => Math.abs(p.lat) >= 0.5 || Math.abs(p.lon) >= 0.5)
-      .map((p) => ({
-        lat: p.lat,
-        lng: p.lon,
-        color: CATEGORY_COLORS[p.dominant_category] ?? "rgba(255,255,255,0.6)",
-        country: (p.country ?? "").trim() || "Unknown",
-        size: 0.15 + 0.25 * (totalEvents(p) / maxEvents),
-      }));
-  }, [points]);
+  const [size, setSize] = useState({ width: 1000, height: 700 });
 
   useEffect(() => {
-    onReady?.();
-  }, [onReady]);
-
-  useEffect(() => {
-    if (!containerRef?.current) return;
-    const el = containerRef.current;
     const updateSize = () => {
-      if (el) {
-        setDimensions({ width: el.clientWidth, height: el.clientHeight });
-      }
+      setSize({
+        width: Math.max(400, window.innerWidth - 120),
+        height: Math.max(380, window.innerHeight - 220),
+      });
     };
     updateSize();
-    const ro = new ResizeObserver(updateSize);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [containerRef]);
+    window.addEventListener("resize", updateSize);
+    return () => window.removeEventListener("resize", updateSize);
+  }, []);
 
   useEffect(() => {
     if (!recenterRef) return;
-    recenterRef.current = () => {
-      globeRef.current?.pointOfView(DEFAULT_POV, 1000);
-    };
+    recenterRef.current = () => globeRef.current?.pointOfView(DEFAULT_POV, 900);
     return () => {
       recenterRef.current = null;
     };
   }, [recenterRef]);
 
-  const handlePointClick = useCallback(
-    (point: GlobePoint) => {
-      onCountrySelect?.(point.country);
-    },
-    [onCountrySelect]
-  );
+  const pointsData = useMemo<GlobePoint[]>(() => {
+    const out: GlobePoint[] = [];
+    for (const key of Object.keys(activeLayers) as IntelLayerKey[]) {
+      if (!activeLayers[key]) continue;
+      const color = asRgbCss(LAYER_COLORS[key]);
+      for (const p of layers[key]) {
+        const scaled = Math.max(0.08, Math.min(0.36, (p.magnitude ?? 1) / 80));
+        out.push({
+          ...p,
+          color,
+          radius: key === "hotspots" ? scaled * 1.35 : scaled,
+        });
+      }
+    }
+    return out;
+  }, [activeLayers, layers]);
 
-  const handleGlobeReady = useCallback(() => {
+  useEffect(() => {
     onReady?.();
   }, [onReady]);
 
-  const mapStyle = {
-    position: "absolute" as const,
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    zIndex: 1,
-    minHeight: 400,
-  };
+  useEffect(() => {
+    const controls = globeRef.current?.controls?.();
+    if (!controls) return;
+    controls.autoRotate = autoRotate;
+    controls.autoRotateSpeed = 0.45;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+  }, [autoRotate]);
 
   return (
-    <div style={mapStyle}>
+    <div style={{ position: "absolute", inset: 0 }}>
       <Globe
         ref={globeRef as React.MutableRefObject<GlobeMethods | undefined>}
-        globeImageUrl={undefined}
-        bumpImageUrl={undefined}
-        backgroundImageUrl={undefined}
+        width={size.width}
+        height={size.height}
+        globeImageUrl="https://unpkg.com/three-globe/example/img/earth-dark.jpg"
+        bumpImageUrl="https://unpkg.com/three-globe/example/img/earth-topology.png"
+        backgroundImageUrl="https://unpkg.com/three-globe/example/img/night-sky.png"
         backgroundColor="#020617"
-        showGlobe={true}
         showAtmosphere={true}
-        atmosphereColor="#1a4aaa"
-        atmosphereAltitude={0.08}
-        pointsData={globePoints}
+        atmosphereColor="#4b7fd1"
+        atmosphereAltitude={0.11}
+        pointsData={pointsData}
         pointLat="lat"
-        pointLng="lng"
+        pointLng="lon"
         pointColor="color"
-        pointAltitude={0.014}
-        pointRadius="size"
-        pointsMerge={false}
-        onPointClick={(p, _event, _coords) =>
-          handlePointClick(p as GlobePoint)
-        }
-        onGlobeReady={handleGlobeReady}
-        width={dimensions.width}
-        height={dimensions.height}
+        pointRadius="radius"
+        pointAltitude={0.008}
+        pointLabel={(p) => {
+          const d = p as GlobePoint;
+          return `<div style='background:rgba(2,8,20,0.92);padding:8px 10px;border:1px solid rgba(96,165,250,0.35);border-radius:6px;'>
+            <div style='font-weight:700;color:white;font-size:12px;'>${d.title}</div>
+            <div style='color:rgba(255,255,255,0.7);font-size:11px;margin-top:2px;'>${d.layer.toUpperCase()} · ${d.source}</div>
+          </div>`;
+        }}
+        onPointClick={(obj) => onPointSelect?.(obj as IntelPoint)}
+        onGlobeReady={() => {
+          globeRef.current?.pointOfView(DEFAULT_POV, 0);
+          onReady?.();
+        }}
+        onZoom={() => {
+          const controls = globeRef.current?.controls?.();
+          if (controls) {
+            controls.maxDistance = 430;
+            controls.minDistance = 90;
+          }
+        }}
       />
+      {pointsData.length === 0 && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: 80,
+            transform: "translateX(-50%)",
+            zIndex: 20,
+            padding: "8px 12px",
+            borderRadius: 6,
+            border: "1px solid rgba(96,165,250,0.3)",
+            background: "rgba(2,8,20,0.8)",
+            color: "rgba(226,232,240,0.85)",
+            fontSize: 12,
+            letterSpacing: "0.04em",
+          }}
+        >
+          No active points for selected layers and time range.
+        </div>
+      )}
     </div>
   );
 }

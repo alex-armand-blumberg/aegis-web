@@ -3,7 +3,7 @@
  * Format: [lat_min, lat_max, lon_min, lon_max, center_lat, center_lon]
  * Leaflet bounds = [[lat_min, lon_min], [lat_max, lon_max]]
  */
-const COUNTRY_BBOX: Record<
+export const COUNTRY_BBOX: Record<
   string,
   [number, number, number, number, number, number]
 > = {
@@ -104,4 +104,12 @@ export function getCountryBounds(country: string): LatLngBoundsTuple | null {
     [latMin, lonMin],
     [latMax, lonMax],
   ];
+}
+
+export function getCountryCenter(
+  country: string
+): { lat: number; lon: number } | null {
+  const raw = COUNTRY_BBOX[country];
+  if (!raw) return null;
+  return { lat: raw[4], lon: raw[5] };
 }

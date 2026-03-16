@@ -9,12 +9,18 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@deck.gl/core": "^9.2.11",
+    "@deck.gl/layers": "^9.2.11",
+    "@deck.gl/mapbox": "^9.2.11",
+    "@deck.gl/react": "^9.2.11",
     "leaflet": "^1.9.4",
+    "maplibre-gl": "^5.20.1",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-globe.gl": "^2.37.0",
     "react-leaflet": "^5.0.0",
+    "react-map-gl": "^8.1.0",
     "recharts": "^3.8.0",
     "resend": "^6.9.3",
     "rss-parser": "^3.13.0",

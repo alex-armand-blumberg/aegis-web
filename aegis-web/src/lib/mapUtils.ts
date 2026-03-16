@@ -1,97 +1,68 @@
-import type { MapPoint } from "@/app/api/map/route";
+import type { IntelPoint } from "@/lib/intel/types";
 import { getCountryBounds, type LatLngBoundsTuple } from "./countryBounds";
 
 export type CountrySummary = {
-  fatalities: number;
-  battles: number;
-  explosions: number;
-  civ_violence: number;
-  strategic: number;
-  protests: number;
-  riots: number;
-  metric_total: number;
+  totalSignals: number;
+  conflictSignals: number;
+  flightSignals: number;
+  vesselSignals: number;
+  newsSignals: number;
+  hotspotSignals: number;
+  severityScore: number;
 };
 
-/** Aggregate points by country (sum of event counts) for the info panel. */
+/** Aggregate generic intelligence points by country for side-panels/ranking. */
 export function aggregatePointsByCountry(
-  points: MapPoint[]
+  points: IntelPoint[]
 ): Record<string, CountrySummary> {
-  const byCountry: Record<
-    string,
-    {
-      fatalities: number;
-      battles: number;
-      explosions_remote_violence: number;
-      violence_against_civilians: number;
-      strategic_developments: number;
-      protests: number;
-      riots: number;
-    }
-  > = {};
+  const out: Record<string, CountrySummary> = {};
 
   for (const p of points) {
-    const c = p.country?.trim() || "Unknown";
-    if (!byCountry[c]) {
-      byCountry[c] = {
-        fatalities: 0,
-        battles: 0,
-        explosions_remote_violence: 0,
-        violence_against_civilians: 0,
-        strategic_developments: 0,
-        protests: 0,
-        riots: 0,
+    const country = p.country?.trim() || "Unknown";
+    if (!out[country]) {
+      out[country] = {
+        totalSignals: 0,
+        conflictSignals: 0,
+        flightSignals: 0,
+        vesselSignals: 0,
+        newsSignals: 0,
+        hotspotSignals: 0,
+        severityScore: 0,
       };
     }
-    byCountry[c].fatalities += Number(p.fatalities) || 0;
-    byCountry[c].battles += Number(p.battles) || 0;
-    byCountry[c].explosions_remote_violence +=
-      Number(p.explosions_remote_violence) || 0;
-    byCountry[c].violence_against_civilians +=
-      Number(p.violence_against_civilians) || 0;
-    byCountry[c].strategic_developments +=
-      Number(p.strategic_developments) || 0;
-    byCountry[c].protests += Number(p.protests) || 0;
-    byCountry[c].riots += Number(p.riots) || 0;
+    out[country].totalSignals += 1;
+    if (p.layer === "conflicts") out[country].conflictSignals += 1;
+    if (p.layer === "flights") out[country].flightSignals += 1;
+    if (p.layer === "vessels") out[country].vesselSignals += 1;
+    if (p.layer === "news") out[country].newsSignals += 1;
+    if (p.layer === "hotspots") out[country].hotspotSignals += 1;
+
+    const sev = p.severity;
+    out[country].severityScore +=
+      sev === "critical" ? 4 : sev === "high" ? 3 : sev === "medium" ? 2 : 1;
   }
 
-  const result: Record<string, CountrySummary> = {};
-  for (const [country, agg] of Object.entries(byCountry)) {
-    const metric_total =
-      agg.battles +
-      agg.explosions_remote_violence +
-      agg.violence_against_civilians +
-      agg.strategic_developments +
-      agg.protests +
-      agg.riots;
-    result[country] = {
-      fatalities: agg.fatalities,
-      battles: agg.battles,
-      explosions: agg.explosions_remote_violence,
-      civ_violence: agg.violence_against_civilians,
-      strategic: agg.strategic_developments,
-      protests: agg.protests,
-      riots: agg.riots,
-      metric_total,
-    };
-  }
-  return result;
+  return out;
 }
 
-/** Get bounds for a country: use hardcoded bbox if available, else compute from points. */
+/** Get bounds for a country: hardcoded bbox if available, else computed from points. */
 export function getBoundsForCountry(
   country: string,
-  points: MapPoint[]
+  points: IntelPoint[]
 ): LatLngBoundsTuple | null {
   const hardcoded = getCountryBounds(country);
   if (hardcoded) return hardcoded;
+
   const forCountry = points.filter(
     (p) => (p.country?.trim() || "") === country.trim()
   );
-  if (forCountry.length === 0) return null;
-  let minLat = 90,
-    maxLat = -90,
-    minLon = 180,
-    maxLon = -180;
+  if (!forCountry.length) return null;
+
+  let minLat = 90;
+  let maxLat = -90;
+  let minLon = 180;
+  let maxLon = -180;
+
   for (const p of forCountry) {
     if (p.lat >= -90 && p.lat <= 90 && p.lon >= -180 && p.lon <= 180) {
       minLat = Math.min(minLat, p.lat);
@@ -100,8 +71,10 @@ export function getBoundsForCountry(
       maxLon = Math.max(maxLon, p.lon);
     }
   }
+
   if (minLat > maxLat || minLon > maxLon) return null;
-  const pad = Math.max(0.5, Math.max(maxLat - minLat, maxLon - minLon) * 0.15);
+
+  const pad = Math.max(0.5, Math.max(maxLat - minLat, maxLon - minLon) * 0.2);
   return [
     [minLat - pad, minLon - pad],
     [maxLat + pad, maxLon + pad],

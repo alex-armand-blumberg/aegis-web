@@ -1,202 +1,190 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
-import type { MapPoint } from "@/app/api/map/route";
-import "leaflet/dist/leaflet.css";
+import { useEffect, useMemo, useState } from "react";
+import DeckGL from "@deck.gl/react";
+import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import Map, { NavigationControl } from "react-map-gl/maplibre";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import type { IntelLayerKey, IntelPoint } from "@/lib/intel/types";
+import { LAYER_COLORS } from "@/lib/intel/colors";
 
-const CATEGORY_COLORS: Record<string, string> = {
-  Battles: "#ef4444",
-  "Explosions / Remote Violence": "#f59e0b",
-  "Violence Against Civilians": "#fde047",
-  "Strategic Developments": "#60a5fa",
-  Protests: "#a78bfa",
-  Riots: "#f472b6",
-};
-
-const DEFAULT_CENTER: [number, number] = [20, 10];
-const DEFAULT_ZOOM = 2;
-
-function popupContent(p: MapPoint): string {
-  const title = [p.admin1, p.country].filter(Boolean).join(", ") || "Unknown";
-  const month = p.event_month
-    ? `<div style="color:rgba(255,255,255,0.5);font-size:11px;margin-bottom:8px;">${p.event_month}</div>`
-    : "";
-  return `
-    <div class="map-popup-content">
-      <div class="map-popup-title">${title}</div>
-      ${month}
-      <div class="map-popup-row"><span>Fatalities</span><strong>${Number(p.fatalities ?? 0).toLocaleString()}</strong></div>
-      <div class="map-popup-row"><span>Battles</span><strong>${Number(p.battles ?? 0).toLocaleString()}</strong></div>
-      <div class="map-popup-row"><span>Explosions / Remote</span><strong>${Number(p.explosions_remote_violence ?? 0).toLocaleString()}</strong></div>
-      <div class="map-popup-row"><span>Strategic developments</span><strong>${Number(p.strategic_developments ?? 0).toLocaleString()}</strong></div>
-      <div class="map-popup-row"><span>Violence vs civilians</span><strong>${Number(p.violence_against_civilians ?? 0).toLocaleString()}</strong></div>
-      <div class="map-popup-row"><span>Protests</span><strong>${Number(p.protests ?? 0).toLocaleString()}</strong></div>
-      <div class="map-popup-row"><span>Riots</span><strong>${Number(p.riots ?? 0).toLocaleString()}</strong></div>
-    </div>
-  `;
-}
-
-export type CountryBoundsMap = Record<string, [[number, number], [number, number]]>;
-
-type ConflictMapProps = {
-  points: MapPoint[];
-  mode: "2d" | "3d";
-  containerRef?: React.RefObject<HTMLDivElement | null>;
+export type ConflictMapProps = {
+  layers: Record<IntelLayerKey, IntelPoint[]>;
+  activeLayers: Record<IntelLayerKey, boolean>;
   recenterRef?: React.MutableRefObject<(() => void) | null>;
   onReady?: () => void;
   onError?: (message: string) => void;
-  /** Called when user clicks a point; pass country name to zoom and show panel. */
-  onCountrySelect?: (country: string) => void;
-  /** Bounds per country for flyToBounds: [[south, west], [north, east]]. */
-  countryBoundsMap?: CountryBoundsMap;
+  onPointSelect?: (point: IntelPoint) => void;
 };
 
-function RecenterControl({
-  recenterRef,
-}: {
-  recenterRef?: React.MutableRefObject<(() => void) | null>;
-}) {
-  const map = useMap();
-  useEffect(() => {
-    if (!recenterRef) return;
-    recenterRef.current = () => {
-      map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
-    };
-    return () => {
-      recenterRef.current = null;
-    };
-  }, [map, recenterRef]);
-  return null;
-}
+const DEFAULT_VIEW_STATE = {
+  longitude: 0,
+  latitude: 20,
+  zoom: 1.65,
+  pitch: 25,
+  bearing: 0,
+};
 
-function totalEvents(p: MapPoint): number {
-  return (
-    (p.battles ?? 0) +
-    (p.explosions_remote_violence ?? 0) +
-    (p.violence_against_civilians ?? 0) +
-    (p.strategic_developments ?? 0) +
-    (p.protests ?? 0) +
-    (p.riots ?? 0)
-  );
-}
+const BASEMAP_STYLE =
+  "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
-function MapContent({
-  points,
-  recenterRef,
-  onReady,
-  onCountrySelect,
-  countryBoundsMap,
-}: {
-  points: MapPoint[];
-  recenterRef?: React.MutableRefObject<(() => void) | null>;
-  onReady?: () => void;
-  onCountrySelect?: (country: string) => void;
-  countryBoundsMap?: CountryBoundsMap;
-}) {
-  const map = useMap();
-  useEffect(() => {
-    onReady?.();
-  }, [onReady]);
-
-  const maxEvents = Math.max(1, ...points.map(totalEvents));
-
-  return (
-    <>
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-      />
-      <RecenterControl recenterRef={recenterRef} />
-      {points.map((p, i) => {
-        const color = CATEGORY_COLORS[p.dominant_category] ?? "rgba(255,255,255,0.6)";
-        const events = totalEvents(p);
-        const radius = Math.min(12, 4 + (events / maxEvents) * 8);
-        const country = (p.country ?? "").trim() || "Unknown";
-        const handleClick = () => {
-          onCountrySelect?.(country);
-          const bounds = countryBoundsMap?.[country];
-          if (bounds && map) {
-            map.flyToBounds(bounds, { duration: 1, maxZoom: 9 });
-          }
-        };
-        return (
-          <CircleMarker
-            key={`${p.lon}-${p.lat}-${i}`}
-            center={[p.lat, p.lon]}
-            radius={radius}
-            pathOptions={{
-              fillColor: color,
-              color: "rgba(255,255,255,0.4)",
-              weight: 1,
-              fillOpacity: 0.85,
-            }}
-            eventHandlers={{ click: handleClick }}
-          >
-            <Popup>
-              <div dangerouslySetInnerHTML={{ __html: popupContent(p) }} />
-            </Popup>
-          </CircleMarker>
-        );
-      })}
-    </>
-  );
+function severityRadiusMultiplier(severity: IntelPoint["severity"]): number {
+  switch (severity) {
+    case "critical":
+      return 1.5;
+    case "high":
+      return 1.2;
+    case "medium":
+      return 1;
+    default:
+      return 0.8;
+  }
 }
 
 export default function ConflictMap({
-  points,
-  mode,
-  containerRef: externalContainerRef,
+  layers,
+  activeLayers,
   recenterRef,
   onReady,
   onError,
-  onCountrySelect,
-  countryBoundsMap,
+  onPointSelect,
 }: ConflictMapProps) {
-  const internalRef = useRef<HTMLDivElement>(null);
+  const [viewState, setViewState] = useState(DEFAULT_VIEW_STATE);
 
   useEffect(() => {
     onReady?.();
   }, [onReady]);
 
-  const mapStyle = {
-    position: "absolute" as const,
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    zIndex: 1,
-    minHeight: 400,
-  };
+  useEffect(() => {
+    if (!recenterRef) return;
+    recenterRef.current = () => setViewState(DEFAULT_VIEW_STATE);
+    return () => {
+      recenterRef.current = null;
+    };
+  }, [recenterRef]);
 
-  const map = (
-    <MapContainer
-      center={DEFAULT_CENTER}
-      zoom={DEFAULT_ZOOM}
-      style={mapStyle}
-      scrollWheelZoom
-    >
-      <MapContent
-        points={points}
-        recenterRef={recenterRef}
-        onReady={onReady}
-        onCountrySelect={onCountrySelect}
-        countryBoundsMap={countryBoundsMap}
-      />
-    </MapContainer>
-  );
+  const visiblePoints = useMemo(() => {
+    const out: IntelPoint[] = [];
+    for (const [layer, enabled] of Object.entries(activeLayers) as [
+      IntelLayerKey,
+      boolean,
+    ][]) {
+      if (!enabled) continue;
+      out.push(...layers[layer]);
+    }
+    return out;
+  }, [activeLayers, layers]);
 
-  if (externalContainerRef) {
-    return <div style={mapStyle}>{map}</div>;
-  }
+  const deckLayers = useMemo(() => {
+    const built: any[] = (Object.keys(activeLayers) as IntelLayerKey[])
+      .filter((k) => activeLayers[k])
+      .map((layerKey) => {
+        const color = LAYER_COLORS[layerKey];
+        const layerPoints = layers[layerKey] || [];
+
+        return new ScatterplotLayer<IntelPoint>({
+          id: `scatter-${layerKey}`,
+          data: layerPoints,
+          getPosition: (d) => [d.lon, d.lat],
+          getRadius: (d) => {
+            const base =
+              layerKey === "hotspots" ? 50000 : layerKey === "conflicts" ? 32000 : 22000;
+            const magnitude = Math.max(0.6, Math.min(2, (d.magnitude ?? 1) / 20));
+            return base * magnitude * severityRadiusMultiplier(d.severity);
+          },
+          getFillColor: [...color, layerKey === "hotspots" ? 210 : 175],
+          getLineColor: [255, 255, 255, 120],
+          lineWidthMinPixels: 1,
+          stroked: true,
+          filled: true,
+          pickable: true,
+          radiusMinPixels: layerKey === "hotspots" ? 5 : 3,
+          radiusMaxPixels: layerKey === "hotspots" ? 26 : 15,
+          onClick: ({ object }) => {
+            if (object) onPointSelect?.(object);
+          },
+        });
+      });
+
+    if (activeLayers.hotspots) {
+      built.push(
+        new TextLayer<IntelPoint>({
+          id: "hotspot-labels",
+          data: layers.hotspots,
+          getPosition: (d) => [d.lon, d.lat],
+          getText: (d) => (d.country ? d.country.toUpperCase() : "HOTSPOT"),
+          getColor: [255, 255, 255, 220],
+          getSize: 12,
+          sizeUnits: "pixels",
+          sizeMinPixels: 10,
+          sizeMaxPixels: 14,
+          getPixelOffset: [0, -15],
+          getTextAnchor: "middle",
+          getAlignmentBaseline: "bottom",
+          billboard: true,
+          pickable: false,
+        })
+      );
+    }
+
+    return built;
+  }, [activeLayers, layers, onPointSelect]);
+
   return (
-    <div
-      ref={internalRef}
-      className="w-full h-full"
-      style={{ minHeight: 400, position: "relative" }}
+    <DeckGL
+      layers={deckLayers}
+      initialViewState={DEFAULT_VIEW_STATE}
+      controller={true}
+      viewState={viewState}
+      onViewStateChange={({ viewState: next }) =>
+        setViewState({
+          longitude: (next as any).longitude,
+          latitude: (next as any).latitude,
+          zoom: (next as any).zoom,
+          pitch: (next as any).pitch,
+          bearing: (next as any).bearing,
+        })
+      }
+      getCursor={({ isHovering }) => (isHovering ? "pointer" : "grab")}
     >
-      {map}
-    </div>
+      <Map
+        mapLib={maplibregl}
+        mapStyle={BASEMAP_STYLE}
+        attributionControl={false}
+        reuseMaps
+        onLoad={() => onReady?.()}
+        onError={(e) => {
+          const msg =
+            typeof (e as { error?: { message?: string } }).error?.message ===
+            "string"
+              ? (e as { error: { message: string } }).error.message
+              : "Map error";
+          onError?.(msg);
+        }}
+      >
+        <NavigationControl position="top-left" visualizePitch={true} />
+      </Map>
+      {visiblePoints.length === 0 && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: 90,
+            transform: "translateX(-50%)",
+            zIndex: 20,
+            padding: "8px 12px",
+            borderRadius: 6,
+            border: "1px solid rgba(96,165,250,0.3)",
+            background: "rgba(2,8,20,0.8)",
+            color: "rgba(226,232,240,0.85)",
+            fontSize: 12,
+            letterSpacing: "0.04em",
+          }}
+        >
+          No active points for selected layers and time range.
+        </div>
+      )}
+    </DeckGL>
   );
 }
-
-export { CATEGORY_COLORS };
