@@ -99,16 +99,18 @@ export default function ConflictMap({
 
   const deckLayers = useMemo(() => {
     const countryScore = new globalThis.Map<string, number>();
-    for (const p of layers.conflicts) {
+    const scoringSignals = [...layers.conflicts, ...layers.liveStrikes, ...layers.news];
+    for (const p of scoringSignals) {
       if (!p.country) continue;
       const normalized = normalizeCountryName(p.country);
       const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
       const sev = p.severity === "critical" ? 3.5 : p.severity === "high" ? 2.4 : p.severity === "medium" ? 1.4 : 0.7;
+      const liveBoost = p.layer === "liveStrikes" ? 1.7 : p.layer === "news" ? 1.15 : 1;
       const recencyPenalty = Math.max(
         0.35,
         1 - (Date.now() - new Date(p.timestamp).getTime()) / (1000 * 3600 * 24 * 14)
       );
-      countryScore.set(key, (countryScore.get(key) ?? 0) + sev * recencyPenalty);
+      countryScore.set(key, (countryScore.get(key) ?? 0) + sev * recencyPenalty * liveBoost);
     }
 
     const built: any[] = [];
@@ -153,7 +155,13 @@ export default function ConflictMap({
           getPosition: (d) => [d.lon, d.lat],
           getRadius: (d) => {
             const base =
-              layerKey === "hotspots" ? 50000 : layerKey === "conflicts" ? 32000 : 22000;
+              layerKey === "hotspots"
+                ? 50000
+                : layerKey === "liveStrikes"
+                  ? 36000
+                  : layerKey === "conflicts"
+                    ? 32000
+                    : 22000;
             const magnitude = Math.max(0.6, Math.min(2, (d.magnitude ?? 1) / 20));
             return base * magnitude * severityRadiusMultiplier(d.severity);
           },

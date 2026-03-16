@@ -17,6 +17,7 @@ const ConflictGlobe = dynamic(() => import("@/components/ConflictGlobe"), {
 const TIME_RANGES = ["1h", "6h", "24h", "7d", "30d"] as const;
 const ALL_LAYERS: IntelLayerKey[] = [
   "conflicts",
+  "liveStrikes",
   "flights",
   "vessels",
   "carriers",
@@ -28,6 +29,7 @@ const ALL_LAYERS: IntelLayerKey[] = [
 function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
   return {
     conflicts: true,
+    liveStrikes: true,
     flights: true,
     vessels: true,
     carriers: true,
@@ -107,6 +109,7 @@ export default function MapPage() {
     apiData?.layers ??
     ({
       conflicts: [],
+      liveStrikes: [],
       flights: [],
       vessels: [],
       carriers: [],
@@ -150,8 +153,8 @@ export default function MapPage() {
             </h1>
             <p className="section-body reveal" style={{ marginBottom: "24px" }}>
               Multi-source map layers inspired by modern OSINT dashboards. Data blends
-              conflict databases, corroborated live strike reports, military flight
-              telemetry, carrier-group signals, vessel relay feeds, and strategic
+              event-level conflict databases, corroborated live strike reports, military
+              flight telemetry, carrier-group signals, vessel relay feeds, and strategic
               infrastructure overlays.
             </p>
           </div>
@@ -315,6 +318,29 @@ export default function MapPage() {
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="map-limitations">
+            <h3>Current limitations</h3>
+            <ul>
+              <li>
+                ACLED is maintained as historical context and can lag real-world events by
+                weeks, so live strike urgency depends on the real-time feeds.
+              </li>
+              <li>
+                Military ships and carrier groups can disable or spoof AIS/ADS-B, which can
+                hide active deployments during sensitive missions.
+              </li>
+              <li>
+                News-derived event geolocation uses city/country extraction and
+                corroboration; some events are intentionally suppressed until multiple
+                credible publishers confirm them.
+              </li>
+              <li>
+                Open-source feeds are strongest for Europe/Middle East; coverage quality can
+                vary by region, censorship, and language.
+              </li>
+            </ul>
           </div>
         </div>
       </main>

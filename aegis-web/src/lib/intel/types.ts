@@ -1,5 +1,6 @@
 export type IntelLayerKey =
   | "conflicts"
+  | "liveStrikes"
   | "flights"
   | "vessels"
   | "carriers"
