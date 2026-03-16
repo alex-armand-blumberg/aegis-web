@@ -37,6 +37,7 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
     "conflicts",
     "flights",
     "vessels",
+    "carriers",
     "news",
     "hotspots",
     "infrastructure",
@@ -629,6 +630,210 @@ function extractRssTag(block: string, tag: string): string | null {
   return null;
 }
 
+const STRIKE_KEYWORDS = [
+  "airstrike",
+  "missile",
+  "drone strike",
+  "bombing",
+  "explosion",
+  "artillery",
+  "rocket",
+  "strike",
+  "battle",
+  "offensive",
+];
+
+const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }> = {
+  tehran: { lat: 35.6892, lon: 51.389, country: "Iran" },
+  isfahan: { lat: 32.6546, lon: 51.668, country: "Iran" },
+  telaviv: { lat: 32.0853, lon: 34.7818, country: "Israel" },
+  jerusalem: { lat: 31.7683, lon: 35.2137, country: "Israel" },
+  gaza: { lat: 31.5018, lon: 34.4668, country: "Palestine" },
+  rafah: { lat: 31.2969, lon: 34.2436, country: "Palestine" },
+  kyiv: { lat: 50.4501, lon: 30.5234, country: "Ukraine" },
+  kharkiv: { lat: 49.9935, lon: 36.2304, country: "Ukraine" },
+  odesa: { lat: 46.4825, lon: 30.7233, country: "Ukraine" },
+  donetsk: { lat: 48.0159, lon: 37.8029, country: "Ukraine" },
+  kherson: { lat: 46.6354, lon: 32.6169, country: "Ukraine" },
+  khartoum: { lat: 15.5007, lon: 32.5599, country: "Sudan" },
+  "port sudan": { lat: 19.6158, lon: 37.2164, country: "Sudan" },
+  sanaa: { lat: 15.3694, lon: 44.191, country: "Yemen" },
+  aden: { lat: 12.7855, lon: 45.0187, country: "Yemen" },
+  damascus: { lat: 33.5138, lon: 36.2765, country: "Syria" },
+  beirut: { lat: 33.8938, lon: 35.5018, country: "Lebanon" },
+};
+
+function normalizeHeadlineForCluster(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w && w.length > 2 && !["with", "from", "that", "this", "report", "reports", "says", "say"].includes(w))
+    .slice(0, 9)
+    .join(" ");
+}
+
+function extractPublisherFromTitle(title: string): string {
+  const parts = title.split(" - ").map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 2) return parts[parts.length - 1];
+  return "Unknown";
+}
+
+function extractStrikeKeyword(text: string): string | null {
+  const t = text.toLowerCase();
+  for (const k of STRIKE_KEYWORDS) {
+    if (t.includes(k)) return k;
+  }
+  return null;
+}
+
+function extractMentionedCity(text: string): { city: string; lat: number; lon: number; country: string } | null {
+  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/g, "");
+  for (const [city, loc] of Object.entries(CITY_COORDS)) {
+    if (normalized.includes(city)) {
+      return { city, ...loc };
+    }
+  }
+  return null;
+}
+
+async function fetchRapidConflictSignals(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const query = encodeURIComponent(
+    "(airstrike OR missile strike OR bombardment OR drone strike OR explosion OR artillery OR battle) (Ukraine OR Russia OR Israel OR Gaza OR Iran OR Sudan OR Yemen OR Syria OR Lebanon OR Red Sea)"
+  );
+  const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
+    if (!res.ok) {
+      return {
+        points: [],
+        health: {
+          provider: "Rapid conflict feed",
+          ok: false,
+          updatedAt: new Date().toISOString(),
+          latencyMs: Date.now() - started,
+          message: `HTTP ${res.status}`,
+        },
+      };
+    }
+
+    const text = await res.text();
+    const itemBlocks = text.split("<item>").slice(1, 260);
+    const cutoff = Date.now() - rangeHours * 3600_000;
+    const clusters = new Map<
+      string,
+      {
+        latestTs: number;
+        title: string;
+        country: string;
+        lat: number;
+        lon: number;
+        keyword: string;
+        publishers: Set<string>;
+        evidence: string[];
+      }
+    >();
+
+    for (const block of itemBlocks) {
+      const title = extractRssTag(block, "title");
+      const description = extractRssTag(block, "description") ?? "";
+      const pubRaw = extractRssTag(block, "pubDate");
+      if (!title) continue;
+      const ts = pubRaw ? new Date(pubRaw).getTime() : Date.now();
+      if (!Number.isFinite(ts) || ts < cutoff) continue;
+
+      const fullText = `${title} ${description}`;
+      const keyword = extractStrikeKeyword(fullText);
+      if (!keyword) continue;
+
+      const city = extractMentionedCity(fullText);
+      const country = city?.country || extractMentionedCountry(fullText);
+      if (!country) continue;
+      const bbox = COUNTRY_BBOX[country];
+      if (!bbox && !city) continue;
+      const lat = city?.lat ?? bbox![4];
+      const lon = city?.lon ?? bbox![5];
+
+      const publisher = extractPublisherFromTitle(title);
+      const clusterKey = `${country}|${city?.city ?? "country"}|${keyword}|${normalizeHeadlineForCluster(
+        title
+      )}`;
+      const current = clusters.get(clusterKey) ?? {
+        latestTs: ts,
+        title,
+        country,
+        lat,
+        lon,
+        keyword,
+        publishers: new Set<string>(),
+        evidence: [],
+      };
+      current.latestTs = Math.max(current.latestTs, ts);
+      current.publishers.add(publisher);
+      if (current.evidence.length < 4) current.evidence.push(title);
+      clusters.set(clusterKey, current);
+    }
+
+    const points: IntelPoint[] = [];
+    for (const [key, c] of clusters.entries()) {
+      const corroboration = c.publishers.size;
+      if (corroboration < 2) continue;
+      const norm = Math.min(1, corroboration / 4);
+      points.push({
+        id: `rapid-${key}`,
+        layer: "conflicts",
+        title: c.title,
+        subtitle: `${c.keyword} | corroborated by ${corroboration} sources`,
+        lat: c.lat,
+        lon: c.lon,
+        country: c.country,
+        severity: corroboration >= 3 ? "critical" : "high",
+        source: "Corroborated live conflict feed",
+        timestamp: new Date(c.latestTs).toISOString(),
+        magnitude: 12 + corroboration * 3,
+        confidence: 0.5 + norm * 0.35,
+        metadata: {
+          corroborating_sources: corroboration,
+          top_publishers: Array.from(c.publishers).slice(0, 3).join(", "),
+          sample_event: c.evidence[0] ?? "",
+        },
+      });
+    }
+
+    return {
+      points: points.slice(0, 280),
+      health: {
+        provider: "Rapid conflict feed",
+        ok: true,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: `Mapped ${points.length} corroborated near-live strike events`,
+      },
+    };
+  } catch (err) {
+    return {
+      points: [],
+      health: {
+        provider: "Rapid conflict feed",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: err instanceof Error ? err.message : "Rapid feed failed",
+      },
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchNewsSignals(rangeHours: number): Promise<{
   points: IntelPoint[];
   health: ProviderHealth;
@@ -824,6 +1029,78 @@ async function fetchVesselSignals(): Promise<{
   };
 }
 
+const US_CARRIERS = [
+  "NIMITZ",
+  "EISENHOWER",
+  "VINSON",
+  "ROOSEVELT",
+  "LINCOLN",
+  "WASHINGTON",
+  "STENNIS",
+  "TRUMAN",
+  "REAGAN",
+  "BUSH",
+  "FORD",
+];
+
+const MIL_NAVAL_HINT_RE =
+  /\b(USS|USNS|HMS|HMAS|ROKS|INS|PLAN|DDG|CG-|FFG|FRIGATE|DESTROYER|CRUISER|CARRIER)\b/i;
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const toRad = (v: number) => (v * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function extractCarrierGroups(vesselPoints: IntelPoint[]): IntelPoint[] {
+  const carriers = vesselPoints.filter((v) => {
+    const title = (v.title || "").toUpperCase();
+    if (US_CARRIERS.some((c) => title.includes(c))) return true;
+    if (title.includes(" CARRIER")) return true;
+    return false;
+  });
+
+  const escorts = vesselPoints.filter((v) => MIL_NAVAL_HINT_RE.test(v.title || ""));
+  const nowIso = new Date().toISOString();
+  const out: IntelPoint[] = [];
+
+  for (const carrier of carriers) {
+    const nearbyEscorts = escorts.filter(
+      (e) =>
+        e.id !== carrier.id &&
+        haversineKm(carrier.lat, carrier.lon, e.lat, e.lon) <= 320
+    );
+    const groupSize = 1 + nearbyEscorts.length;
+    out.push({
+      id: `carrier-group-${carrier.id}`,
+      layer: "carriers",
+      title: carrier.title,
+      subtitle:
+        nearbyEscorts.length > 0
+          ? `Likely carrier strike group (${nearbyEscorts.length} nearby escorts)`
+          : "Carrier contact",
+      lat: carrier.lat,
+      lon: carrier.lon,
+      country: carrier.country,
+      severity: groupSize >= 5 ? "critical" : groupSize >= 3 ? "high" : "medium",
+      source: "AIS naval group inference",
+      timestamp: carrier.timestamp || nowIso,
+      magnitude: Math.min(24, groupSize * 3),
+      confidence: nearbyEscorts.length > 0 ? 0.8 : 0.62,
+      metadata: {
+        escorts_nearby: nearbyEscorts.length,
+        grouped_units: groupSize,
+      },
+    });
+  }
+
+  return out.slice(0, 120);
+}
+
 const CURATED_BASES_URL =
   "https://raw.githubusercontent.com/koala73/worldmonitor/main/scripts/data/curated-bases.json";
 
@@ -954,6 +1231,7 @@ function buildHotspots(layers: Record<IntelLayerKey, IntelPoint[]>): IntelPoint[
   for (const p of layers.conflicts) push(p, 2.5);
   for (const p of layers.flights) push(p, 1.7);
   for (const p of layers.vessels) push(p, 1.4);
+  for (const p of layers.carriers) push(p, 2.2);
   for (const p of layers.news) push(p, 0.6);
   for (const p of layers.infrastructure) push(p, 0.25);
 
@@ -984,6 +1262,7 @@ function filterToRequestedLayers(
     conflicts: requested.includes("conflicts") ? layers.conflicts : [],
     flights: requested.includes("flights") ? layers.flights : [],
     vessels: requested.includes("vessels") ? layers.vessels : [],
+    carriers: requested.includes("carriers") ? layers.carriers : [],
     news: requested.includes("news") ? layers.news : [],
     hotspots: requested.includes("hotspots") ? layers.hotspots : [],
     infrastructure: requested.includes("infrastructure")
@@ -999,24 +1278,27 @@ export async function GET(request: Request) {
     const requestedLayers = parseLayers(searchParams.get("layers"));
     const rangeHours = rangeToHours(range);
 
-    const [acledRes, ucdpRes, flightsRes, vesselsRes, newsRes, infraRes] =
+    const [acledRes, ucdpRes, rapidRes, flightsRes, vesselsRes, newsRes, infraRes] =
       await Promise.all([
       fetchAcledConflicts(rangeHours),
       fetchUcdpConflicts(rangeHours),
+      fetchRapidConflictSignals(rangeHours),
       fetchOpenSkyFlights(),
       fetchVesselSignals(),
       fetchNewsSignals(rangeHours),
       fetchStrategicInfrastructure(),
     ]);
 
-    const mergedConflicts = [...acledRes.points, ...ucdpRes.points]
+    const mergedConflicts = [...acledRes.points, ...ucdpRes.points, ...rapidRes.points]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
       .slice(0, 2400);
+    const carrierGroups = extractCarrierGroups(vesselsRes.points);
 
     const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
       conflicts: mergedConflicts,
       flights: flightsRes.points,
       vessels: vesselsRes.points,
+      carriers: carrierGroups,
       news: newsRes.points,
       hotspots: [],
       infrastructure: infraRes.points,
@@ -1033,12 +1315,21 @@ export async function GET(request: Request) {
           provider: "Conflict fusion",
           ok: mergedConflicts.length > 0,
           updatedAt: new Date().toISOString(),
-          message: `Merged ${acledRes.points.length} ACLED + ${ucdpRes.points.length} UCDP points`,
+          message: `Merged ${acledRes.points.length} ACLED + ${ucdpRes.points.length} UCDP + ${rapidRes.points.length} rapid events`,
         },
         acledRes.health,
         ucdpRes.health,
+        rapidRes.health,
         flightsRes.health,
         vesselsRes.health,
+        {
+          provider: "Carrier groups",
+          ok: carrierGroups.length > 0,
+          updatedAt: new Date().toISOString(),
+          message: carrierGroups.length
+            ? `Detected ${carrierGroups.length} carrier/group contacts`
+            : "No carrier groups detected in current AIS window",
+        },
         newsRes.health,
         infraRes.health,
       ],

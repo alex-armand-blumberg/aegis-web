@@ -2,6 +2,7 @@ export type IntelLayerKey =
   | "conflicts"
   | "flights"
   | "vessels"
+  | "carriers"
   | "news"
   | "hotspots"
   | "infrastructure";
