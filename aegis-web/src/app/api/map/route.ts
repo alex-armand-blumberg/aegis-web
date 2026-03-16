@@ -39,6 +39,7 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
     "vessels",
     "news",
     "hotspots",
+    "infrastructure",
   ];
   if (!raw?.trim()) return defaults;
   const allowed = new Set(defaults);
@@ -276,6 +277,118 @@ async function fetchAcledConflicts(rangeHours: number): Promise<{
   };
 }
 
+function buildUcdpVersionCandidates(): string[] {
+  const year = new Date().getUTCFullYear() - 2000;
+  return Array.from(new Set([`${year}.1`, `${year - 1}.1`, "25.1", "24.1"]));
+}
+
+type UcdpRawEvent = {
+  id?: string | number;
+  date_start?: string;
+  date_end?: string;
+  latitude?: number | string;
+  longitude?: number | string;
+  country?: string;
+  side_a?: string;
+  side_b?: string;
+  best?: number | string;
+  low?: number | string;
+  high?: number | string;
+  type_of_violence?: number | string;
+  source_original?: string;
+};
+
+async function fetchUcdpConflicts(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const token = process.env.UCDP_ACCESS_TOKEN?.trim();
+  const started = Date.now();
+  const cutoff = Date.now() - rangeHours * 3600_000;
+  const versions = buildUcdpVersionCandidates();
+
+  let events: UcdpRawEvent[] = [];
+  let selectedVersion = "";
+
+  for (const version of versions) {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (token) headers["x-ucdp-access-token"] = token;
+    const res = await timedJsonFetch<{ Result?: UcdpRawEvent[] }>(
+      `https://ucdpapi.pcr.uu.se/api/gedevents/${version}?pagesize=1200&page=0`,
+      { headers },
+      14000
+    );
+    if (res.ok && res.data?.Result?.length) {
+      events = res.data.Result;
+      selectedVersion = version;
+      break;
+    }
+  }
+
+  if (!events.length) {
+    return {
+      points: [],
+      health: {
+        provider: "UCDP",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: token
+          ? "UCDP returned no events for tested versions"
+          : "UCDP returned no events (set UCDP_ACCESS_TOKEN for higher reliability)",
+      },
+    };
+  }
+
+  const points: IntelPoint[] = [];
+  for (const raw of events) {
+    const lat = Number(raw.latitude);
+    const lon = Number(raw.longitude);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+    const ts = Date.parse(String(raw.date_start || ""));
+    if (!Number.isFinite(ts) || ts < cutoff) continue;
+
+    const deathsBest = Number(raw.best) || 0;
+    const deathsHigh = Number(raw.high) || deathsBest;
+    const deathsLow = Number(raw.low) || deathsBest;
+    const norm = Math.min(1, Math.max(0.05, deathsBest / 80));
+    const country = String(raw.country || "").trim();
+    const sideA = String(raw.side_a || "").trim();
+    const sideB = String(raw.side_b || "").trim();
+    points.push({
+      id: `ucdp-${raw.id ?? `${lat}-${lon}-${ts}`}`,
+      layer: "conflicts",
+      title: country || "Conflict event",
+      subtitle: sideA && sideB ? `${sideA} vs ${sideB}` : "UCDP violence event",
+      lat,
+      lon,
+      country: country || undefined,
+      severity: mapSeverity(norm),
+      source: "UCDP",
+      timestamp: new Date(ts).toISOString(),
+      magnitude: Math.max(1, deathsBest),
+      confidence: 0.82,
+      metadata: {
+        deaths_best: deathsBest,
+        deaths_low: deathsLow,
+        deaths_high: deathsHigh,
+        violence_type: String(raw.type_of_violence || ""),
+      },
+    });
+  }
+
+  return {
+    points: points.slice(0, 1400),
+    health: {
+      provider: "UCDP",
+      ok: true,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message: `Loaded ${points.length} conflict events (v${selectedVersion})`,
+    },
+  };
+}
+
 type OpenSkyStatesResponse = {
   time?: number;
   states?: Array<[
@@ -301,6 +414,28 @@ type OpenSkyStatesResponse = {
 
 const MILITARY_CALLSIGN_RE =
   /(^|\s)(RCH|REACH|DUKE|NAVY|USAF|RAF|RRR|NATO|IAF|ROKAF|QID|AIO|CNV|FORTE|HOMER|LAGR|JSTARS|COPPER|SHELL|ARAB|TUAF)/i;
+
+async function fetchOpenSkyOAuthToken(
+  clientId: string,
+  clientSecret: string
+): Promise<string | null> {
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: clientId,
+    client_secret: clientSecret,
+  });
+  const res = await timedJsonFetch<{ access_token?: string }>(
+    "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    },
+    10000
+  );
+  if (!res.ok || !res.data?.access_token) return null;
+  return res.data.access_token;
+}
 
 function extractOpenSkyMilitaryPoints(
   rows: OpenSkyStatesResponse["states"],
@@ -344,15 +479,32 @@ async function fetchOpenSkyFlights(): Promise<{
   points: IntelPoint[];
   health: ProviderHealth;
 }> {
-  const username = process.env.OPENSKY_USERNAME;
-  const password = process.env.OPENSKY_PASSWORD;
-  const authHeader: HeadersInit | undefined =
-    username && password
+  const username = process.env.OPENSKY_USERNAME?.trim();
+  const password = process.env.OPENSKY_PASSWORD?.trim();
+  const clientId = process.env.OPENSKY_CLIENT_ID?.trim();
+  const clientSecret = process.env.OPENSKY_CLIENT_SECRET?.trim();
+
+  let authHeader: HeadersInit | undefined;
+  let authLabel = "none";
+
+  if (clientId && clientSecret) {
+    const token = await fetchOpenSkyOAuthToken(clientId, clientSecret);
+    if (token) {
+      authHeader = { Authorization: `Bearer ${token}` };
+      authLabel = "oauth2";
+    }
+  }
+
+  if (!authHeader) {
+    authHeader =
+      username && password
       ? {
           Authorization:
             "Basic " + Buffer.from(`${username}:${password}`).toString("base64"),
         }
       : undefined;
+    if (authHeader) authLabel = "basic";
+  }
 
   const started = Date.now();
   const res = await timedJsonFetch<OpenSkyStatesResponse>(
@@ -373,7 +525,7 @@ async function fetchOpenSkyFlights(): Promise<{
         ok: true,
         updatedAt: new Date().toISOString(),
         latencyMs: Date.now() - started,
-        message: `Tracked ${points.length} military-like flights`,
+        message: `Tracked ${points.length} military-like flights (${authLabel})`,
       },
     };
   }
@@ -672,6 +824,111 @@ async function fetchVesselSignals(): Promise<{
   };
 }
 
+const CURATED_BASES_URL =
+  "https://raw.githubusercontent.com/koala73/worldmonitor/main/scripts/data/curated-bases.json";
+
+const STRATEGIC_WATERWAYS: Array<{
+  id: string;
+  name: string;
+  country: string;
+  lat: number;
+  lon: number;
+}> = [
+  { id: "hormuz", name: "Strait of Hormuz", country: "Oman", lat: 26.566, lon: 56.25 },
+  { id: "bab-el-mandeb", name: "Bab el-Mandeb", country: "Yemen", lat: 12.592, lon: 43.33 },
+  { id: "suez", name: "Suez Canal", country: "Egypt", lat: 30.7, lon: 32.34 },
+  { id: "malacca", name: "Strait of Malacca", country: "Singapore", lat: 2.5, lon: 101.8 },
+  { id: "taiwan-strait", name: "Taiwan Strait", country: "Taiwan", lat: 24.0, lon: 119.8 },
+  { id: "bosphorus", name: "Bosphorus", country: "Turkey", lat: 41.1, lon: 29.08 },
+  { id: "panama", name: "Panama Canal", country: "Panama", lat: 9.08, lon: -79.68 },
+  { id: "giuk", name: "GIUK Gap", country: "Iceland", lat: 63.5, lon: -18.5 },
+  { id: "gibraltar", name: "Strait of Gibraltar", country: "Spain", lat: 36.0, lon: -5.6 },
+  { id: "dnipro-mouth", name: "Dnipro-Black Sea Access", country: "Ukraine", lat: 46.65, lon: 31.6 },
+  { id: "english-channel", name: "English Channel", country: "United Kingdom", lat: 50.8, lon: 1.2 },
+  { id: "lombok", name: "Lombok Strait", country: "Indonesia", lat: -8.45, lon: 115.9 },
+];
+
+async function fetchStrategicInfrastructure(): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const res = await timedJsonFetch<
+    Array<{
+      id?: string;
+      name?: string;
+      lat?: number;
+      lon?: number;
+      country?: string;
+      type?: string;
+      arm?: string;
+      status?: string;
+    }>
+  >(CURATED_BASES_URL, undefined, 12000);
+
+  const nowIso = new Date().toISOString();
+  const points: IntelPoint[] = [];
+
+  if (res.ok && res.data) {
+    for (const b of res.data.slice(0, 260)) {
+      const lat = Number(b.lat);
+      const lon = Number(b.lon);
+      if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+      points.push({
+        id: `base-${b.id ?? `${lat}-${lon}`}`,
+        layer: "infrastructure",
+        title: b.name?.trim() || "Military base",
+        subtitle: b.arm?.trim() || "Military installation",
+        lat,
+        lon,
+        country: b.country?.trim() || undefined,
+        severity: b.status === "active" ? "high" : "medium",
+        source: "Curated military bases",
+        timestamp: nowIso,
+        magnitude: 1,
+        confidence: 0.76,
+        metadata: {
+          site_type: b.type?.trim() || "base",
+          status: b.status?.trim() || "unknown",
+        },
+      });
+    }
+  }
+
+  for (const w of STRATEGIC_WATERWAYS) {
+    points.push({
+      id: `waterway-${w.id}`,
+      layer: "infrastructure",
+      title: w.name,
+      subtitle: "Strategic maritime chokepoint",
+      lat: w.lat,
+      lon: w.lon,
+      country: w.country,
+      severity: "high",
+      source: "Strategic chokepoints",
+      timestamp: nowIso,
+      magnitude: 1.25,
+      confidence: 0.9,
+      metadata: {
+        site_type: "waterway",
+      },
+    });
+  }
+
+  return {
+    points,
+    health: {
+      provider: "Strategic sites",
+      ok: points.length > 0,
+      updatedAt: nowIso,
+      latencyMs: Date.now() - started,
+      message: points.length
+        ? `Loaded ${points.length} bases and chokepoints`
+        : "Failed to load strategic sites",
+    },
+  };
+}
+
 function buildHotspots(layers: Record<IntelLayerKey, IntelPoint[]>): IntelPoint[] {
   const scoreByCountry = new Map<
     string,
@@ -698,6 +955,7 @@ function buildHotspots(layers: Record<IntelLayerKey, IntelPoint[]>): IntelPoint[
   for (const p of layers.flights) push(p, 1.7);
   for (const p of layers.vessels) push(p, 1.4);
   for (const p of layers.news) push(p, 0.6);
+  for (const p of layers.infrastructure) push(p, 0.25);
 
   return Array.from(scoreByCountry.entries())
     .sort((a, b) => b[1].score - a[1].score)
@@ -728,6 +986,9 @@ function filterToRequestedLayers(
     vessels: requested.includes("vessels") ? layers.vessels : [],
     news: requested.includes("news") ? layers.news : [],
     hotspots: requested.includes("hotspots") ? layers.hotspots : [],
+    infrastructure: requested.includes("infrastructure")
+      ? layers.infrastructure
+      : [],
   };
 }
 
@@ -738,19 +999,27 @@ export async function GET(request: Request) {
     const requestedLayers = parseLayers(searchParams.get("layers"));
     const rangeHours = rangeToHours(range);
 
-    const [conflictsRes, flightsRes, vesselsRes, newsRes] = await Promise.all([
+    const [acledRes, ucdpRes, flightsRes, vesselsRes, newsRes, infraRes] =
+      await Promise.all([
       fetchAcledConflicts(rangeHours),
+      fetchUcdpConflicts(rangeHours),
       fetchOpenSkyFlights(),
       fetchVesselSignals(),
       fetchNewsSignals(rangeHours),
+      fetchStrategicInfrastructure(),
     ]);
 
+    const mergedConflicts = [...acledRes.points, ...ucdpRes.points]
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .slice(0, 2400);
+
     const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
-      conflicts: conflictsRes.points,
+      conflicts: mergedConflicts,
       flights: flightsRes.points,
       vessels: vesselsRes.points,
       news: newsRes.points,
       hotspots: [],
+      infrastructure: infraRes.points,
     };
 
     baseLayers.hotspots = buildHotspots(baseLayers);
@@ -760,10 +1029,18 @@ export async function GET(request: Request) {
       range,
       layers: filterToRequestedLayers(baseLayers, requestedLayers),
       providerHealth: [
-        conflictsRes.health,
+        {
+          provider: "Conflict fusion",
+          ok: mergedConflicts.length > 0,
+          updatedAt: new Date().toISOString(),
+          message: `Merged ${acledRes.points.length} ACLED + ${ucdpRes.points.length} UCDP points`,
+        },
+        acledRes.health,
+        ucdpRes.health,
         flightsRes.health,
         vesselsRes.health,
         newsRes.health,
+        infraRes.health,
       ],
     };
 

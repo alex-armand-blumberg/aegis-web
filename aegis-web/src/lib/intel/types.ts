@@ -3,7 +3,8 @@ export type IntelLayerKey =
   | "flights"
   | "vessels"
   | "news"
-  | "hotspots";
+  | "hotspots"
+  | "infrastructure";
 
 export type IntelSeverity = "low" | "medium" | "high" | "critical";
 

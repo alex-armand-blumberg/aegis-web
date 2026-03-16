@@ -21,6 +21,7 @@ const ALL_LAYERS: IntelLayerKey[] = [
   "vessels",
   "news",
   "hotspots",
+  "infrastructure",
 ];
 
 function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
@@ -30,6 +31,7 @@ function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
     vessels: true,
     news: true,
     hotspots: true,
+    infrastructure: true,
   };
 }
 
@@ -107,6 +109,7 @@ export default function MapPage() {
       vessels: [],
       news: [],
       hotspots: [],
+      infrastructure: [],
     } as MapApiResponse["layers"]);
 
   const providerHealth = apiData?.providerHealth ?? [];
@@ -145,7 +148,8 @@ export default function MapPage() {
             <p className="section-body reveal" style={{ marginBottom: "24px" }}>
               Multi-source map layers inspired by modern OSINT dashboards. Data blends
               ACLED conflict aggregates, military flight telemetry, vessel relay feeds,
-              geocoded breaking-news signals, and fused hotspot scoring.
+              geocoded breaking-news signals, strategic infrastructure overlays, and
+              fused hotspot scoring.
             </p>
           </div>
         </section>

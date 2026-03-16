@@ -6,6 +6,7 @@ export const LAYER_COLORS: Record<IntelLayerKey, [number, number, number]> = {
   vessels: [96, 165, 250],
   news: [167, 139, 250],
   hotspots: [253, 224, 71],
+  infrastructure: [45, 212, 191],
 };
 
 export function layerColorCss(layer: IntelLayerKey): string {
