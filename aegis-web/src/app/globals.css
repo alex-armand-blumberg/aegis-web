@@ -1867,8 +1867,9 @@ footer {
   margin-bottom: 8px;
 }
 .map-page .map-limitations ul {
-  padding-left: 18px;
-  margin: 0;
+  list-style: disc outside;
+  padding-left: 20px;
+  margin: 6px 0 0 0;
   color: rgba(226, 232, 240, 0.72);
   font-size: 12px;
   line-height: 1.6;

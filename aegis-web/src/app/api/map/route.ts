@@ -844,86 +844,121 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
   points: IntelPoint[];
   health: ProviderHealth;
 }> {
-  const query = encodeURIComponent(
-    "(missile OR strike OR explosion OR bombardment OR drone strike OR shelling OR battle) (Ukraine OR Iran OR Israel OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon)"
-  );
-  const url =
-    `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
-
   const started = Date.now();
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 12000);
+  const queries = [
+    "(missile OR strike OR explosion OR bombing OR shelling OR artillery OR drone strike OR battle OR offensive OR invasion OR raid)",
+    "(Ukraine OR Iran OR Israel OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon OR Red Sea) (strike OR battle OR explosion OR attack)",
+    "(Zaporizhzhia OR Kharkiv OR Kyiv OR Kherson OR Donetsk OR Tehran OR Isfahan OR Khartoum OR Port Sudan OR Rafah) (missile OR strike OR explosion OR bombardment)",
+    "(military operation OR battlefield update OR front line OR clashes) (Ukraine OR Israel OR Iran OR Sudan OR Yemen)",
+  ];
+  const eventKeywords = [
+    "missile",
+    "strike",
+    "explosion",
+    "bomb",
+    "bombard",
+    "drone",
+    "artillery",
+    "shelling",
+    "battle",
+    "offensive",
+    "invasion",
+    "raid",
+    "clash",
+    "front line",
+  ];
   try {
-    const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
-    if (!res.ok) {
-      return {
-        points: [],
-        health: {
-          provider: "Google News RSS",
-          ok: false,
-          updatedAt: new Date().toISOString(),
-          latencyMs: Date.now() - started,
-          message: `HTTP ${res.status}`,
-        },
-      };
-    }
-    const text = await res.text();
-    const itemBlocks = text.split("<item>").slice(1, 220);
     const points: IntelPoint[] = [];
+    const seen = new Set<string>();
     const cutoff = Date.now() - rangeHours * 3600_000;
+    let fetchErrors = 0;
 
-    for (let i = 0; i < itemBlocks.length; i += 1) {
-      const block = itemBlocks[i];
-      const title = extractRssTag(block, "title");
-      const description = extractRssTag(block, "description") ?? "";
-      const pubRaw = extractRssTag(block, "pubDate");
-      if (!title) continue;
-      const pubDate = pubRaw ? new Date(pubRaw).getTime() : Date.now();
-      if (Number.isNaN(pubDate) || pubDate < cutoff) continue;
+    for (const rawQuery of queries) {
+      const query = encodeURIComponent(rawQuery);
+      const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 12000);
+      let text = "";
+      try {
+        const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
+        if (!res.ok) {
+          fetchErrors += 1;
+          clearTimeout(timer);
+          continue;
+        }
+        text = await res.text();
+      } catch {
+        fetchErrors += 1;
+        clearTimeout(timer);
+        continue;
+      } finally {
+        clearTimeout(timer);
+      }
 
-      const fullText = `${title} ${description}`;
-      const keyword = extractStrikeKeyword(fullText);
-      if (!keyword) continue;
+      const itemBlocks = text.split("<item>").slice(1, 420);
 
-      const city = extractMentionedCity(fullText);
-      const country = city?.country || extractMentionedCountry(fullText);
-      if (!country) continue;
-      const bbox = COUNTRY_BBOX[country];
-      if (!bbox && !city) continue;
-      const lat = city?.lat ?? bbox![4];
-      const lon = city?.lon ?? bbox![5];
-      const publisher = extractPublisherFromTitle(title);
+      for (let i = 0; i < itemBlocks.length; i += 1) {
+        const block = itemBlocks[i];
+        const title = extractRssTag(block, "title");
+        const description = extractRssTag(block, "description") ?? "";
+        const pubRaw = extractRssTag(block, "pubDate");
+        if (!title) continue;
+        const pubDate = pubRaw ? new Date(pubRaw).getTime() : Date.now();
+        if (Number.isNaN(pubDate) || pubDate < cutoff) continue;
 
-      points.push({
-        id: `news-event-${i}-${country}-${pubDate}`,
-        layer: "news",
-        title: city ? `${keyword} report near ${city.city}` : `${keyword} report in ${country}`,
-        subtitle: `${publisher} headline`,
-        lat,
-        lon,
-        country,
-        severity: city ? "high" : "medium",
-        source: "Google News RSS",
-        timestamp: new Date(pubDate).toISOString(),
-        magnitude: city ? 6 : 3,
-        confidence: city ? 0.58 : 0.42,
-        metadata: {
-          event_type: keyword,
-          publisher,
-          original_headline: title,
-          city: city?.city ?? null,
-        },
-      });
+        const fullText = `${title} ${description}`;
+        const lower = fullText.toLowerCase();
+        if (!eventKeywords.some((k) => lower.includes(k))) continue;
+
+        const keyword = extractStrikeKeyword(fullText) ?? "event";
+        const city = extractMentionedCity(fullText);
+        const country = city?.country || extractMentionedCountry(fullText);
+        if (!country) continue;
+        const bbox = COUNTRY_BBOX[country];
+        if (!bbox && !city) continue;
+        const lat = city?.lat ?? bbox![4];
+        const lon = city?.lon ?? bbox![5];
+        const publisher = extractPublisherFromTitle(title);
+        const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+
+        points.push({
+          id: `news-event-${i}-${country}-${pubDate}-${seen.size}`,
+          layer: "news",
+          title: city ? `${keyword} report near ${city.city}` : `${keyword} report in ${country}`,
+          subtitle: `${publisher} headline`,
+          lat,
+          lon,
+          country,
+          severity: city ? "high" : "medium",
+          source: "Google News RSS",
+          timestamp: new Date(pubDate).toISOString(),
+          magnitude: city ? 7 : 4,
+          confidence: city ? 0.62 : 0.48,
+          metadata: {
+            event_type: keyword,
+            publisher,
+            original_headline: title,
+            city: city?.city ?? null,
+          },
+        });
+      }
     }
+
+    points.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
     return {
-      points: points.slice(0, 260),
+      points: points.slice(0, 1200),
       health: {
         provider: "Google News RSS",
-        ok: true,
+        ok: points.length > 0,
         updatedAt: new Date().toISOString(),
         latencyMs: Date.now() - started,
-        message: `Mapped ${points.length} event-level geocoded headlines`,
+        message:
+          fetchErrors > 0
+            ? `Mapped ${points.length} event-level headlines (${fetchErrors} query feeds degraded)`
+            : `Mapped ${points.length} event-level geocoded headlines`,
       },
     };
   } catch (err) {
@@ -937,8 +972,6 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         message: err instanceof Error ? err.message : "News fetch failed",
       },
     };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -1011,16 +1044,25 @@ async function fetchVesselSignals(): Promise<{
   }
 
   const vessels = res.data.vessels ?? [];
+  const GOV_VESSEL_RE =
+    /\b(USS|USNS|USCGC|HMS|HMCS|HMAS|ROKS|INS|PLAN|NAVE|NAVY|COAST\s*GUARD|CGC|CG-|PATROL|CORVETTE|FRIGATE|DESTROYER|CRUISER|CARRIER|BATTLESHIP|AMPHIB|LCS|CUTTER|WARSHIP)\b/i;
+  const GOV_FLAG_HINT_RE =
+    /\b(NAVY|COAST\s*GUARD|GOVERNMENT|MILITARY|STATE)\b/i;
   const points: IntelPoint[] = [];
   for (const v of vessels) {
     const lat = Number(v.lat);
     const lon = Number(v.lon);
     if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+    const name = v.name?.trim() || "";
+    const flag = v.flag?.trim() || "";
+    const isGovernmentVessel =
+      GOV_VESSEL_RE.test(name) || GOV_FLAG_HINT_RE.test(flag);
+    if (!isGovernmentVessel) continue;
     const speed = Number(v.speed) || 0;
     points.push({
       id: `vessel-${v.id ?? `${lat}-${lon}`}`,
       layer: "vessels",
-      title: v.name?.trim() || "Vessel",
+      title: name || "Government vessel",
       subtitle: v.flag ? `${v.flag} flag` : "AIS snapshot",
       lat,
       lon,
@@ -1042,7 +1084,7 @@ async function fetchVesselSignals(): Promise<{
       ok: true,
       updatedAt: new Date().toISOString(),
       latencyMs: res.latencyMs,
-      message: `Loaded ${points.length} vessel positions`,
+      message: `Loaded ${points.length} government/military vessel positions`,
     },
   };
 }
