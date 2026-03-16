@@ -90,6 +90,12 @@ function mapSeverity(v: number): "low" | "medium" | "high" | "critical" {
   return "low";
 }
 
+function shiftMonthString(ym: string, deltaMonths: number): string {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(Date.UTC((y || 1970), (m || 1) - 1 + deltaMonths, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 function monthToDate(ym: string): Date {
   const [y, m] = ym.split("-").map(Number);
   return new Date(Date.UTC(y || 1970, (m || 1) - 1, 1));
@@ -97,12 +103,12 @@ function monthToDate(ym: string): Date {
 
 function pointMagnitudeFromAcled(a: Record<string, unknown>): number {
   return (
-    (Number(a.battles) || 0) +
-    (Number(a.explosions_remote_violence) || 0) +
-    (Number(a.violence_against_civilians) || 0) +
-    (Number(a.strategic_developments) || 0) +
-    (Number(a.protests) || 0) +
-    (Number(a.riots) || 0)
+    (Number(a.battles) || 0) * 3 +
+    (Number(a.explosions_remote_violence) || 0) * 2.5 +
+    (Number(a.violence_against_civilians) || 0) * 2.5 +
+    (Number(a.strategic_developments) || 0) * 1.5 +
+    (Number(a.protests) || 0) * 0.4 +
+    (Number(a.riots) || 0) * 0.8
   );
 }
 
@@ -190,7 +196,6 @@ async function fetchAcledConflicts(rangeHours: number): Promise<{
           : String(a.event_month ?? "").slice(0, 7);
 
       if (!eventMonth) continue;
-      if (eventMonth < startMonth || eventMonth > endMonth) continue;
 
       const magnitude = pointMagnitudeFromAcled(a);
       if (magnitude <= 0) continue;
@@ -214,6 +219,7 @@ async function fetchAcledConflicts(rangeHours: number): Promise<{
         magnitude,
         confidence: 0.75,
         metadata: {
+          eventMonth,
           battles: Number(a.battles) || 0,
           explosions: Number(a.explosions_remote_violence) || 0,
           protests: Number(a.protests) || 0,
@@ -230,14 +236,42 @@ async function fetchAcledConflicts(rangeHours: number): Promise<{
     if (offset > 50000) break;
   }
 
+  const strictRangePoints = points.filter((p) => {
+    const eventMonth = p.metadata?.eventMonth;
+    if (typeof eventMonth !== "string") return false;
+    return eventMonth >= startMonth && eventMonth <= endMonth;
+  });
+
+  let filteredPoints = strictRangePoints;
+  let rangeLabel = `${startMonth}..${endMonth}`;
+
+  // ACLED ArcGIS is monthly and often lags the current month. For short windows,
+  // fall back to the latest available month(s) so the map does not appear empty.
+  if (filteredPoints.length === 0 && points.length > 0) {
+    const months = Array.from(
+      new Set(
+        points
+          .map((p) => p.metadata?.eventMonth)
+          .filter((m): m is string => typeof m === "string")
+      )
+    ).sort();
+    const latestMonth = months[months.length - 1];
+    const previousMonth = shiftMonthString(latestMonth, -1);
+    filteredPoints = points.filter((p) => {
+      const m = p.metadata?.eventMonth;
+      return typeof m === "string" && m >= previousMonth && m <= latestMonth;
+    });
+    rangeLabel = `${previousMonth}..${latestMonth} (latest available fallback)`;
+  }
+
   return {
-    points,
+    points: filteredPoints,
     health: {
       provider: "ACLED ArcGIS",
       ok: true,
       updatedAt: new Date().toISOString(),
       latencyMs: Date.now() - started,
-      message: `Loaded ${points.length} points`,
+      message: `Loaded ${filteredPoints.length} points (${rangeLabel})`,
     },
   };
 }
@@ -268,6 +302,44 @@ type OpenSkyStatesResponse = {
 const MILITARY_CALLSIGN_RE =
   /(^|\s)(RCH|REACH|DUKE|NAVY|USAF|RAF|RRR|NATO|IAF|ROKAF|QID|AIO|CNV|FORTE|HOMER|LAGR|JSTARS|COPPER|SHELL|ARAB|TUAF)/i;
 
+function extractOpenSkyMilitaryPoints(
+  rows: OpenSkyStatesResponse["states"],
+  timestampSeconds: number
+): IntelPoint[] {
+  const points: IntelPoint[] = [];
+  for (const r of rows ?? []) {
+    const callsign = String(r[1] ?? "").trim();
+    const country = String(r[2] ?? "").trim();
+    const lon = Number(r[5]);
+    const lat = Number(r[6]);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+    if (!MILITARY_CALLSIGN_RE.test(callsign)) continue;
+
+    const velocity = Number(r[9]) || 0;
+    const altitude = Number(r[13]) || 0;
+    const norm = Math.min(1, velocity / 320);
+
+    points.push({
+      id: `flight-${r[0] ?? `${callsign}-${lat}-${lon}`}`,
+      layer: "flights",
+      title: callsign || "Military flight",
+      subtitle: country || "Unknown origin",
+      lat,
+      lon,
+      severity: mapSeverity(norm),
+      source: "OpenSky",
+      timestamp: new Date(timestampSeconds * 1000).toISOString(),
+      magnitude: velocity,
+      confidence: 0.65,
+      metadata: {
+        velocity_ms: velocity,
+        altitude_m: altitude,
+      },
+    });
+  }
+  return points;
+}
+
 async function fetchOpenSkyFlights(): Promise<{
   points: IntelPoint[];
   health: ProviderHealth;
@@ -289,7 +361,36 @@ async function fetchOpenSkyFlights(): Promise<{
     12000
   );
 
-  if (!res.ok || !res.data) {
+  if (res.ok && res.data) {
+    const points = extractOpenSkyMilitaryPoints(
+      res.data.states,
+      res.data.time ?? Math.floor(Date.now() / 1000)
+    );
+    return {
+      points: points.slice(0, 450),
+      health: {
+        provider: "OpenSky",
+        ok: true,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: `Tracked ${points.length} military-like flights`,
+      },
+    };
+  }
+
+  const fallback = await timedJsonFetch<{
+    ac?: Array<{
+      hex?: string;
+      flight?: string;
+      lat?: number;
+      lon?: number;
+      gs?: number;
+      alt_baro?: number | string;
+      t?: number;
+    }>;
+  }>("https://api.adsb.lol/v2/mil", undefined, 10000);
+
+  if (!fallback.ok || !fallback.data) {
     return {
       points: [],
       health: {
@@ -299,40 +400,30 @@ async function fetchOpenSkyFlights(): Promise<{
         latencyMs: res.latencyMs,
         message:
           res.message ??
-          "OpenSky unavailable. Set OPENSKY_USERNAME and OPENSKY_PASSWORD for better reliability.",
+          "OpenSky unavailable. Check credentials and provider limits.",
       },
     };
   }
 
-  const rows = res.data.states ?? [];
   const points: IntelPoint[] = [];
-
-  for (const r of rows) {
-    const callsign = String(r[1] ?? "").trim();
-    const country = String(r[2] ?? "").trim();
-    const lon = Number(r[5]);
-    const lat = Number(r[6]);
+  for (const flight of fallback.data.ac ?? []) {
+    const lat = Number(flight.lat);
+    const lon = Number(flight.lon);
     if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
-
-    const isMilitary = MILITARY_CALLSIGN_RE.test(callsign);
-    if (!isMilitary) continue;
-
-    const velocity = Number(r[9]) || 0;
-    const altitude = Number(r[13]) || 0;
-    const norm = Math.min(1, velocity / 320);
-
+    const velocity = Number(flight.gs) || 0;
+    const altitude = Number(flight.alt_baro) || 0;
     points.push({
-      id: `flight-${r[0] ?? `${callsign}-${lat}-${lon}`}`,
+      id: `flight-fallback-${flight.hex ?? `${lat}-${lon}`}`,
       layer: "flights",
-      title: callsign || "Military flight",
-      subtitle: country || "Unknown origin",
+      title: String(flight.flight ?? "").trim() || "Military flight",
+      subtitle: "Fallback military feed",
       lat,
       lon,
-      severity: mapSeverity(norm),
-      source: "OpenSky",
-      timestamp: new Date((res.data.time ?? Date.now() / 1000) * 1000).toISOString(),
+      severity: mapSeverity(Math.min(1, velocity / 320)),
+      source: "adsb.lol fallback",
+      timestamp: new Date((Number(flight.t) || Date.now() / 1000) * 1000).toISOString(),
       magnitude: velocity,
-      confidence: 0.65,
+      confidence: 0.55,
       metadata: {
         velocity_ms: velocity,
         altitude_m: altitude,
@@ -347,16 +438,42 @@ async function fetchOpenSkyFlights(): Promise<{
       ok: true,
       updatedAt: new Date().toISOString(),
       latencyMs: Date.now() - started,
-      message: `Tracked ${points.length} military-like flights`,
+      message: `OpenSky failed; fallback loaded ${points.length} military flights`,
     },
   };
 }
 
+const COUNTRY_ALIASES: Array<{ keyword: string; country: string }> = [
+  { keyword: "ukrainian", country: "Ukraine" },
+  { keyword: "russian", country: "Russia" },
+  { keyword: "sudanese", country: "Sudan" },
+  { keyword: "israeli", country: "Israel" },
+  { keyword: "palestinian", country: "Palestine" },
+  { keyword: "syrian", country: "Syria" },
+  { keyword: "yemeni", country: "Yemen" },
+  { keyword: "iranian", country: "Iran" },
+];
+
 function extractMentionedCountry(text: string): string | null {
   const normalized = text.toLowerCase();
+
+  for (const alias of COUNTRY_ALIASES) {
+    if (normalized.includes(alias.keyword)) return alias.country;
+  }
+
   for (const name of COUNTRY_NAMES) {
     if (normalized.includes(name.toLowerCase())) return name;
   }
+  return null;
+}
+
+function extractRssTag(block: string, tag: string): string | null {
+  const cdataMatch = block.match(
+    new RegExp(`<${tag}><!\\[CDATA\\[(.*?)\\]\\]><\\/${tag}>`, "is")
+  );
+  if (cdataMatch?.[1]) return cdataMatch[1].trim();
+  const plainMatch = block.match(new RegExp(`<${tag}>(.*?)<\\/${tag}>`, "is"));
+  if (plainMatch?.[1]) return plainMatch[1].trim();
   return null;
 }
 
@@ -394,14 +511,14 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
 
     for (let i = 0; i < itemBlocks.length; i += 1) {
       const block = itemBlocks[i];
-      const titleMatch = block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/i);
-      const pubMatch = block.match(/<pubDate>(.*?)<\/pubDate>/i);
-      const title = titleMatch?.[1]?.trim();
+      const title = extractRssTag(block, "title");
+      const description = extractRssTag(block, "description") ?? "";
+      const pubRaw = extractRssTag(block, "pubDate");
       if (!title) continue;
-      const pubDate = pubMatch ? new Date(pubMatch[1]).getTime() : Date.now();
+      const pubDate = pubRaw ? new Date(pubRaw).getTime() : Date.now();
       if (Number.isNaN(pubDate) || pubDate < cutoff) continue;
 
-      const country = extractMentionedCountry(title);
+      const country = extractMentionedCountry(`${title} ${description}`);
       if (!country) continue;
       const bbox = COUNTRY_BBOX[country];
       if (!bbox) continue;
@@ -454,8 +571,8 @@ async function fetchVesselSignals(): Promise<{
   points: IntelPoint[];
   health: ProviderHealth;
 }> {
-  const snapshotUrl = process.env.AISSTREAM_SNAPSHOT_URL;
-  if (!snapshotUrl) {
+  const snapshotUrlRaw = process.env.AISSTREAM_SNAPSHOT_URL?.trim();
+  if (!snapshotUrlRaw) {
     return {
       points: [],
       health: {
@@ -464,6 +581,31 @@ async function fetchVesselSignals(): Promise<{
         updatedAt: new Date().toISOString(),
         message:
           "No AISSTREAM_SNAPSHOT_URL configured. Add relay snapshot endpoint for vessel positions.",
+      },
+    };
+  }
+
+  const snapshotUrl = /^https?:\/\//i.test(snapshotUrlRaw)
+    ? snapshotUrlRaw
+    : `https://${snapshotUrlRaw}`;
+  let parsedUrl: URL | null = null;
+  try {
+    parsedUrl = new URL(snapshotUrl);
+    if (parsedUrl.pathname === "/" || parsedUrl.pathname === "") {
+      parsedUrl.pathname = "/snapshot";
+    }
+  } catch {
+    parsedUrl = null;
+  }
+  if (!parsedUrl) {
+    return {
+      points: [],
+      health: {
+        provider: "AISStream",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        message:
+          "AISSTREAM_SNAPSHOT_URL is invalid. Use a full URL, for example https://your-relay.up.railway.app/snapshot",
       },
     };
   }
@@ -478,7 +620,7 @@ async function fetchVesselSignals(): Promise<{
       speed?: number;
       updatedAt?: string;
     }>;
-  }>(snapshotUrl, undefined, 12000);
+  }>(parsedUrl.toString(), undefined, 12000);
 
   if (!res.ok || !res.data) {
     return {
