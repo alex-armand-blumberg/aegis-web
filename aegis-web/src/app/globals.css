@@ -1946,6 +1946,7 @@ footer {
   color: rgba(255, 255, 255, 0.45);
   cursor: pointer;
   font-size: 14px;
+  z-index: 2;
 }
 .map-page .intel-side-header h3 {
   margin-top: 4px;
@@ -1955,11 +1956,11 @@ footer {
 }
 .map-page .intel-side-image {
   width: 100%;
-  max-height: 150px;
+  max-height: 118px;
   object-fit: cover;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  margin-bottom: 10px;
+  margin: 4px 0 8px;
 }
 .map-page .intel-side-header p {
   margin-top: 4px;
@@ -2005,4 +2006,14 @@ footer {
   color: rgba(255, 255, 255, 0.62);
   font-size: 11px;
   line-height: 1.45;
+}
+.map-page .intel-side-note-list {
+  margin-top: 8px;
+  padding-left: 16px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.map-page .intel-side-note-list li {
+  margin-bottom: 4px;
 }

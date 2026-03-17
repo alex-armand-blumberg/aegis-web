@@ -165,6 +165,7 @@ export default function MapPage() {
       "Available statistics:",
       statsLines,
       "Write exactly 3 bullet points summarizing why this event was flagged.",
+      "Each line must start with '- '.",
       "Each bullet must include at least one numeric value from the provided statistics.",
       "If a value is missing, explicitly say it is unavailable.",
       "No policy advice. Keep neutral intelligence tone.",

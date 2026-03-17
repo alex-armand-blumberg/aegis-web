@@ -429,7 +429,7 @@ type OpenSkyStatesResponse = {
 };
 
 const MILITARY_CALLSIGN_RE =
-  /(^|\s)(RCH|REACH|DUKE|NAVY|USAF|RAF|RRR|NATO|IAF|ROKAF|QID|AIO|CNV|FORTE|HOMER|LAGR|JSTARS|COPPER|SHELL|ARAB|TUAF)/i;
+  /(^|\s)(RCH|REACH|DUKE|NAVY|USAF|RAF|RRR|NATO|IAF|ROKAF|QID|AIO|CNV|FORTE|HOMER|LAGR|JSTARS|COPPER|SHELL|ARAB|TUAF|SPAR|SAM|HURON|ASCOT|RFR|OMEN|MC|MIG|SU-|F-16|F-35|IL-76|ANKA|QTR|UAEAF|RSAF)/i;
 
 async function fetchOpenSkyOAuthToken(
   clientId: string,
@@ -535,7 +535,7 @@ async function fetchOpenSkyFlights(): Promise<{
       res.data.time ?? Math.floor(Date.now() / 1000)
     );
     return {
-      points: points.slice(0, 450),
+      points: points.slice(0, 900),
       health: {
         provider: "OpenSky",
         ok: true,
@@ -600,7 +600,7 @@ async function fetchOpenSkyFlights(): Promise<{
   }
 
   return {
-    points: points.slice(0, 450),
+    points: points.slice(0, 900),
     health: {
       provider: "OpenSky",
       ok: true,
@@ -669,6 +669,128 @@ const STRIKE_KEYWORDS = [
   "offensive",
 ];
 
+type EventDescriptor = {
+  eventType: string;
+  shortLabel: string;
+  strikeKeyword: string | null;
+  isConflict: boolean;
+  isDirectKinetic: boolean;
+};
+
+const CONTEXT_ONLY_RE =
+  /\b(bearing the weight|economic toll|workers|markets?|oil prices|analysis|opinion|editorial|supply chain|trade impact|humanitarian aid)\b/i;
+
+const DIRECT_IMPACT_RE =
+  /\b(hit|hits|struck|strike|attacked|attack|launched|launches|fired|intercepted|shot down|sunk|seized|clashed|clashes|raid|raided)\b/i;
+
+function classifyEvent(text: string): EventDescriptor {
+  const t = text.toLowerCase();
+  if (CONTEXT_ONLY_RE.test(t) && !DIRECT_IMPACT_RE.test(t)) {
+    return {
+      eventType: "analysis_only",
+      shortLabel: "War impact report",
+      strikeKeyword: null,
+      isConflict: false,
+      isDirectKinetic: false,
+    };
+  }
+
+  const checks: Array<{
+    type: string;
+    label: string;
+    keyword: string;
+    regex: RegExp;
+    direct: boolean;
+  }> = [
+    {
+      type: "missile_hit",
+      label: "Missile hit",
+      keyword: "missile",
+      regex:
+        /\b((missile|rocket).{0,45}(hit|strike|struck|impact|target|pounded)|(hit|struck|targeted).{0,45}(missile|rocket))\b/i,
+      direct: true,
+    },
+    {
+      type: "interception",
+      label: "Interception",
+      keyword: "interception",
+      regex: /\b(intercept|interception|shot down|air defense|anti[-\s]?air)\b/i,
+      direct: true,
+    },
+    {
+      type: "drone_strike",
+      label: "Drone strike",
+      keyword: "drone strike",
+      regex: /\b(drone strike|drone attack|uav strike|uav attack|loitering munition)\b/i,
+      direct: true,
+    },
+    {
+      type: "naval_attack",
+      label: "Naval attack",
+      keyword: "naval battle",
+      regex: /\b(submarine|warship|frigate|destroyer|naval).{0,45}(attack|hit|strike|sunk|seized|clash|battle)\b/i,
+      direct: true,
+    },
+    {
+      type: "naval_movement",
+      label: "Naval movement",
+      keyword: "naval movement",
+      regex: /\b(carrier group|fleet|warship|frigate|destroyer|submarine).{0,45}(deploy|move|entered|arrived|patrol|heading)\b/i,
+      direct: false,
+    },
+    {
+      type: "air_operation",
+      label: "Air operation",
+      keyword: "air operation",
+      regex: /\b(airstrike|air raid|sortie|fighter jet|dogfight|air battle|combat air patrol)\b/i,
+      direct: true,
+    },
+    {
+      type: "border_clash",
+      label: "Border clash",
+      keyword: "border clash",
+      regex: /\b(border clash|cross-border fire|incursion|standoff)\b/i,
+      direct: true,
+    },
+    {
+      type: "ground_battle",
+      label: "Ground battle",
+      keyword: "battle",
+      regex: /\b(battle|skirmish|clashes|offensive|raid|infiltration|special operation)\b/i,
+      direct: true,
+    },
+  ];
+
+  for (const c of checks) {
+    if (!c.regex.test(t)) continue;
+    return {
+      eventType: c.type,
+      shortLabel: c.label,
+      strikeKeyword: c.keyword,
+      isConflict: true,
+      isDirectKinetic: c.direct,
+    };
+  }
+
+  if (WAR_LIKE_KEYWORDS.some((k) => t.includes(k))) {
+    return {
+      eventType: "conflict_report",
+      shortLabel: "Conflict report",
+      strikeKeyword: "conflict",
+      isConflict: true,
+      isDirectKinetic: false,
+    };
+  }
+
+  return {
+    eventType: "analysis_only",
+    shortLabel: "Context report",
+    strikeKeyword: null,
+    isConflict: false,
+    isDirectKinetic: false,
+  };
+}
+
 const WAR_LIKE_KEYWORDS = [
   "war",
   "civil war",
@@ -721,6 +843,7 @@ const CURRENT_WAR_COUNTRIES = new Set(
     "Libya",
   ].map((c) => normalizeCountryLabel(c).toLowerCase())
 );
+CURRENT_WAR_COUNTRIES.add(normalizeCountryLabel("Ukraine").toLowerCase());
 
 const CONFLICT_COUNTRY_ALIASES: Record<string, string> = {
   "democratic republic of congo": "democratic republic of the congo",
@@ -789,6 +912,14 @@ const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }>
   idlib: { lat: 35.9306, lon: 36.6339, country: "Syria" },
   mykolaiv: { lat: 46.975, lon: 31.9946, country: "Ukraine" },
   mariupol: { lat: 47.0971, lon: 37.5434, country: "Ukraine" },
+  dubai: { lat: 25.2048, lon: 55.2708, country: "United Arab Emirates" },
+  "abu dhabi": { lat: 24.4539, lon: 54.3773, country: "United Arab Emirates" },
+  riyadh: { lat: 24.7136, lon: 46.6753, country: "Saudi Arabia" },
+  jeddah: { lat: 21.4858, lon: 39.1925, country: "Saudi Arabia" },
+  doha: { lat: 25.2854, lon: 51.531, country: "Qatar" },
+  manama: { lat: 26.2285, lon: 50.586, country: "Bahrain" },
+  "kuwait city": { lat: 29.3759, lon: 47.9774, country: "Kuwait" },
+  muscat: { lat: 23.5859, lon: 58.4059, country: "Oman" },
 };
 
 function normalizeHeadlineForCluster(text: string): string {
@@ -813,11 +944,7 @@ function isTrustedPublisher(text: string): boolean {
 }
 
 function extractStrikeKeyword(text: string): string | null {
-  const t = text.toLowerCase();
-  for (const k of STRIKE_KEYWORDS) {
-    if (t.includes(k)) return k;
-  }
-  return null;
+  return classifyEvent(text).strikeKeyword;
 }
 
 function extractMentionedCity(text: string): { city: string; lat: number; lon: number; country: string } | null {
@@ -949,8 +1076,8 @@ async function fetchLiveuamapEvents(rangeHours: number): Promise<{
     const title = String(e.title ?? e.description ?? "").trim();
     if (!title) continue;
     const fullText = `${title} ${String(e.description ?? "")}`;
-    const keyword = extractStrikeKeyword(fullText);
-    if (!keyword) continue;
+    const descriptor = classifyEvent(fullText);
+    if (!descriptor.isConflict) continue;
 
     const lat = Number(e.latitude ?? e.lat);
     const lon = Number(e.longitude ?? e.lng);
@@ -969,7 +1096,7 @@ async function fetchLiveuamapEvents(rangeHours: number): Promise<{
     points.push({
       id: `liveuamap-${String(e.id ?? `${country}-${city}-${ts}`)}`,
       layer: "liveStrikes",
-      title: city ? `${keyword} report near ${city}` : `${keyword} report`,
+      title: city ? `${descriptor.shortLabel} near ${city}` : descriptor.shortLabel,
       subtitle: title,
       lat: finalLat,
       lon: finalLon,
@@ -980,7 +1107,8 @@ async function fetchLiveuamapEvents(rangeHours: number): Promise<{
       magnitude: 10,
       confidence: 0.82,
       metadata: {
-        event_type: keyword,
+        event_type: descriptor.eventType,
+        short_label: descriptor.shortLabel,
         original_headline: title,
         city: city || null,
       },
@@ -1051,8 +1179,8 @@ async function fetchGdeltEmergencyFallback(rangeHours: number): Promise<IntelPoi
       const ts = pubRaw ? Date.parse(pubRaw) : Date.now();
       if (!Number.isFinite(ts) || ts < cutoff) continue;
       const textBlob = `${title} ${description}`;
-      const eventType = extractStrikeKeyword(textBlob);
-      if (!eventType) continue;
+      const descriptor = classifyEvent(textBlob);
+      if (!descriptor.isConflict) continue;
       const city = extractMentionedCity(textBlob);
       const country = city?.country || extractMentionedCountry(textBlob);
       if (!country) continue;
@@ -1061,7 +1189,9 @@ async function fetchGdeltEmergencyFallback(rangeHours: number): Promise<IntelPoi
       points.push({
         id: `gdelt-emerg-${country}-${ts}-${points.length + 1}`,
         layer: "liveStrikes",
-        title: city ? `${eventType} report near ${city.city}` : `${eventType} report in ${country}`,
+        title: city
+          ? `${descriptor.shortLabel} near ${city.city}`
+          : `${descriptor.shortLabel} in ${country}`,
         subtitle: title,
         lat: city?.lat ?? bbox![4],
         lon: city?.lon ?? bbox![5],
@@ -1071,6 +1201,11 @@ async function fetchGdeltEmergencyFallback(rangeHours: number): Promise<IntelPoi
         timestamp: new Date(ts).toISOString(),
         magnitude: city ? 7 : 5,
         confidence: 0.52,
+        metadata: {
+          event_type: descriptor.eventType,
+          short_label: descriptor.shortLabel,
+          original_headline: title,
+        },
       });
     }
     return points.slice(0, 220);
@@ -1169,8 +1304,8 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
     const parsedTs = parseGdeltSeenDate(a.seendate);
     const ts = Number.isFinite(parsedTs) ? parsedTs : Date.now();
     if (ts < cutoff) continue;
-    const keyword = extractStrikeKeyword(title);
-    if (!keyword) continue;
+    const descriptor = classifyEvent(title);
+    if (!descriptor.isConflict) continue;
 
     const city = extractMentionedCity(title);
     const sourceCountryRaw = String(a.sourcecountry ?? "").trim().toUpperCase();
@@ -1190,7 +1325,9 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
     points.push({
       id: `gdelt-${idx}-${country}-${ts}`,
       layer: "liveStrikes",
-      title: city ? `${keyword} report near ${city.city}` : `${keyword} report in ${country}`,
+      title: city
+        ? `${descriptor.shortLabel} near ${city.city}`
+        : `${descriptor.shortLabel} in ${country}`,
       subtitle: title,
       lat,
       lon,
@@ -1201,7 +1338,8 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
       magnitude: city ? 8 : 5,
       confidence: city ? 0.64 : 0.55,
       metadata: {
-        event_type: keyword,
+        event_type: descriptor.eventType,
+        short_label: descriptor.shortLabel,
         publisher: a.domain ?? "unknown",
         source_url: a.url ?? null,
       },
@@ -1411,8 +1549,8 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
         const ts = pubRaw ? Date.parse(pubRaw) : Date.now();
         if (!Number.isFinite(ts) || ts < cutoff) continue;
         const fullText = `${title} ${description}`;
-        const eventType = extractStrikeKeyword(fullText);
-        if (!eventType) continue;
+        const descriptor = classifyEvent(fullText);
+        if (!descriptor.isConflict) continue;
         const city = extractMentionedCity(fullText);
         const country = city?.country || extractMentionedCountry(fullText);
         if (!country) continue;
@@ -1421,7 +1559,9 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
         points.push({
           id: `eventreg-rss-${country}-${ts}-${points.length + 1}`,
           layer: "news",
-          title: city ? `${eventType} report near ${city.city}` : `${eventType} report in ${country}`,
+          title: city
+            ? `${descriptor.shortLabel} near ${city.city}`
+            : `${descriptor.shortLabel} in ${country}`,
           subtitle: "Event Registry fallback via Google News RSS",
           lat: city?.lat ?? bbox![4],
           lon: city?.lon ?? bbox![5],
@@ -1433,7 +1573,8 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
           confidence: city ? 0.62 : 0.52,
           imageUrl: imageUrl || undefined,
           metadata: {
-            event_type: eventType,
+            event_type: descriptor.eventType,
+            short_label: descriptor.shortLabel,
             source_url: extractRssTag(block, "link"),
             image_url: imageUrl || null,
             original_headline: title,
@@ -1465,7 +1606,7 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
         ok: false,
         updatedAt: new Date().toISOString(),
         latencyMs: Date.now() - started,
-        message: lastMessage,
+        message: `Event Registry empty; fallback active (${lastMessage})`,
       },
     };
   }
@@ -1477,8 +1618,8 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
     const body = String(a.body ?? "").trim();
     const fullText = `${title} ${body}`;
     if (!title) continue;
-    const eventType = extractStrikeKeyword(fullText) ?? "event";
-    if (!WAR_LIKE_KEYWORDS.some((k) => fullText.toLowerCase().includes(k))) continue;
+    const descriptor = classifyEvent(fullText);
+    if (!descriptor.isConflict) continue;
 
     const sourceTitle = String(a.source?.title ?? "").trim();
     const sourceUri = String(a.source?.uri ?? "").trim();
@@ -1506,7 +1647,9 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
     points.push({
       id: `eventreg-${a.uri ?? `${country}-${ts}-${points.length + 1}`}`,
       layer: "news",
-      title: city ? `${eventType} report near ${city.city}` : `${eventType} report in ${country}`,
+      title: city
+        ? `${descriptor.shortLabel} near ${city.city}`
+        : `${descriptor.shortLabel} in ${country}`,
       subtitle: sourceTitle || sourceUri || "Event Registry source",
       lat,
       lon,
@@ -1518,7 +1661,8 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
       confidence: trusted ? (city ? 0.78 : 0.7) : city ? 0.64 : 0.56,
       imageUrl: imageUrl || undefined,
       metadata: {
-        event_type: eventType,
+        event_type: descriptor.eventType,
+        short_label: descriptor.shortLabel,
         publisher: sourceTitle || sourceUri || "unknown",
         source_url: sourceUrl || null,
         image_url: imageUrl || null,
@@ -1741,8 +1885,8 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
       if (!Number.isFinite(ts) || ts < cutoff) continue;
 
       const fullText = `${title} ${description}`;
-      const keyword = extractStrikeKeyword(fullText);
-      if (!keyword) continue;
+      const descriptor = classifyEvent(fullText);
+      if (!descriptor.isConflict) continue;
 
       const city = extractMentionedCity(fullText);
       const country = city?.country || extractMentionedCountry(fullText);
@@ -1753,7 +1897,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
       const lon = city?.lon ?? bbox![5];
 
       const publisher = extractPublisherFromTitle(title);
-      const clusterKey = `${country}|${city?.city ?? "country"}|${keyword}|${normalizeHeadlineForCluster(
+      const clusterKey = `${country}|${city?.city ?? "country"}|${descriptor.eventType}|${normalizeHeadlineForCluster(
         title
       )}`;
       const current = clusters.get(clusterKey) ?? {
@@ -1762,13 +1906,14 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         country,
         lat,
         lon,
-        keyword,
+        keyword: descriptor.shortLabel,
         imageUrl: imageUrl || null,
         publishers: new Set<string>(),
         evidence: [],
       };
       current.latestTs = Math.max(current.latestTs, ts);
       current.publishers.add(publisher);
+      if (!current.imageUrl && imageUrl) current.imageUrl = imageUrl;
       if (current.evidence.length < 4) current.evidence.push(title);
       clusters.set(clusterKey, current);
     }
@@ -1793,6 +1938,8 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         confidence: 0.5 + norm * 0.35,
         imageUrl: c.imageUrl || undefined,
         metadata: {
+          event_type: c.keyword.toLowerCase().replace(/\s+/g, "_"),
+          short_label: c.keyword,
           corroborating_sources: corroboration,
           top_publishers: Array.from(c.publishers).slice(0, 3).join(", "),
           sample_event: c.evidence[0] ?? "",
@@ -1839,6 +1986,8 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "(military operation OR battlefield update OR front line OR clashes) (Ukraine OR Israel OR Iran OR Sudan OR Yemen)",
     "(special operations OR interception OR air defense OR precision strike OR naval battle OR frigate OR destroyer) (Iran OR Israel OR Ukraine OR Russia OR Baltic Sea OR Red Sea)",
     "(drone attack OR ballistic missile OR cruise missile OR shelling OR raid) (Tel Aviv OR Tehran OR Kyiv OR Kharkiv OR Odesa OR Sanaa OR Damascus OR Beirut)",
+    "(warship OR submarine OR fleet movement OR naval task force OR carrier strike group) (Gulf OR UAE OR Saudi Arabia OR Qatar OR Oman OR Red Sea)",
+    "(border clash OR standoff OR infiltration OR skirmish) (India OR Pakistan OR China OR Taiwan OR Lebanon OR Syria)",
   ];
   const eventKeywords = [
     "missile",
@@ -1855,6 +2004,13 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "raid",
     "clash",
     "front line",
+    "interception",
+    "standoff",
+    "submarine",
+    "warship",
+    "carrier",
+    "frigate",
+    "destroyer",
   ];
   try {
     const points: IntelPoint[] = [];
@@ -1884,7 +2040,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         clearTimeout(timer);
       }
 
-      const itemBlocks = text.split("<item>").slice(1, 800);
+      const itemBlocks = text.split("<item>").slice(1, 1200);
 
       for (let i = 0; i < itemBlocks.length; i += 1) {
         const block = itemBlocks[i];
@@ -1900,7 +2056,8 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         const lower = fullText.toLowerCase();
         if (!eventKeywords.some((k) => lower.includes(k))) continue;
 
-        const keyword = extractStrikeKeyword(fullText) ?? "event";
+        const descriptor = classifyEvent(fullText);
+        if (!descriptor.isConflict) continue;
         const city = extractMentionedCity(fullText);
         const country = city?.country || extractMentionedCountry(fullText);
         if (!country) continue;
@@ -1910,14 +2067,17 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         const lon = city?.lon ?? bbox![5];
         const publisher = extractPublisherFromTitle(title);
         const trusted = isTrustedPublisher(`${publisher} ${title}`);
-        const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}`;
+        const timeBucket = Math.floor(pubDate / (6 * 3600_000));
+        const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}|${timeBucket}`;
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
 
         points.push({
           id: `news-event-${i}-${country}-${pubDate}-${seen.size}`,
           layer: "news",
-          title: city ? `${keyword} report near ${city.city}` : `${keyword} report in ${country}`,
+          title: city
+            ? `${descriptor.shortLabel} near ${city.city}`
+            : `${descriptor.shortLabel} in ${country}`,
           subtitle: `${publisher} headline`,
           lat,
           lon,
@@ -1926,10 +2086,11 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
           source: "Google News RSS",
           timestamp: new Date(pubDate).toISOString(),
           magnitude: city ? 7 : 4,
-          confidence: trusted ? (city ? 0.7 : 0.58) : city ? 0.6 : 0.46,
+          confidence: trusted ? (city ? 0.74 : 0.62) : city ? 0.64 : 0.5,
           imageUrl: imageUrl || undefined,
           metadata: {
-            event_type: keyword,
+            event_type: descriptor.eventType,
+            short_label: descriptor.shortLabel,
             publisher,
             original_headline: title,
             city: city?.city ?? null,
@@ -1943,7 +2104,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     points.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
     return {
-      points: points.slice(0, 2600),
+      points: points.slice(0, 4200),
       health: {
         provider: "Google News RSS",
         ok: points.length > 0,
@@ -2039,9 +2200,9 @@ async function fetchVesselSignals(): Promise<{
 
   const vessels = res.data.vessels ?? [];
   const GOV_VESSEL_RE =
-    /\b(USS|USNS|USCGC|HMS|HMCS|HMAS|ROKS|INS|PLAN|NAVE|NAVY|COAST\s*GUARD|CGC|CG-|PATROL|CORVETTE|FRIGATE|DESTROYER|CRUISER|CARRIER|BATTLESHIP|AMPHIB|LCS|CUTTER|WARSHIP)\b/i;
+    /\b(USS|USNS|USCGC|HMS|HMCS|HMAS|ROKS|INS|PLAN|NAVE|ARMADA|MARINA|NAVY|COAST\s*GUARD|GUARDIA|CGC|CG-|PATROL|CORVETTE|FRIGATE|DESTROYER|CRUISER|CARRIER|BATTLESHIP|AMPHIB|LCS|CUTTER|WARSHIP|SUBMARINE|FLEET|TASK\s*FORCE)\b/i;
   const GOV_FLAG_HINT_RE =
-    /\b(NAVY|COAST\s*GUARD|GOVERNMENT|MILITARY|STATE)\b/i;
+    /\b(NAVY|COAST\s*GUARD|GOVERNMENT|MILITARY|STATE|DEFENCE|MINISTRY|ARMADA|MARINA)\b/i;
   const points: IntelPoint[] = [];
   for (const v of vessels) {
     const lat = Number(v.lat);
@@ -2049,10 +2210,14 @@ async function fetchVesselSignals(): Promise<{
     if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
     const name = v.name?.trim() || "";
     const flag = v.flag?.trim() || "";
-    const isGovernmentVessel =
-      GOV_VESSEL_RE.test(name) || GOV_FLAG_HINT_RE.test(flag);
-    if (!isGovernmentVessel) continue;
     const speed = Number(v.speed) || 0;
+    const inferredMilitaryMovement =
+      speed >= 22 &&
+      /\b(unknown|n\/a|none)\b/i.test(name || "unknown") &&
+      /\b(unknown|n\/a|none)\b/i.test(flag || "unknown");
+    const isGovernmentVessel =
+      GOV_VESSEL_RE.test(name) || GOV_FLAG_HINT_RE.test(flag) || inferredMilitaryMovement;
+    if (!isGovernmentVessel) continue;
     points.push({
       id: `vessel-${v.id ?? `${lat}-${lon}`}`,
       layer: "vessels",
@@ -2064,15 +2229,16 @@ async function fetchVesselSignals(): Promise<{
       source: "AISStream relay",
       timestamp: v.updatedAt || new Date().toISOString(),
       magnitude: speed,
-      confidence: 0.7,
+      confidence: inferredMilitaryMovement ? 0.52 : 0.7,
       metadata: {
         speed_knots: speed,
+        inferred_military_movement: inferredMilitaryMovement,
       },
     });
   }
 
   return {
-    points: points.slice(0, 1500),
+    points: points.slice(0, 2800),
     health: {
       provider: "AISStream",
       ok: true,

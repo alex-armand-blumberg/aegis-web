@@ -34,6 +34,11 @@ export default function IntelInfoPanel({
   const imageUrl =
     point.imageUrl ||
     (typeof point.metadata?.image_url === "string" ? point.metadata.image_url : "");
+  const aiBulletLines = (aiSummary ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^[-*•]\s*/, ""));
   return (
     <aside className="intel-side-panel">
       <button type="button" className="intel-side-close" onClick={onClose}>
@@ -107,8 +112,14 @@ export default function IntelInfoPanel({
         <div className="intel-side-subtitle">AI statistical summary</div>
         {aiLoading ? (
           <p className="intel-side-note">Generating AI summary...</p>
+        ) : aiBulletLines.length > 0 ? (
+          <ul className="intel-side-note-list">
+            {aiBulletLines.map((line, idx) => (
+              <li key={`${point.id}-ai-${idx}`}>{line}</li>
+            ))}
+          </ul>
         ) : (
-          <p className="intel-side-note">{aiSummary || "No AI summary yet."}</p>
+          <p className="intel-side-note">No AI summary yet.</p>
         )}
       </div>
     </aside>
