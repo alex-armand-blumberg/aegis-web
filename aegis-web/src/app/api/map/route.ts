@@ -673,6 +673,30 @@ const GDELT_CACHE_TTL_MS = 8 * 60 * 1000;
 const GDELT_COOLDOWN_MS = 15 * 60 * 1000;
 let gdeltCache: { fetchedAt: number; points: IntelPoint[] } | null = null;
 let gdeltCooldownUntil = 0;
+const CURRENT_WAR_COUNTRIES = new Set(
+  [
+    "Ukraine",
+    "Russia",
+    "Sudan",
+    "South Sudan",
+    "Yemen",
+    "Syria",
+    "Israel",
+    "Palestine",
+    "Iran",
+    "Lebanon",
+    "Myanmar",
+    "Iraq",
+    "Somalia",
+    "Mali",
+    "Burkina Faso",
+    "Niger",
+    "Democratic Republic of the Congo",
+    "Ethiopia",
+    "Afghanistan",
+    "Libya",
+  ].map((c) => normalizeCountryLabel(c))
+);
 
 const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }> = {
   tehran: { lat: 35.6892, lon: 51.389, country: "Iran" },
@@ -912,6 +936,78 @@ type GdeltDocResponse = {
   }>;
 };
 
+function parseGdeltSeenDate(raw: string | undefined): number {
+  if (!raw) return Number.NaN;
+  const direct = Date.parse(raw);
+  if (Number.isFinite(direct)) return direct;
+  const compact = raw.match(
+    /^(\d{4})(\d{2})(\d{2})T?(\d{2})(\d{2})(\d{2})Z?$/
+  );
+  if (!compact) return Number.NaN;
+  const [, y, mo, d, h, mi, s] = compact;
+  const ts = Date.UTC(
+    Number(y),
+    Number(mo) - 1,
+    Number(d),
+    Number(h),
+    Number(mi),
+    Number(s)
+  );
+  return Number.isFinite(ts) ? ts : Number.NaN;
+}
+
+async function fetchGdeltEmergencyFallback(rangeHours: number): Promise<IntelPoint[]> {
+  const query = encodeURIComponent(
+    "(missile OR strike OR drone OR explosion OR artillery OR bombardment OR naval battle OR interception OR raid) (Ukraine OR Russia OR Israel OR Iran OR Gaza OR Sudan OR Yemen OR Myanmar OR Syria OR Lebanon)"
+  );
+  const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 9000);
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
+    if (!res.ok) return [];
+    const text = await res.text();
+    const cutoff = Date.now() - rangeHours * 3600_000;
+    const points: IntelPoint[] = [];
+    const blocks = text.split("<item>").slice(1, 140);
+    for (const block of blocks) {
+      const title = extractRssTag(block, "title");
+      const description = extractRssTag(block, "description") ?? "";
+      const pubRaw = extractRssTag(block, "pubDate");
+      if (!title) continue;
+      const ts = pubRaw ? Date.parse(pubRaw) : Date.now();
+      if (!Number.isFinite(ts) || ts < cutoff) continue;
+      const textBlob = `${title} ${description}`;
+      const eventType = extractStrikeKeyword(textBlob);
+      if (!eventType) continue;
+      const city = extractMentionedCity(textBlob);
+      const country = city?.country || extractMentionedCountry(textBlob);
+      if (!country) continue;
+      const bbox = COUNTRY_BBOX[country];
+      if (!bbox && !city) continue;
+      points.push({
+        id: `gdelt-emerg-${country}-${ts}-${points.length + 1}`,
+        layer: "liveStrikes",
+        title: city ? `${eventType} report near ${city.city}` : `${eventType} report in ${country}`,
+        subtitle: title,
+        lat: city?.lat ?? bbox![4],
+        lon: city?.lon ?? bbox![5],
+        country: normalizeCountryLabel(country),
+        severity: city ? "high" : "medium",
+        source: "GDELT fallback",
+        timestamp: new Date(ts).toISOString(),
+        magnitude: city ? 7 : 5,
+        confidence: 0.52,
+      });
+    }
+    return points.slice(0, 220);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
   points: IntelPoint[];
   health: ProviderHealth;
@@ -953,6 +1049,20 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
     gdeltCooldownUntil = Date.now() + GDELT_COOLDOWN_MS;
   }
   if (!res.ok || !res.data?.articles?.length) {
+    const emergency = await fetchGdeltEmergencyFallback(rangeHours);
+    if (emergency.length > 0) {
+      gdeltCache = { fetchedAt: Date.now(), points: emergency };
+      return {
+        points: emergency,
+        health: {
+          provider: "GDELT",
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          latencyMs: res.latencyMs,
+          message: `GDELT degraded (${res.message ?? "upstream error"}); fallback mapped ${emergency.length} events`,
+        },
+      };
+    }
     if (gdeltCache?.points?.length) {
       return {
         points: gdeltCache.points,
@@ -983,7 +1093,7 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
   for (const a of res.data.articles) {
     const title = String(a.title ?? "").trim();
     if (!title) continue;
-    const ts = a.seendate ? Date.parse(a.seendate) : Date.now();
+    const ts = parseGdeltSeenDate(a.seendate);
     if (!Number.isFinite(ts) || ts < cutoff) continue;
     const keyword = extractStrikeKeyword(title);
     if (!keyword) continue;
@@ -1104,22 +1214,20 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
   const bodyCandidates: unknown[] = [
     {
       apiKey,
-      keyword:
-        "missile strike OR drone strike OR naval battle OR artillery OR bombardment OR interception OR special operation OR border clashes",
+      keyword: "missile strike",
       dateStart: from.toISOString().slice(0, 10),
       dateEnd: now.toISOString().slice(0, 10),
-      lang: ["eng"],
+      lang: "eng",
       isDuplicateFilter: "skipDuplicates",
       articlesCount: 300,
       articlesSortBy: "date",
     },
     {
       apiKey,
-      keyword:
-        "(missile OR strike OR drone OR battle OR naval OR operation OR interception) AND (Ukraine OR Russia OR Israel OR Iran OR Sudan OR Yemen OR Myanmar OR Syria OR Lebanon)",
+      keyword: "drone strike OR artillery OR battle OR interception",
       dateStart: from.toISOString().slice(0, 10),
       dateEnd: now.toISOString().slice(0, 10),
-      lang: ["eng"],
+      lang: "eng",
       articlesCount: 250,
       articlesSortBy: "date",
     },
@@ -1142,8 +1250,35 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
       lastMessage = res.message ?? lastMessage;
       continue;
     }
+    if (res.data && typeof res.data === "object") {
+      const errObj = (res.data as Record<string, unknown>).error;
+      if (errObj && typeof errObj === "object") {
+        const maybeMsg = String(
+          (errObj as Record<string, unknown>).message ??
+            (errObj as Record<string, unknown>).description ??
+            ""
+        ).trim();
+        if (maybeMsg) lastMessage = maybeMsg;
+      }
+    }
     parsed = parseEventRegistryArticles(res.data);
     if (parsed.length) break;
+  }
+
+  if (!parsed.length) {
+    const fallbackQuery = encodeURIComponent(
+      "missile OR strike OR drone OR bombardment OR artillery OR naval battle"
+    );
+    const fallbackUrl =
+      `https://eventregistry.org/api/v1/article/getArticles?apiKey=${encodeURIComponent(
+        apiKey
+      )}&keyword=${fallbackQuery}&lang=eng&articlesCount=250&articlesSortBy=date`;
+    const fallbackRes = await timedJsonFetch<unknown>(fallbackUrl, undefined, 12000);
+    if (fallbackRes.ok) {
+      parsed = parseEventRegistryArticles(fallbackRes.data);
+    } else if (fallbackRes.message) {
+      lastMessage = fallbackRes.message;
+    }
   }
 
   if (!parsed.length) {
@@ -1172,7 +1307,7 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
     const sourceTitle = String(a.source?.title ?? "").trim();
     const sourceUri = String(a.source?.uri ?? "").trim();
     const trustedProbe = `${sourceTitle} ${sourceUri} ${title}`;
-    if (!isTrustedPublisher(trustedProbe)) continue;
+    const trusted = isTrustedPublisher(trustedProbe);
 
     const ts = parseEventRegistryTimestamp(a);
     if (!Number.isFinite(ts) || ts < cutoff) continue;
@@ -1203,12 +1338,13 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
       source: "Event Registry",
       timestamp: new Date(ts).toISOString(),
       magnitude: city ? 8 : 5,
-      confidence: city ? 0.72 : 0.65,
+      confidence: trusted ? (city ? 0.78 : 0.7) : city ? 0.64 : 0.56,
       metadata: {
         event_type: eventType,
         publisher: sourceTitle || sourceUri || "unknown",
         source_url: sourceUrl || null,
         original_headline: title,
+        trusted_source: trusted,
       },
     });
   }
@@ -1288,7 +1424,11 @@ function buildActiveConflictCountries(
       latestEventAt: v.latestEventAt,
       sources: Array.from(v.sources).slice(0, 6),
     }))
-    .filter((c) => c.score >= 8)
+    .filter(
+      (c) =>
+        c.score >= 8 &&
+        CURRENT_WAR_COUNTRIES.has(normalizeCountryLabel(c.country))
+    )
     .sort((a, b) => b.score - a.score)
     .slice(0, 45);
 }
