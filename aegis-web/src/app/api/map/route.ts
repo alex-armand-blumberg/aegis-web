@@ -387,7 +387,9 @@ async function fetchUcdpConflicts(rangeHours: number): Promise<{
       ok: true,
       updatedAt: new Date().toISOString(),
       latencyMs: Date.now() - started,
-      message: `Loaded ${points.length} conflict events (v${selectedVersion})`,
+      message: `Loaded ${points.length} conflict events (v${selectedVersion}, auth: ${
+        token ? "token" : "anonymous"
+      })`,
     },
   };
 }
@@ -698,16 +700,56 @@ const CURRENT_WAR_COUNTRIES = new Set(
   ].map((c) => normalizeCountryLabel(c))
 );
 
+const CONFLICT_COUNTRY_ALIASES: Record<string, string> = {
+  "democratic republic of congo": "democratic republic of the congo",
+  drc: "democratic republic of the congo",
+  "dr congo": "democratic republic of the congo",
+  "russian federation": "russia",
+  "state of palestine": "palestine",
+  "occupied palestinian territory": "palestine",
+};
+
+const GDELT_SOURCECOUNTRY_MAP: Record<string, string> = {
+  UA: "Ukraine",
+  RU: "Russia",
+  IR: "Iran",
+  IL: "Israel",
+  PS: "Palestine",
+  SD: "Sudan",
+  YE: "Yemen",
+  SY: "Syria",
+  LB: "Lebanon",
+  MM: "Myanmar",
+  IQ: "Iraq",
+  SO: "Somalia",
+  ML: "Mali",
+  BF: "Burkina Faso",
+  NE: "Niger",
+  CD: "Democratic Republic of the Congo",
+  ET: "Ethiopia",
+  AF: "Afghanistan",
+  LY: "Libya",
+  SS: "South Sudan",
+};
+
 const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }> = {
   tehran: { lat: 35.6892, lon: 51.389, country: "Iran" },
   isfahan: { lat: 32.6546, lon: 51.668, country: "Iran" },
+  tabriz: { lat: 38.0962, lon: 46.2738, country: "Iran" },
+  mashhad: { lat: 36.2605, lon: 59.6168, country: "Iran" },
   telaviv: { lat: 32.0853, lon: 34.7818, country: "Israel" },
+  "tel aviv": { lat: 32.0853, lon: 34.7818, country: "Israel" },
   jerusalem: { lat: 31.7683, lon: 35.2137, country: "Israel" },
+  haifa: { lat: 32.794, lon: 34.9896, country: "Israel" },
+  beersheba: { lat: 31.252, lon: 34.7915, country: "Israel" },
+  "beer sheva": { lat: 31.252, lon: 34.7915, country: "Israel" },
   gaza: { lat: 31.5018, lon: 34.4668, country: "Palestine" },
   rafah: { lat: 31.2969, lon: 34.2436, country: "Palestine" },
   kyiv: { lat: 50.4501, lon: 30.5234, country: "Ukraine" },
+  kiev: { lat: 50.4501, lon: 30.5234, country: "Ukraine" },
   kharkiv: { lat: 49.9935, lon: 36.2304, country: "Ukraine" },
   odesa: { lat: 46.4825, lon: 30.7233, country: "Ukraine" },
+  odessa: { lat: 46.4825, lon: 30.7233, country: "Ukraine" },
   donetsk: { lat: 48.0159, lon: 37.8029, country: "Ukraine" },
   kherson: { lat: 46.6354, lon: 32.6169, country: "Ukraine" },
   zaporizhzhia: { lat: 47.8388, lon: 35.1396, country: "Ukraine" },
@@ -721,6 +763,10 @@ const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }>
   aden: { lat: 12.7855, lon: 45.0187, country: "Yemen" },
   damascus: { lat: 33.5138, lon: 36.2765, country: "Syria" },
   beirut: { lat: 33.8938, lon: 35.5018, country: "Lebanon" },
+  aleppo: { lat: 36.2021, lon: 37.1343, country: "Syria" },
+  idlib: { lat: 35.9306, lon: 36.6339, country: "Syria" },
+  mykolaiv: { lat: 46.975, lon: 31.9946, country: "Ukraine" },
+  mariupol: { lat: 47.0971, lon: 37.5434, country: "Ukraine" },
 };
 
 function normalizeHeadlineForCluster(text: string): string {
@@ -764,6 +810,11 @@ function extractMentionedCity(text: string): { city: string; lat: number; lon: n
 
 function normalizeCountryLabel(country: string): string {
   return country.replace(/\s+/g, " ").trim();
+}
+
+function canonicalConflictCountry(country: string): string {
+  const normalized = normalizeCountryLabel(country).toLowerCase();
+  return CONFLICT_COUNTRY_ALIASES[normalized] ?? normalized;
 }
 
 function rankSignalSeverity(points: IntelPoint[]): "low" | "medium" | "high" | "critical" {
@@ -1040,10 +1091,10 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
   }
 
   const query = encodeURIComponent(
-    "(missile OR strike OR drone OR explosion OR artillery OR bombardment OR battle OR invasion OR interception OR naval battle) AND (Ukraine OR Russia OR Iran OR Israel OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon OR Myanmar)"
+    "(missile OR strike OR drone OR explosion OR artillery OR bombardment OR battle OR invasion OR interception OR naval battle OR shelling OR raid)"
   );
   const url =
-    `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=ArtList&format=json&maxrecords=180&sort=datedesc`;
+    `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=ArtList&format=json&maxrecords=120&sort=datedesc`;
   const res = await timedJsonFetch<GdeltDocResponse>(url, undefined, 14000);
   if (!res.ok && (res.message || "").includes("HTTP 429")) {
     gdeltCooldownUntil = Date.now() + GDELT_COOLDOWN_MS;
@@ -1093,13 +1144,20 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
   for (const a of res.data.articles) {
     const title = String(a.title ?? "").trim();
     if (!title) continue;
-    const ts = parseGdeltSeenDate(a.seendate);
-    if (!Number.isFinite(ts) || ts < cutoff) continue;
+    const parsedTs = parseGdeltSeenDate(a.seendate);
+    const ts = Number.isFinite(parsedTs) ? parsedTs : Date.now();
+    if (ts < cutoff) continue;
     const keyword = extractStrikeKeyword(title);
     if (!keyword) continue;
 
     const city = extractMentionedCity(title);
-    const country = city?.country || extractMentionedCountry(title) || String(a.sourcecountry ?? "").trim();
+    const sourceCountryRaw = String(a.sourcecountry ?? "").trim().toUpperCase();
+    const sourceCountryFromCode = GDELT_SOURCECOUNTRY_MAP[sourceCountryRaw];
+    const country =
+      city?.country ||
+      extractMentionedCountry(title) ||
+      sourceCountryFromCode ||
+      String(a.sourcecountry ?? "").trim();
     if (!country) continue;
     const bbox = COUNTRY_BBOX[country];
     if (!bbox && !city) continue;
@@ -1219,8 +1277,9 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
       dateEnd: now.toISOString().slice(0, 10),
       lang: "eng",
       isDuplicateFilter: "skipDuplicates",
-      articlesCount: 300,
-      articlesSortBy: "date",
+      articleCount: 100,
+      sortBy: "date",
+      resultType: "articles",
     },
     {
       apiKey,
@@ -1228,8 +1287,9 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
       dateStart: from.toISOString().slice(0, 10),
       dateEnd: now.toISOString().slice(0, 10),
       lang: "eng",
-      articlesCount: 250,
-      articlesSortBy: "date",
+      articleCount: 100,
+      sortBy: "date",
+      resultType: "articles",
     },
   ];
 
@@ -1266,18 +1326,26 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
   }
 
   if (!parsed.length) {
-    const fallbackQuery = encodeURIComponent(
-      "missile OR strike OR drone OR bombardment OR artillery OR naval battle"
-    );
-    const fallbackUrl =
+    const fallbackUrls = [
       `https://eventregistry.org/api/v1/article/getArticles?apiKey=${encodeURIComponent(
         apiKey
-      )}&keyword=${fallbackQuery}&lang=eng&articlesCount=250&articlesSortBy=date`;
-    const fallbackRes = await timedJsonFetch<unknown>(fallbackUrl, undefined, 12000);
-    if (fallbackRes.ok) {
-      parsed = parseEventRegistryArticles(fallbackRes.data);
-    } else if (fallbackRes.message) {
-      lastMessage = fallbackRes.message;
+      )}&keyword=${encodeURIComponent(
+        "missile strike OR drone strike OR artillery OR naval battle"
+      )}&lang=eng&articleCount=100&sortBy=date&resultType=articles`,
+      `https://newsapi.ai/api/v1/article/getArticles?apiKey=${encodeURIComponent(
+        apiKey
+      )}&keyword=${encodeURIComponent(
+        "missile strike OR drone strike OR artillery OR naval battle"
+      )}&lang=eng&articleCount=100&sortBy=date&resultType=articles`,
+    ];
+    for (const fallbackUrl of fallbackUrls) {
+      const fallbackRes = await timedJsonFetch<unknown>(fallbackUrl, undefined, 12000);
+      if (fallbackRes.ok) {
+        parsed = parseEventRegistryArticles(fallbackRes.data);
+        if (parsed.length > 0) break;
+      } else if (fallbackRes.message) {
+        lastMessage = fallbackRes.message;
+      }
     }
   }
 
@@ -1373,7 +1441,7 @@ function buildActiveConflictCountries(
 
   const push = (p: IntelPoint, weight: number) => {
     if (!p.country) return;
-    const country = normalizeCountryLabel(p.country);
+    const country = canonicalConflictCountry(p.country);
     const current = byCountry.get(country) ?? {
       score: 0,
       latestEventAt: p.timestamp,
@@ -1412,9 +1480,9 @@ function buildActiveConflictCountries(
   for (const p of conflicts) {
     if (isWarLike(p)) push(p, 2.8);
   }
-  // News-only country scoring is intentionally excluded so protests/headline noise
-  // does not color countries as active war zones.
-  void news;
+  for (const p of news) {
+    if (isWarLike(p)) push(p, 0.9);
+  }
 
   return Array.from(byCountry.entries())
     .map(([country, v]) => ({
@@ -1427,7 +1495,7 @@ function buildActiveConflictCountries(
     .filter(
       (c) =>
         c.score >= 8 &&
-        CURRENT_WAR_COUNTRIES.has(normalizeCountryLabel(c.country))
+        CURRENT_WAR_COUNTRIES.has(canonicalConflictCountry(c.country))
     )
     .sort((a, b) => b.score - a.score)
     .slice(0, 45);
@@ -1648,7 +1716,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         const lat = city?.lat ?? bbox![4];
         const lon = city?.lon ?? bbox![5];
         const publisher = extractPublisherFromTitle(title);
-        if (!isTrustedPublisher(`${publisher} ${title}`)) continue;
+        const trusted = isTrustedPublisher(`${publisher} ${title}`);
         const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}`;
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
@@ -1665,12 +1733,13 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
           source: "Google News RSS",
           timestamp: new Date(pubDate).toISOString(),
           magnitude: city ? 7 : 4,
-          confidence: city ? 0.62 : 0.48,
+          confidence: trusted ? (city ? 0.7 : 0.58) : city ? 0.6 : 0.46,
           metadata: {
             event_type: keyword,
             publisher,
             original_headline: title,
             city: city?.city ?? null,
+            trusted_source: trusted,
           },
         });
       }
