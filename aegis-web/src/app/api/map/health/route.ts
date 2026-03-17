@@ -16,6 +16,7 @@ export async function GET() {
       process.env.ACLED_EMAIL?.trim() && process.env.ACLED_PASSWORD?.trim()
     ),
     ucdpToken: Boolean(process.env.UCDP_ACCESS_TOKEN?.trim()),
+    newsApi: Boolean(process.env.NEWS_API?.trim()),
   };
 
   return NextResponse.json(
@@ -28,6 +29,7 @@ export async function GET() {
         "Basic OpenSky auth still works in some environments but can be blocked/rate-limited on cloud IP ranges.",
         "AIS layer requires AISSTREAM_SNAPSHOT_URL relay endpoint.",
         "UCDP adds fresher event-level conflict signals when UCDP_ACCESS_TOKEN is set.",
+        "Event Registry feed is enabled when NEWS_API is set.",
       ],
     },
     { status: 200 }

@@ -645,6 +645,35 @@ const STRIKE_KEYWORDS = [
   "offensive",
 ];
 
+const WAR_LIKE_KEYWORDS = [
+  "war",
+  "civil war",
+  "front line",
+  "missile",
+  "airstrike",
+  "drone strike",
+  "artillery",
+  "rocket",
+  "bombing",
+  "battle",
+  "offensive",
+  "invasion",
+  "incursion",
+  "clashes",
+  "interception",
+  "naval battle",
+  "border clash",
+  "cross-border",
+];
+
+const TRUSTED_PUBLISHER_RE =
+  /\b(reuters|associated press|ap news|bbc|cnn|new york times|nytimes|washington post|wall street journal|financial times|al jazeera|france 24|deutsche welle|the guardian|bloomberg|nbc news|abc news|cbs news|npr|politico)\b/i;
+
+const GDELT_CACHE_TTL_MS = 8 * 60 * 1000;
+const GDELT_COOLDOWN_MS = 15 * 60 * 1000;
+let gdeltCache: { fetchedAt: number; points: IntelPoint[] } | null = null;
+let gdeltCooldownUntil = 0;
+
 const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }> = {
   tehran: { lat: 35.6892, lon: 51.389, country: "Iran" },
   isfahan: { lat: 32.6546, lon: 51.668, country: "Iran" },
@@ -685,6 +714,10 @@ function extractPublisherFromTitle(title: string): string {
   const parts = title.split(" - ").map((p) => p.trim()).filter(Boolean);
   if (parts.length >= 2) return parts[parts.length - 1];
   return "Unknown";
+}
+
+function isTrustedPublisher(text: string): boolean {
+  return TRUSTED_PUBLISHER_RE.test(text);
 }
 
 function extractStrikeKeyword(text: string): string | null {
@@ -884,13 +917,54 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
   health: ProviderHealth;
 }> {
   const started = Date.now();
+  const now = Date.now();
+  if (gdeltCache && now - gdeltCache.fetchedAt < GDELT_CACHE_TTL_MS) {
+    return {
+      points: gdeltCache.points,
+      health: {
+        provider: "GDELT",
+        ok: gdeltCache.points.length > 0,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: `Mapped ${gdeltCache.points.length} conflict events (cached)`,
+      },
+    };
+  }
+  if (now < gdeltCooldownUntil && gdeltCache) {
+    return {
+      points: gdeltCache.points,
+      health: {
+        provider: "GDELT",
+        ok: gdeltCache.points.length > 0,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: `Rate limited upstream; serving ${gdeltCache.points.length} cached events`,
+      },
+    };
+  }
+
   const query = encodeURIComponent(
-    "(missile OR strike OR drone OR explosion OR artillery OR bombardment OR battle OR invasion) AND (Ukraine OR Russia OR Iran OR Israel OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon)"
+    "(missile OR strike OR drone OR explosion OR artillery OR bombardment OR battle OR invasion OR interception OR naval battle) AND (Ukraine OR Russia OR Iran OR Israel OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon OR Myanmar)"
   );
   const url =
-    `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=ArtList&format=json&maxrecords=400&sort=datedesc`;
+    `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=ArtList&format=json&maxrecords=180&sort=datedesc`;
   const res = await timedJsonFetch<GdeltDocResponse>(url, undefined, 14000);
+  if (!res.ok && (res.message || "").includes("HTTP 429")) {
+    gdeltCooldownUntil = Date.now() + GDELT_COOLDOWN_MS;
+  }
   if (!res.ok || !res.data?.articles?.length) {
+    if (gdeltCache?.points?.length) {
+      return {
+        points: gdeltCache.points,
+        health: {
+          provider: "GDELT",
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          latencyMs: res.latencyMs,
+          message: `GDELT degraded (${res.message ?? "upstream error"}); using ${gdeltCache.points.length} cached events`,
+        },
+      };
+    }
     return {
       points: [],
       health: {
@@ -943,15 +1017,210 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
       },
     });
   }
+  gdeltCache = { fetchedAt: Date.now(), points: points.slice(0, 1400) };
 
   return {
-    points: points.slice(0, 1400),
+    points: gdeltCache.points,
     health: {
       provider: "GDELT",
+      ok: gdeltCache.points.length > 0,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message: `Mapped ${gdeltCache.points.length} conflict events`,
+    },
+  };
+}
+
+type EventRegistryArticle = {
+  uri?: string;
+  title?: string;
+  body?: string;
+  url?: string;
+  date?: string;
+  time?: string;
+  source?: {
+    title?: string;
+    uri?: string;
+  };
+  location?: {
+    country?: string;
+    city?: string;
+    type?: string;
+    label?: string;
+  };
+  concepts?: Array<{
+    label?: {
+      eng?: string;
+    };
+    type?: string;
+  }>;
+};
+
+function parseEventRegistryArticles(payload: unknown): EventRegistryArticle[] {
+  if (!payload || typeof payload !== "object") return [];
+  const root = payload as Record<string, unknown>;
+  const candidates = [
+    root.articles,
+    (root.articles as Record<string, unknown> | undefined)?.results,
+    root.results,
+  ];
+  for (const c of candidates) {
+    if (Array.isArray(c)) return c as EventRegistryArticle[];
+    if (c && typeof c === "object") {
+      const maybe = (c as Record<string, unknown>).results;
+      if (Array.isArray(maybe)) return maybe as EventRegistryArticle[];
+    }
+  }
+  return [];
+}
+
+function parseEventRegistryTimestamp(a: EventRegistryArticle): number {
+  const raw = `${a.date || ""} ${a.time || ""}`.trim();
+  const ts = raw ? Date.parse(raw) : Number.NaN;
+  if (Number.isFinite(ts)) return ts;
+  return Date.now();
+}
+
+async function fetchEventRegistryNews(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const apiKey = process.env.NEWS_API?.trim();
+  const started = Date.now();
+  if (!apiKey) {
+    return {
+      points: [],
+      health: {
+        provider: "Event Registry",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        message: "No NEWS_API configured",
+      },
+    };
+  }
+
+  const now = new Date();
+  const from = new Date(now.getTime() - rangeHours * 3600_000);
+  const bodyCandidates: unknown[] = [
+    {
+      apiKey,
+      keyword:
+        "missile strike OR drone strike OR naval battle OR artillery OR bombardment OR interception OR special operation OR border clashes",
+      dateStart: from.toISOString().slice(0, 10),
+      dateEnd: now.toISOString().slice(0, 10),
+      lang: ["eng"],
+      isDuplicateFilter: "skipDuplicates",
+      articlesCount: 300,
+      articlesSortBy: "date",
+    },
+    {
+      apiKey,
+      keyword:
+        "(missile OR strike OR drone OR battle OR naval OR operation OR interception) AND (Ukraine OR Russia OR Israel OR Iran OR Sudan OR Yemen OR Myanmar OR Syria OR Lebanon)",
+      dateStart: from.toISOString().slice(0, 10),
+      dateEnd: now.toISOString().slice(0, 10),
+      lang: ["eng"],
+      articlesCount: 250,
+      articlesSortBy: "date",
+    },
+  ];
+
+  let parsed: EventRegistryArticle[] = [];
+  let lastMessage = "No Event Registry articles returned";
+
+  for (const body of bodyCandidates) {
+    const res = await timedJsonFetch<unknown>(
+      "https://eventregistry.org/api/v1/article/getArticles",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+      },
+      14000
+    );
+    if (!res.ok) {
+      lastMessage = res.message ?? lastMessage;
+      continue;
+    }
+    parsed = parseEventRegistryArticles(res.data);
+    if (parsed.length) break;
+  }
+
+  if (!parsed.length) {
+    return {
+      points: [],
+      health: {
+        provider: "Event Registry",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: lastMessage,
+      },
+    };
+  }
+
+  const cutoff = Date.now() - rangeHours * 3600_000;
+  const points: IntelPoint[] = [];
+  for (const a of parsed) {
+    const title = String(a.title ?? "").trim();
+    const body = String(a.body ?? "").trim();
+    const fullText = `${title} ${body}`;
+    if (!title) continue;
+    const eventType = extractStrikeKeyword(fullText) ?? "event";
+    if (!WAR_LIKE_KEYWORDS.some((k) => fullText.toLowerCase().includes(k))) continue;
+
+    const sourceTitle = String(a.source?.title ?? "").trim();
+    const sourceUri = String(a.source?.uri ?? "").trim();
+    const trustedProbe = `${sourceTitle} ${sourceUri} ${title}`;
+    if (!isTrustedPublisher(trustedProbe)) continue;
+
+    const ts = parseEventRegistryTimestamp(a);
+    if (!Number.isFinite(ts) || ts < cutoff) continue;
+
+    const conceptCity = a.concepts?.find((c) => c.type === "loc" && c.label?.eng)?.label?.eng;
+    const locHint = String(a.location?.label ?? conceptCity ?? "").trim();
+    const city = extractMentionedCity(`${fullText} ${locHint}`);
+    const country =
+      city?.country ||
+      String(a.location?.country ?? "").trim() ||
+      extractMentionedCountry(`${fullText} ${locHint}`);
+    if (!country) continue;
+    const bbox = COUNTRY_BBOX[country];
+    if (!bbox && !city) continue;
+    const lat = city?.lat ?? bbox![4];
+    const lon = city?.lon ?? bbox![5];
+    const sourceUrl = String(a.url ?? "").trim();
+
+    points.push({
+      id: `eventreg-${a.uri ?? `${country}-${ts}-${points.length + 1}`}`,
+      layer: "news",
+      title: city ? `${eventType} report near ${city.city}` : `${eventType} report in ${country}`,
+      subtitle: sourceTitle || sourceUri || "Event Registry source",
+      lat,
+      lon,
+      country: normalizeCountryLabel(country),
+      severity: city ? "high" : "medium",
+      source: "Event Registry",
+      timestamp: new Date(ts).toISOString(),
+      magnitude: city ? 8 : 5,
+      confidence: city ? 0.72 : 0.65,
+      metadata: {
+        event_type: eventType,
+        publisher: sourceTitle || sourceUri || "unknown",
+        source_url: sourceUrl || null,
+        original_headline: title,
+      },
+    });
+  }
+
+  return {
+    points: points.slice(0, 1000),
+    health: {
+      provider: "Event Registry",
       ok: points.length > 0,
       updatedAt: new Date().toISOString(),
       latencyMs: Date.now() - started,
-      message: `Mapped ${points.length} conflict events`,
+      message: `Mapped ${points.length} event-level trusted-source reports`,
     },
   };
 }
@@ -984,9 +1253,32 @@ function buildActiveConflictCountries(
     byCountry.set(country, current);
   };
 
-  for (const p of liveStrikes) push(p, 2.6);
-  for (const p of conflicts) push(p, 2.2);
-  for (const p of news) push(p, 0.9);
+  const isWarLike = (p: IntelPoint): boolean => {
+    const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`.toLowerCase();
+    if (WAR_LIKE_KEYWORDS.some((k) => text.includes(k))) return true;
+    if (p.source === "UCDP") return true;
+    if (p.source === "ACLED ArcGIS") {
+      const battles = Number(p.metadata?.battles ?? 0);
+      const explosions = Number(p.metadata?.explosions ?? 0);
+      const civilians = Number(p.metadata?.civilians ?? 0);
+      const fatalities = Number(p.metadata?.fatalities ?? 0);
+      const protests = Number(p.metadata?.protests ?? 0);
+      const riots = Number(p.metadata?.riots ?? 0);
+      const hardConflict = battles + explosions + civilians + riots;
+      return hardConflict >= 3 && fatalities >= 1 && protests <= 12;
+    }
+    return false;
+  };
+
+  for (const p of liveStrikes) {
+    if (isWarLike(p)) push(p, 3.1);
+  }
+  for (const p of conflicts) {
+    if (isWarLike(p)) push(p, 2.8);
+  }
+  // News-only country scoring is intentionally excluded so protests/headline noise
+  // does not color countries as active war zones.
+  void news;
 
   return Array.from(byCountry.entries())
     .map(([country, v]) => ({
@@ -996,9 +1288,9 @@ function buildActiveConflictCountries(
       latestEventAt: v.latestEventAt,
       sources: Array.from(v.sources).slice(0, 6),
     }))
-    .filter((c) => c.score >= 4)
+    .filter((c) => c.score >= 8)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 80);
+    .slice(0, 45);
 }
 
 async function fetchRapidConflictSignals(rangeHours: number): Promise<{
@@ -1216,6 +1508,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         const lat = city?.lat ?? bbox![4];
         const lon = city?.lon ?? bbox![5];
         const publisher = extractPublisherFromTitle(title);
+        if (!isTrustedPublisher(`${publisher} ${title}`)) continue;
         const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}`;
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
@@ -1707,6 +2000,7 @@ export async function GET(request: Request) {
       ucdpRes,
       liveuamapRes,
       gdeltRes,
+      eventRegistryRes,
       rapidRes,
       flightsRes,
       vesselsRes,
@@ -1718,6 +2012,7 @@ export async function GET(request: Request) {
       fetchUcdpConflicts(rangeHours),
       fetchLiveuamapEvents(rangeHours),
       fetchGdeltConflictEvents(rangeHours),
+      fetchEventRegistryNews(rangeHours),
       fetchRapidConflictSignals(rangeHours),
       fetchOpenSkyFlights(),
       fetchVesselSignals(),
@@ -1728,14 +2023,32 @@ export async function GET(request: Request) {
     const mergedConflicts = [...ucdpRes.points, ...acledRes.points]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
       .slice(0, 2400);
-    const liveStrikes = [...rapidRes.points, ...gdeltRes.points, ...liveuamapRes.points]
+    const eventRegistryStrikePoints: IntelPoint[] = eventRegistryRes.points
+      .filter((p) => WAR_LIKE_KEYWORDS.some((k) => `${p.title} ${p.subtitle ?? ""}`.toLowerCase().includes(k)))
+      .map((p, idx) => ({
+        ...p,
+        id: `eventreg-strike-${p.id}-${idx}`,
+        layer: "liveStrikes" as const,
+        severity: p.severity === "critical" ? "critical" : "high",
+        source: "Event Registry",
+      }));
+
+    const liveStrikes = [
+      ...rapidRes.points,
+      ...gdeltRes.points,
+      ...liveuamapRes.points,
+      ...eventRegistryStrikePoints,
+    ]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
       .slice(0, 2400);
+    const fusedNewsPoints = [...newsRes.points, ...eventRegistryRes.points]
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .slice(0, 1600);
     const carrierGroups = extractCarrierGroups(vesselsRes.points);
     const activeConflictCountries = buildActiveConflictCountries(
       liveStrikes,
       mergedConflicts,
-      newsRes.points
+      fusedNewsPoints
     );
 
     const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
@@ -1744,7 +2057,7 @@ export async function GET(request: Request) {
       flights: flightsRes.points,
       vessels: vesselsRes.points,
       carriers: carrierGroups,
-      news: newsRes.points,
+      news: fusedNewsPoints,
       hotspots: [],
       infrastructure: infraRes.points,
     };
@@ -1767,6 +2080,7 @@ export async function GET(request: Request) {
         ucdpRes.health,
         liveuamapRes.health,
         gdeltRes.health,
+        eventRegistryRes.health,
         rapidRes.health,
         flightsRes.health,
         vesselsRes.health,
