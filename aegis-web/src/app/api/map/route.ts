@@ -431,6 +431,36 @@ type OpenSkyStatesResponse = {
 const MILITARY_CALLSIGN_RE =
   /(^|\s)(RCH|REACH|DUKE|NAVY|USAF|RAF|RRR|NATO|IAF|ROKAF|QID|AIO|CNV|FORTE|HOMER|LAGR|JSTARS|COPPER|SHELL|ARAB|TUAF|SPAR|SAM|HURON|ASCOT|RFR|OMEN|MC|MIG|SU-|F-16|F-35|IL-76|ANKA|QTR|UAEAF|RSAF)/i;
 
+const MILITARY_ORIGIN_COUNTRY_RE =
+  /\b(United States|United Kingdom|France|Germany|Italy|Turkey|Israel|Russia|Ukraine|India|Pakistan|Saudi Arabia|United Arab Emirates|Qatar|Iran|China|Japan|South Korea)\b/i;
+
+function isLikelyMilitaryOpenSkyRow(
+  callsign: string,
+  originCountry: string,
+  onGround: boolean,
+  velocityMs: number,
+  altitudeM: number
+): boolean {
+  if (MILITARY_CALLSIGN_RE.test(callsign)) return true;
+  const compact = callsign.replace(/\s+/g, "");
+  const hasMilitaryStylePattern = /^[A-Z]{2,5}\d{2,5}[A-Z]?$/.test(compact);
+  return (
+    !onGround &&
+    hasMilitaryStylePattern &&
+    MILITARY_ORIGIN_COUNTRY_RE.test(originCountry) &&
+    (velocityMs >= 105 || altitudeM >= 1500)
+  );
+}
+
+function inferAircraftRole(callsign: string): string {
+  const c = callsign.toUpperCase();
+  if (/\b(AF|RCH|REACH|ASCOT|DUKE|SPAR)\b/.test(c)) return "Air force transport";
+  if (/\b(NAVY|CNV|USS|USN)\b/.test(c)) return "Naval aviation";
+  if (/\b(FORTE|RQ|MQ|UAV|DRONE)\b/.test(c)) return "ISR/Drone mission";
+  if (/\b(F-16|F-35|MIG|SU-)\b/.test(c)) return "Combat jet";
+  return "Military flight";
+}
+
 async function fetchOpenSkyOAuthToken(
   clientId: string,
   clientSecret: string
@@ -464,17 +494,24 @@ function extractOpenSkyMilitaryPoints(
     const lon = Number(r[5]);
     const lat = Number(r[6]);
     if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
-    if (!MILITARY_CALLSIGN_RE.test(callsign)) continue;
-
+    const baroAltitude = Number(r[7]) || 0;
+    const onGround = Boolean(r[8]);
     const velocity = Number(r[9]) || 0;
-    const altitude = Number(r[13]) || 0;
+    const trueTrack = Number(r[10]);
+    const verticalRate = Number(r[11]) || 0;
+    const altitude = Number(r[13]) || baroAltitude;
+    const squawk = String(r[14] ?? "").trim();
+    const icao24 = String(r[0] ?? "").trim();
+    if (!isLikelyMilitaryOpenSkyRow(callsign, country, onGround, velocity, altitude)) continue;
     const norm = Math.min(1, velocity / 320);
+    const speedKts = Number((velocity * 1.943844).toFixed(1));
+    const role = inferAircraftRole(callsign);
 
     points.push({
-      id: `flight-${r[0] ?? `${callsign}-${lat}-${lon}`}`,
+      id: `flight-${icao24 || `${callsign}-${lat}-${lon}`}`,
       layer: "flights",
       title: callsign || "Military flight",
-      subtitle: country || "Unknown origin",
+      subtitle: `${country || "Unknown origin"} • ${role}`,
       lat,
       lon,
       severity: mapSeverity(norm),
@@ -484,7 +521,15 @@ function extractOpenSkyMilitaryPoints(
       confidence: 0.65,
       metadata: {
         velocity_ms: velocity,
+        speed_kts: speedKts,
         altitude_m: altitude,
+        heading_deg: Number.isFinite(trueTrack) ? Math.round(trueTrack) : null,
+        vertical_rate_ms: verticalRate,
+        squawk: squawk || null,
+        icao24: icao24 || null,
+        origin_country: country || null,
+        on_ground: onGround,
+        aircraft_role: role,
       },
     });
   }
@@ -535,7 +580,7 @@ async function fetchOpenSkyFlights(): Promise<{
       res.data.time ?? Math.floor(Date.now() / 1000)
     );
     return {
-      points: points.slice(0, 900),
+      points: points.slice(0, 1600),
       health: {
         provider: "OpenSky",
         ok: true,
@@ -580,6 +625,7 @@ async function fetchOpenSkyFlights(): Promise<{
     if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
     const velocity = Number(flight.gs) || 0;
     const altitude = Number(flight.alt_baro) || 0;
+    const speedKts = Number((velocity * 1.943844).toFixed(1));
     points.push({
       id: `flight-fallback-${flight.hex ?? `${lat}-${lon}`}`,
       layer: "flights",
@@ -594,13 +640,15 @@ async function fetchOpenSkyFlights(): Promise<{
       confidence: 0.55,
       metadata: {
         velocity_ms: velocity,
+        speed_kts: speedKts,
         altitude_m: altitude,
+        icao24: String(flight.hex ?? "").trim() || null,
       },
     });
   }
 
   return {
-    points: points.slice(0, 900),
+    points: points.slice(0, 1400),
     health: {
       provider: "OpenSky",
       ok: true,
@@ -620,6 +668,14 @@ const COUNTRY_ALIASES: Array<{ keyword: string; country: string }> = [
   { keyword: "syrian", country: "Syria" },
   { keyword: "yemeni", country: "Yemen" },
   { keyword: "iranian", country: "Iran" },
+  { keyword: "myanmarese", country: "Myanmar" },
+  { keyword: "uae", country: "United Arab Emirates" },
+  { keyword: "emirati", country: "United Arab Emirates" },
+  { keyword: "saudi", country: "Saudi Arabia" },
+  { keyword: "qatari", country: "Qatar" },
+  { keyword: "omani", country: "Oman" },
+  { keyword: "bahraini", country: "Bahrain" },
+  { keyword: "kuwaiti", country: "Kuwait" },
 ];
 
 function extractMentionedCountry(text: string): string | null {
@@ -835,7 +891,6 @@ const CURRENT_WAR_COUNTRIES = new Set(
     "Iraq",
     "Somalia",
     "Mali",
-    "Burkina Faso",
     "Niger",
     "Democratic Republic of the Congo",
     "Ethiopia",
@@ -852,6 +907,7 @@ const CONFLICT_COUNTRY_ALIASES: Record<string, string> = {
   "russian federation": "russia",
   "state of palestine": "palestine",
   "occupied palestinian territory": "palestine",
+  burma: "myanmar",
 };
 
 const GDELT_SOURCECOUNTRY_MAP: Record<string, string> = {
@@ -922,6 +978,23 @@ const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }>
   muscat: { lat: 23.5859, lon: 58.4059, country: "Oman" },
 };
 
+const CONFLICT_REGION_CENTROIDS: Array<{
+  re: RegExp;
+  country: string;
+  lat: number;
+  lon: number;
+}> = [
+  { re: /\bred sea\b/i, country: "Yemen", lat: 17.8, lon: 40.2 },
+  { re: /\bgulf of aden\b/i, country: "Yemen", lat: 12.1, lon: 49.5 },
+  { re: /\bpersian gulf|arabian gulf\b/i, country: "United Arab Emirates", lat: 26.1, lon: 52.1 },
+  { re: /\bgulf of oman\b/i, country: "Oman", lat: 24.9, lon: 58.8 },
+  { re: /\bblack sea\b/i, country: "Ukraine", lat: 43.2, lon: 35.0 },
+  { re: /\bsouth china sea\b/i, country: "Philippines", lat: 14.8, lon: 114.8 },
+  { re: /\bwestern pacific\b/i, country: "Japan", lat: 24.7, lon: 142.0 },
+  { re: /\beastern mediterranean|levant\b/i, country: "Israel", lat: 33.9, lon: 34.9 },
+  { re: /\bkashmir|line of control\b/i, country: "Pakistan", lat: 34.3, lon: 74.5 },
+];
+
 function normalizeHeadlineForCluster(text: string): string {
   return text
     .toLowerCase()
@@ -952,6 +1025,17 @@ function extractMentionedCity(text: string): { city: string; lat: number; lon: n
   for (const [city, loc] of Object.entries(CITY_COORDS)) {
     if (normalized.includes(city)) {
       return { city, ...loc };
+    }
+  }
+  return null;
+}
+
+function extractRegionFallback(
+  text: string
+): { lat: number; lon: number; country: string } | null {
+  for (const r of CONFLICT_REGION_CENTROIDS) {
+    if (r.re.test(text)) {
+      return { lat: r.lat, lon: r.lon, country: r.country };
     }
   }
   return null;
@@ -1673,7 +1757,7 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
   }
 
   return {
-    points: points.slice(0, 1000),
+    points: points.slice(0, 1800),
     health: {
       provider: "Event Registry",
       ok: points.length > 0,
@@ -1761,7 +1845,7 @@ function buildActiveConflictCountries(
     if (seen.has(warCountry)) continue;
     computed.push({
       country: warCountry,
-      score: 0.6,
+      score: 1.2,
       severity: "low",
       latestEventAt: nowIso,
       sources: ["Curated conflict-country baseline"],
@@ -1836,7 +1920,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
 }> {
   const started = Date.now();
   const query = encodeURIComponent(
-    "(airstrike OR missile strike OR bombardment OR drone strike OR explosion OR artillery OR battle) (Ukraine OR Russia OR Israel OR Gaza OR Iran OR Sudan OR Yemen OR Syria OR Lebanon OR Red Sea)"
+    "(airstrike OR missile strike OR bombardment OR drone strike OR explosion OR artillery OR battle OR naval clash OR interception OR border clash OR infiltration OR standoff) (Ukraine OR Russia OR Israel OR Gaza OR Iran OR Sudan OR Yemen OR Syria OR Lebanon OR Red Sea OR Gulf OR Saudi OR UAE OR Qatar OR Oman OR Somalia)"
   );
   const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
 
@@ -1858,7 +1942,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     }
 
     const text = await res.text();
-    const itemBlocks = text.split("<item>").slice(1, 520);
+    const itemBlocks = text.split("<item>").slice(1, 1000);
     const cutoff = Date.now() - rangeHours * 3600_000;
     const clusters = new Map<
       string,
@@ -1889,12 +1973,13 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
       if (!descriptor.isConflict) continue;
 
       const city = extractMentionedCity(fullText);
-      const country = city?.country || extractMentionedCountry(fullText);
+      const region = extractRegionFallback(fullText);
+      const country = city?.country || extractMentionedCountry(fullText) || region?.country;
       if (!country) continue;
       const bbox = COUNTRY_BBOX[country];
-      if (!bbox && !city) continue;
-      const lat = city?.lat ?? bbox![4];
-      const lon = city?.lon ?? bbox![5];
+      if (!bbox && !city && !region) continue;
+      const lat = city?.lat ?? region?.lat ?? bbox![4];
+      const lon = city?.lon ?? region?.lon ?? bbox![5];
 
       const publisher = extractPublisherFromTitle(title);
       const clusterKey = `${country}|${city?.city ?? "country"}|${descriptor.eventType}|${normalizeHeadlineForCluster(
@@ -1949,7 +2034,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     }
 
     return {
-      points: points.slice(0, 560),
+      points: points.slice(0, 1200),
       health: {
         provider: "Rapid conflict feed",
         ok: true,
@@ -1988,6 +2073,14 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "(drone attack OR ballistic missile OR cruise missile OR shelling OR raid) (Tel Aviv OR Tehran OR Kyiv OR Kharkiv OR Odesa OR Sanaa OR Damascus OR Beirut)",
     "(warship OR submarine OR fleet movement OR naval task force OR carrier strike group) (Gulf OR UAE OR Saudi Arabia OR Qatar OR Oman OR Red Sea)",
     "(border clash OR standoff OR infiltration OR skirmish) (India OR Pakistan OR China OR Taiwan OR Lebanon OR Syria)",
+    "(jamming OR interception OR anti-air OR air defense OR SAM battery) (Iran OR Israel OR Ukraine OR Russia OR Saudi Arabia OR UAE)",
+    "(special forces OR commandos OR covert raid OR sabotage) (Ukraine OR Russia OR Iran OR Israel OR Syria OR Lebanon)",
+    "(carrier strike group OR naval flotilla OR amphibious ready group) (Mediterranean OR Red Sea OR Persian Gulf OR Arabian Sea)",
+    "(submarine OR torpedo OR anti-ship missile OR maritime patrol aircraft) (Black Sea OR Red Sea OR Gulf of Oman OR Arabian Sea)",
+    "(frontline update OR trench warfare OR artillery duel OR cross-border shelling) (Donetsk OR Luhansk OR Zaporizhzhia OR Kherson OR Kharkiv)",
+    "(Houthi OR Hezbollah OR IRGC OR Wagner OR ISIS OR Al Shabaab) (attack OR clash OR strike OR ambush)",
+    "(Somalia OR Afghanistan OR Pakistan OR Kashmir OR Myanmar OR Sahel) (battle OR offensive OR raid OR clash)",
+    "(UAE OR Saudi Arabia OR Qatar OR Bahrain OR Kuwait OR Oman) (missile OR interception OR naval movement OR air operation)",
   ];
   const eventKeywords = [
     "missile",
@@ -2011,6 +2104,15 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "carrier",
     "frigate",
     "destroyer",
+    "air defense",
+    "jamming",
+    "torpedo",
+    "ambush",
+    "infiltration",
+    "sabotage",
+    "anti-ship",
+    "carrier strike group",
+    "commandos",
   ];
   try {
     const points: IntelPoint[] = [];
@@ -2040,7 +2142,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         clearTimeout(timer);
       }
 
-      const itemBlocks = text.split("<item>").slice(1, 1200);
+      const itemBlocks = text.split("<item>").slice(1, 1800);
 
       for (let i = 0; i < itemBlocks.length; i += 1) {
         const block = itemBlocks[i];
@@ -2059,15 +2161,16 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         const descriptor = classifyEvent(fullText);
         if (!descriptor.isConflict) continue;
         const city = extractMentionedCity(fullText);
-        const country = city?.country || extractMentionedCountry(fullText);
+        const region = extractRegionFallback(fullText);
+        const country = city?.country || extractMentionedCountry(fullText) || region?.country;
         if (!country) continue;
         const bbox = COUNTRY_BBOX[country];
-        if (!bbox && !city) continue;
-        const lat = city?.lat ?? bbox![4];
-        const lon = city?.lon ?? bbox![5];
+        if (!bbox && !city && !region) continue;
+        const lat = city?.lat ?? region?.lat ?? bbox![4];
+        const lon = city?.lon ?? region?.lon ?? bbox![5];
         const publisher = extractPublisherFromTitle(title);
         const trusted = isTrustedPublisher(`${publisher} ${title}`);
-        const timeBucket = Math.floor(pubDate / (6 * 3600_000));
+        const timeBucket = Math.floor(pubDate / (3 * 3600_000));
         const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}|${timeBucket}`;
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
@@ -2104,7 +2207,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     points.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
     return {
-      points: points.slice(0, 4200),
+      points: points.slice(0, 7600),
       health: {
         provider: "Google News RSS",
         ok: points.length > 0,
@@ -2127,6 +2230,182 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         message: err instanceof Error ? err.message : "News fetch failed",
       },
     };
+  }
+}
+
+const USNI_REGION_HINTS: Array<{
+  label: string;
+  country: string;
+  lat: number;
+  lon: number;
+  re: RegExp;
+}> = [
+  { label: "North Atlantic", country: "Iceland", lat: 64.7, lon: -18.6, re: /\b(north atlantic|atlantic)\b/i },
+  { label: "Eastern Mediterranean", country: "Cyprus", lat: 34.9, lon: 33.1, re: /\b(eastern med|eastern mediterranean|mediterranean)\b/i },
+  { label: "Black Sea", country: "Romania", lat: 43.0, lon: 35.2, re: /\bblack sea\b/i },
+  { label: "Red Sea", country: "Yemen", lat: 17.6, lon: 40.4, re: /\bred sea\b/i },
+  { label: "Gulf of Aden", country: "Yemen", lat: 12.2, lon: 49.2, re: /\bgulf of aden\b/i },
+  { label: "Arabian Sea", country: "Oman", lat: 19.0, lon: 62.5, re: /\barabian sea\b/i },
+  { label: "Persian Gulf", country: "United Arab Emirates", lat: 26.2, lon: 52.3, re: /\b(persian gulf|arabian gulf|gulf)\b/i },
+  { label: "Gulf of Oman", country: "Oman", lat: 24.8, lon: 58.8, re: /\bgulf of oman\b/i },
+  { label: "South China Sea", country: "Philippines", lat: 14.6, lon: 114.7, re: /\bsouth china sea\b/i },
+  { label: "Philippine Sea", country: "Philippines", lat: 18.0, lon: 132.0, re: /\bphilippine sea\b/i },
+  { label: "Western Pacific", country: "Japan", lat: 25.0, lon: 142.0, re: /\bwestern pacific\b/i },
+  { label: "Baltic Sea", country: "Sweden", lat: 58.8, lon: 20.5, re: /\bbaltic sea\b/i },
+];
+
+function inferUsniRegions(text: string): Array<{
+  label: string;
+  country: string;
+  lat: number;
+  lon: number;
+}> {
+  const out: Array<{ label: string; country: string; lat: number; lon: number }> = [];
+  for (const h of USNI_REGION_HINTS) {
+    if (h.re.test(text)) out.push(h);
+  }
+  return out;
+}
+
+function dedupeVesselPoints(points: IntelPoint[]): IntelPoint[] {
+  const byKey = new Map<string, IntelPoint>();
+  for (const p of points) {
+    const roundedLat = Math.round(p.lat * 2) / 2;
+    const roundedLon = Math.round(p.lon * 2) / 2;
+    const bucket = Math.floor(Date.parse(p.timestamp || new Date().toISOString()) / (8 * 3600_000));
+    const key = `${(p.title || "").toLowerCase()}|${(p.country || "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}`;
+    const current = byKey.get(key);
+    if (!current || p.timestamp > current.timestamp) byKey.set(key, p);
+  }
+  return Array.from(byKey.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+async function fetchUsniFleetTrackerSignals(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const query = encodeURIComponent(
+    'site:news.usni.org ("Fleet and Marine Tracker" OR "Fleet Tracker" OR "Naval Tracker")'
+  );
+  const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
+    if (!res.ok) {
+      return {
+        points: [],
+        health: {
+          provider: "USNI Fleet Tracker",
+          ok: false,
+          updatedAt: new Date().toISOString(),
+          latencyMs: Date.now() - started,
+          message: `HTTP ${res.status}`,
+        },
+      };
+    }
+    const text = await res.text();
+    const itemBlocks = text.split("<item>").slice(1, 400);
+    const cutoff = Date.now() - rangeHours * 3600_000;
+    const points: IntelPoint[] = [];
+    for (const block of itemBlocks) {
+      const title = extractRssTag(block, "title");
+      if (!title) continue;
+      const description = extractRssTag(block, "description") ?? "";
+      const link = extractRssTag(block, "link");
+      const imageUrl = extractRssImageUrl(block);
+      const pubRaw = extractRssTag(block, "pubDate");
+      const ts = pubRaw ? Date.parse(pubRaw) : Date.now();
+      if (!Number.isFinite(ts) || ts < cutoff) continue;
+
+      const textBlob = `${title} ${description}`;
+      const regions = inferUsniRegions(textBlob);
+      const shipMatch = textBlob.match(
+        /\b(USS|USNS|HMS|HMCS|HMAS|ROKS|INS|PLAN)\s+[A-Z0-9\- ]{2,50}\b/
+      );
+      const shipHint = shipMatch?.[0]?.trim() || null;
+
+      if (regions.length > 0) {
+        for (const r of regions.slice(0, 7)) {
+          points.push({
+            id: `usni-vessel-${r.label}-${ts}-${points.length + 1}`,
+            layer: "vessels",
+            title: shipHint || `${r.label} naval presence`,
+            subtitle: "USNI Fleet Tracker",
+            lat: r.lat,
+            lon: r.lon,
+            country: r.country,
+            severity: "medium",
+            source: "USNI Fleet Tracker",
+            timestamp: new Date(ts).toISOString(),
+            magnitude: 12,
+            confidence: 0.8,
+            imageUrl: imageUrl || undefined,
+            metadata: {
+              region: r.label,
+              source_url: link || null,
+              image_url: imageUrl || null,
+              ship_hint: shipHint,
+            },
+          });
+        }
+        continue;
+      }
+
+      const city = extractMentionedCity(textBlob);
+      const country = city?.country || extractMentionedCountry(textBlob);
+      if (!country) continue;
+      const bbox = COUNTRY_BBOX[country];
+      if (!bbox && !city) continue;
+      points.push({
+        id: `usni-vessel-${country}-${ts}-${points.length + 1}`,
+        layer: "vessels",
+        title: shipHint || `${country} naval movement`,
+        subtitle: "USNI Fleet Tracker",
+        lat: city?.lat ?? bbox![4],
+        lon: city?.lon ?? bbox![5],
+        country,
+        severity: city ? "high" : "medium",
+        source: "USNI Fleet Tracker",
+        timestamp: new Date(ts).toISOString(),
+        magnitude: city ? 13 : 10,
+        confidence: city ? 0.82 : 0.72,
+        imageUrl: imageUrl || undefined,
+        metadata: {
+          source_url: link || null,
+          image_url: imageUrl || null,
+          ship_hint: shipHint,
+        },
+      });
+    }
+
+    const deduped = dedupeVesselPoints(points).slice(0, 2200);
+    return {
+      points: deduped,
+      health: {
+        provider: "USNI Fleet Tracker",
+        ok: deduped.length > 0,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: deduped.length
+          ? `Mapped ${deduped.length} fleet tracker vessel signals`
+          : "No fleet tracker vessel signals returned",
+      },
+    };
+  } catch (err) {
+    return {
+      points: [],
+      health: {
+        provider: "USNI Fleet Tracker",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: err instanceof Error ? err.message : "USNI fleet fetch failed",
+      },
+    };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -2577,6 +2856,7 @@ export async function GET(request: Request) {
       eventRegistryRes,
       rapidRes,
       flightsRes,
+      usniVesselsRes,
       vesselsRes,
       newsRes,
       infraRes,
@@ -2589,6 +2869,7 @@ export async function GET(request: Request) {
       fetchEventRegistryNews(rangeHours),
       fetchRapidConflictSignals(rangeHours),
       fetchOpenSkyFlights(),
+      fetchUsniFleetTrackerSignals(rangeHours),
       fetchVesselSignals(),
       fetchNewsSignals(rangeHours),
       fetchStrategicInfrastructure(),
@@ -2614,11 +2895,15 @@ export async function GET(request: Request) {
       ...eventRegistryStrikePoints,
     ]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 2400);
+      .slice(0, 3600);
     const fusedNewsPoints = [...newsRes.points, ...eventRegistryRes.points]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 2800);
-    const carrierGroups = extractCarrierGroups(vesselsRes.points);
+      .slice(0, 5600);
+    const mergedVesselPoints = dedupeVesselPoints([
+      ...usniVesselsRes.points,
+      ...vesselsRes.points,
+    ]).slice(0, 3800);
+    const carrierGroups = extractCarrierGroups(mergedVesselPoints);
     const activeConflictCountries = buildActiveConflictCountries(
       liveStrikes,
       mergedConflicts,
@@ -2665,7 +2950,7 @@ export async function GET(request: Request) {
       conflicts: mergedConflicts,
       liveStrikes,
       flights: flightsRes.points,
-      vessels: vesselsRes.points,
+      vessels: mergedVesselPoints,
       carriers: carrierGroups,
       news: fusedNewsPoints,
       escalationRisk: escalationRiskPoints,
@@ -2695,6 +2980,7 @@ export async function GET(request: Request) {
         eventRegistryRes.health,
         rapidRes.health,
         flightsRes.health,
+        usniVesselsRes.health,
         vesselsRes.health,
         {
           provider: "Carrier groups",
