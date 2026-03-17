@@ -34,9 +34,60 @@ export type ProviderHealth = {
   message?: string;
 };
 
+export type ActiveConflictCountry = {
+  country: string;
+  score: number;
+  severity: IntelSeverity;
+  latestEventAt: string;
+  sources: string[];
+};
+
 export type MapApiResponse = {
   updatedAt: string;
   range: string;
   layers: Record<IntelLayerKey, IntelPoint[]>;
   providerHealth: ProviderHealth[];
+  activeConflictCountries?: ActiveConflictCountry[];
+};
+
+export type CountryIntelResponse = {
+  country: string;
+  range: string;
+  updatedAt: string;
+  instabilityIndex: number;
+  status: "stable" | "elevated" | "critical";
+  signals: {
+    liveStrikes: number;
+    conflicts: number;
+    militaryFlights: number;
+    navalVessels: number;
+    carrierSignals: number;
+    protests: number;
+    criticalNews: number;
+  };
+  timeline: Array<{
+    day: string;
+    liveStrikes: number;
+    conflicts: number;
+    military: number;
+    protests: number;
+    natural: number;
+  }>;
+  topNews: Array<{
+    title: string;
+    severity: IntelSeverity;
+    source: string;
+    timestamp: string;
+  }>;
+  militaryActivity: {
+    ownFlights: number;
+    foreignFlights: number;
+    navalVessels: number;
+    foreignPresence: "yes" | "no";
+    nearestMilitaryBaseKm?: number;
+  };
+  infrastructureExposure: {
+    nearbyCritical: number;
+    nearestCriticalKm?: number;
+  };
 };

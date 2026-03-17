@@ -6,16 +6,18 @@ import { GeoJsonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import Map, { NavigationControl } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { IntelLayerKey, IntelPoint } from "@/lib/intel/types";
+import type { ActiveConflictCountry, IntelLayerKey, IntelPoint } from "@/lib/intel/types";
 import { LAYER_COLORS } from "@/lib/intel/colors";
 
 export type ConflictMapProps = {
   layers: Record<IntelLayerKey, IntelPoint[]>;
   activeLayers: Record<IntelLayerKey, boolean>;
+  activeConflictCountries?: ActiveConflictCountry[];
   recenterRef?: React.MutableRefObject<(() => void) | null>;
   onReady?: () => void;
   onError?: (message: string) => void;
   onPointSelect?: (point: IntelPoint) => void;
+  onCountrySelect?: (country: string) => void;
 };
 
 const DEFAULT_VIEW_STATE = {
@@ -66,10 +68,12 @@ function severityRadiusMultiplier(severity: IntelPoint["severity"]): number {
 export default function ConflictMap({
   layers,
   activeLayers,
+  activeConflictCountries = [],
   recenterRef,
   onReady,
   onError,
   onPointSelect,
+  onCountrySelect,
 }: ConflictMapProps) {
   const [viewState, setViewState] = useState(DEFAULT_VIEW_STATE);
 
@@ -99,18 +103,10 @@ export default function ConflictMap({
 
   const deckLayers = useMemo(() => {
     const countryScore = new globalThis.Map<string, number>();
-    const scoringSignals = [...layers.conflicts, ...layers.liveStrikes, ...layers.news];
-    for (const p of scoringSignals) {
-      if (!p.country) continue;
-      const normalized = normalizeCountryName(p.country);
+    for (const c of activeConflictCountries) {
+      const normalized = normalizeCountryName(c.country);
       const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
-      const sev = p.severity === "critical" ? 3.5 : p.severity === "high" ? 2.4 : p.severity === "medium" ? 1.4 : 0.7;
-      const liveBoost = p.layer === "liveStrikes" ? 1.7 : p.layer === "news" ? 1.15 : 1;
-      const recencyPenalty = Math.max(
-        0.35,
-        1 - (Date.now() - new Date(p.timestamp).getTime()) / (1000 * 3600 * 24 * 14)
-      );
-      countryScore.set(key, (countryScore.get(key) ?? 0) + sev * recencyPenalty * liveBoost);
+      countryScore.set(key, c.score);
     }
 
     const built: any[] = [];
@@ -119,7 +115,7 @@ export default function ConflictMap({
         new GeoJsonLayer({
           id: "country-conflict-heat",
           data: COUNTRY_GEOJSON_URL,
-          pickable: false,
+          pickable: true,
           filled: true,
           stroked: true,
           lineWidthMinPixels: 1,
@@ -136,7 +132,13 @@ export default function ConflictMap({
             return [248, 113, 113, 70];
           },
           updateTriggers: {
-            getFillColor: [layers.conflicts.length],
+            getFillColor: [
+              activeConflictCountries.map((c) => `${c.country}:${c.score}`).join("|"),
+            ],
+          },
+          onClick: ({ object }: any) => {
+            const rawName = String(object?.properties?.name ?? "").trim();
+            if (rawName) onCountrySelect?.(rawName);
           },
         })
       );
@@ -202,7 +204,7 @@ export default function ConflictMap({
     }
 
     return built;
-  }, [activeLayers, layers, onPointSelect]);
+  }, [activeConflictCountries, activeLayers, layers, onCountrySelect, onPointSelect]);
 
   return (
     <DeckGL

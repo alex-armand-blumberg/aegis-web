@@ -3,9 +3,15 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { IntelLayerKey, IntelPoint, MapApiResponse } from "@/lib/intel/types";
+import type {
+  CountryIntelResponse,
+  IntelLayerKey,
+  IntelPoint,
+  MapApiResponse,
+} from "@/lib/intel/types";
 import { layerColorCss } from "@/lib/intel/colors";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
+import CountryIntelPanel from "@/components/CountryIntelPanel";
 
 const ConflictMap = dynamic(() => import("@/components/ConflictMap"), {
   ssr: false,
@@ -45,6 +51,8 @@ export default function MapPage() {
   const [activeLayers, setActiveLayers] = useState(buildInitialLayerState);
   const [apiData, setApiData] = useState<MapApiResponse | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<IntelPoint | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [countryIntel, setCountryIntel] = useState<CountryIntelResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
@@ -83,6 +91,32 @@ export default function MapPage() {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    if (!selectedCountry) {
+      setCountryIntel(null);
+      return;
+    }
+    let active = true;
+    const run = async () => {
+      try {
+        const params = new URLSearchParams({
+          country: selectedCountry,
+          range,
+        });
+        const res = await fetch(`/api/map/country?${params.toString()}`);
+        const data = (await res.json()) as CountryIntelResponse & { error?: string };
+        if (!res.ok) throw new Error(data.error || "Failed country intelligence");
+        if (active) setCountryIntel(data);
+      } catch {
+        if (active) setCountryIntel(null);
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [range, selectedCountry]);
+
   const handleFullscreen = useCallback(() => {
     const el = mapContainerRef.current;
     if (!el) return;
@@ -119,6 +153,7 @@ export default function MapPage() {
     } as MapApiResponse["layers"]);
 
   const providerHealth = apiData?.providerHealth ?? [];
+  const activeConflictCountries = apiData?.activeConflictCountries ?? [];
 
   const totalVisible = ALL_LAYERS.reduce(
     (sum, layer) => sum + (activeLayers[layer] ? layers[layer].length : 0),
@@ -292,6 +327,11 @@ export default function MapPage() {
                 onReady={() => setMapReady(true)}
                 onError={(m) => setError(m)}
                 onPointSelect={setSelectedPoint}
+                onCountrySelect={(country) => {
+                  setSelectedPoint(null);
+                  setSelectedCountry(country);
+                }}
+                activeConflictCountries={activeConflictCountries}
               />
             ) : (
               <ConflictGlobe
@@ -302,6 +342,16 @@ export default function MapPage() {
                 onError={(m) => setError(m)}
                 onPointSelect={setSelectedPoint}
                 autoRotate={autoRotate}
+              />
+            )}
+
+            {selectedCountry && countryIntel && (
+              <CountryIntelPanel
+                data={countryIntel}
+                onClose={() => {
+                  setSelectedCountry(null);
+                  setCountryIntel(null);
+                }}
               />
             )}
           </div>

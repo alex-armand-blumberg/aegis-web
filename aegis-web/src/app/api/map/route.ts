@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { COUNTRY_BBOX } from "@/lib/countryBounds";
 import type {
+  ActiveConflictCountry,
   IntelLayerKey,
   IntelPoint,
   MapApiResponse,
@@ -704,6 +705,302 @@ function extractMentionedCity(text: string): { city: string; lat: number; lon: n
   return null;
 }
 
+function normalizeCountryLabel(country: string): string {
+  return country.replace(/\s+/g, " ").trim();
+}
+
+function rankSignalSeverity(points: IntelPoint[]): "low" | "medium" | "high" | "critical" {
+  let score = 0;
+  for (const p of points) {
+    score += p.severity === "critical" ? 4 : p.severity === "high" ? 3 : p.severity === "medium" ? 2 : 1;
+  }
+  if (score >= 40) return "critical";
+  if (score >= 22) return "high";
+  if (score >= 10) return "medium";
+  return "low";
+}
+
+type LiveuamapEvent = {
+  id?: string | number;
+  title?: string;
+  description?: string;
+  city?: string;
+  country?: string;
+  country_name?: string;
+  latitude?: number | string;
+  longitude?: number | string;
+  lat?: number | string;
+  lng?: number | string;
+  pubDate?: string;
+  date?: string;
+  timestamp?: string;
+  source?: string;
+};
+
+function parseLiveuamapList(data: unknown): LiveuamapEvent[] {
+  if (Array.isArray(data)) return data as LiveuamapEvent[];
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    const candidates = [obj.events, obj.data, obj.items, obj.results];
+    for (const c of candidates) {
+      if (Array.isArray(c)) return c as LiveuamapEvent[];
+    }
+  }
+  return [];
+}
+
+async function fetchLiveuamapEvents(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const apiKey = process.env.LIVEUAMAP_API_KEY?.trim();
+  if (!apiKey) {
+    return {
+      points: [],
+      health: {
+        provider: "LiveUAMap",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        message: "No LIVEUAMAP_API_KEY configured",
+      },
+    };
+  }
+
+  const started = Date.now();
+  const now = Date.now();
+  const cutoff = now - rangeHours * 3600_000;
+  const fromIso = new Date(cutoff).toISOString();
+  const candidates = [
+    `https://api.liveuamap.com/v1/events?from=${encodeURIComponent(fromIso)}`,
+    `https://api.liveuamap.com/events?from=${encodeURIComponent(fromIso)}`,
+    `https://uk.liveuamap.com/api/events?from=${encodeURIComponent(fromIso)}`,
+  ];
+
+  let events: LiveuamapEvent[] = [];
+  let lastMessage = "No compatible LiveUAMap response";
+  for (const url of candidates) {
+    const res = await timedJsonFetch<unknown>(
+      url,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "x-api-key": apiKey,
+          Accept: "application/json",
+        },
+      },
+      12000
+    );
+    if (!res.ok) {
+      lastMessage = res.message ?? lastMessage;
+      continue;
+    }
+    const parsed = parseLiveuamapList(res.data);
+    if (parsed.length) {
+      events = parsed;
+      break;
+    }
+  }
+
+  if (!events.length) {
+    return {
+      points: [],
+      health: {
+        provider: "LiveUAMap",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: lastMessage,
+      },
+    };
+  }
+
+  const points: IntelPoint[] = [];
+  for (const e of events) {
+    const title = String(e.title ?? e.description ?? "").trim();
+    if (!title) continue;
+    const fullText = `${title} ${String(e.description ?? "")}`;
+    const keyword = extractStrikeKeyword(fullText);
+    if (!keyword) continue;
+
+    const lat = Number(e.latitude ?? e.lat);
+    const lon = Number(e.longitude ?? e.lng);
+    const city = String(e.city ?? "").trim();
+    const countryRaw = String(e.country_name ?? e.country ?? "").trim();
+    const country = countryRaw || extractMentionedCountry(fullText);
+    if (!country) continue;
+    const bbox = COUNTRY_BBOX[country];
+    const finalLat = Number.isFinite(lat) ? lat : bbox?.[4];
+    const finalLon = Number.isFinite(lon) ? lon : bbox?.[5];
+    if (typeof finalLat !== "number" || typeof finalLon !== "number") continue;
+    const tsRaw = e.pubDate ?? e.timestamp ?? e.date;
+    const ts = tsRaw ? Date.parse(String(tsRaw)) : Date.now();
+    if (!Number.isFinite(ts) || ts < cutoff) continue;
+
+    points.push({
+      id: `liveuamap-${String(e.id ?? `${country}-${city}-${ts}`)}`,
+      layer: "liveStrikes",
+      title: city ? `${keyword} report near ${city}` : `${keyword} report`,
+      subtitle: title,
+      lat: finalLat,
+      lon: finalLon,
+      country: normalizeCountryLabel(country),
+      severity: "high",
+      source: "LiveUAMap",
+      timestamp: new Date(ts).toISOString(),
+      magnitude: 10,
+      confidence: 0.82,
+      metadata: {
+        event_type: keyword,
+        original_headline: title,
+        city: city || null,
+      },
+    });
+  }
+
+  return {
+    points: points.slice(0, 1500),
+    health: {
+      provider: "LiveUAMap",
+      ok: points.length > 0,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message: `Mapped ${points.length} geocoded conflict events`,
+    },
+  };
+}
+
+type GdeltDocResponse = {
+  articles?: Array<{
+    title?: string;
+    seendate?: string;
+    domain?: string;
+    sourcecountry?: string;
+    url?: string;
+  }>;
+};
+
+async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const query = encodeURIComponent(
+    "(missile OR strike OR drone OR explosion OR artillery OR bombardment OR battle OR invasion) AND (Ukraine OR Russia OR Iran OR Israel OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon)"
+  );
+  const url =
+    `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=ArtList&format=json&maxrecords=400&sort=datedesc`;
+  const res = await timedJsonFetch<GdeltDocResponse>(url, undefined, 14000);
+  if (!res.ok || !res.data?.articles?.length) {
+    return {
+      points: [],
+      health: {
+        provider: "GDELT",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        latencyMs: res.latencyMs,
+        message: res.message ?? "No GDELT conflict events",
+      },
+    };
+  }
+
+  const cutoff = Date.now() - rangeHours * 3600_000;
+  const points: IntelPoint[] = [];
+  let idx = 0;
+  for (const a of res.data.articles) {
+    const title = String(a.title ?? "").trim();
+    if (!title) continue;
+    const ts = a.seendate ? Date.parse(a.seendate) : Date.now();
+    if (!Number.isFinite(ts) || ts < cutoff) continue;
+    const keyword = extractStrikeKeyword(title);
+    if (!keyword) continue;
+
+    const city = extractMentionedCity(title);
+    const country = city?.country || extractMentionedCountry(title) || String(a.sourcecountry ?? "").trim();
+    if (!country) continue;
+    const bbox = COUNTRY_BBOX[country];
+    if (!bbox && !city) continue;
+    const lat = city?.lat ?? bbox![4];
+    const lon = city?.lon ?? bbox![5];
+    idx += 1;
+
+    points.push({
+      id: `gdelt-${idx}-${country}-${ts}`,
+      layer: "liveStrikes",
+      title: city ? `${keyword} report near ${city.city}` : `${keyword} report in ${country}`,
+      subtitle: title,
+      lat,
+      lon,
+      country: normalizeCountryLabel(country),
+      severity: "medium",
+      source: "GDELT",
+      timestamp: new Date(ts).toISOString(),
+      magnitude: city ? 8 : 5,
+      confidence: city ? 0.64 : 0.55,
+      metadata: {
+        event_type: keyword,
+        publisher: a.domain ?? "unknown",
+        source_url: a.url ?? null,
+      },
+    });
+  }
+
+  return {
+    points: points.slice(0, 1400),
+    health: {
+      provider: "GDELT",
+      ok: points.length > 0,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message: `Mapped ${points.length} conflict events`,
+    },
+  };
+}
+
+function buildActiveConflictCountries(
+  liveStrikes: IntelPoint[],
+  conflicts: IntelPoint[],
+  news: IntelPoint[]
+): ActiveConflictCountry[] {
+  const byCountry = new Map<
+    string,
+    { score: number; latestEventAt: string; sources: Set<string>; signals: IntelPoint[] }
+  >();
+
+  const push = (p: IntelPoint, weight: number) => {
+    if (!p.country) return;
+    const country = normalizeCountryLabel(p.country);
+    const current = byCountry.get(country) ?? {
+      score: 0,
+      latestEventAt: p.timestamp,
+      sources: new Set<string>(),
+      signals: [],
+    };
+    const sevScore =
+      p.severity === "critical" ? 4 : p.severity === "high" ? 3 : p.severity === "medium" ? 2 : 1;
+    current.score += sevScore * weight;
+    current.sources.add(p.source);
+    current.signals.push(p);
+    if (p.timestamp > current.latestEventAt) current.latestEventAt = p.timestamp;
+    byCountry.set(country, current);
+  };
+
+  for (const p of liveStrikes) push(p, 2.6);
+  for (const p of conflicts) push(p, 2.2);
+  for (const p of news) push(p, 0.9);
+
+  return Array.from(byCountry.entries())
+    .map(([country, v]) => ({
+      country,
+      score: Number(v.score.toFixed(2)),
+      severity: rankSignalSeverity(v.signals),
+      latestEventAt: v.latestEventAt,
+      sources: Array.from(v.sources).slice(0, 6),
+    }))
+    .filter((c) => c.score >= 4)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 80);
+}
+
 async function fetchRapidConflictSignals(rangeHours: number): Promise<{
   points: IntelPoint[];
   health: ProviderHealth;
@@ -1405,10 +1702,22 @@ export async function GET(request: Request) {
     const requestedLayers = parseLayers(searchParams.get("layers"));
     const rangeHours = rangeToHours(range);
 
-    const [acledRes, ucdpRes, rapidRes, flightsRes, vesselsRes, newsRes, infraRes] =
+    const [
+      acledRes,
+      ucdpRes,
+      liveuamapRes,
+      gdeltRes,
+      rapidRes,
+      flightsRes,
+      vesselsRes,
+      newsRes,
+      infraRes,
+    ] =
       await Promise.all([
       fetchAcledConflicts(rangeHours),
       fetchUcdpConflicts(rangeHours),
+      fetchLiveuamapEvents(rangeHours),
+      fetchGdeltConflictEvents(rangeHours),
       fetchRapidConflictSignals(rangeHours),
       fetchOpenSkyFlights(),
       fetchVesselSignals(),
@@ -1416,13 +1725,18 @@ export async function GET(request: Request) {
       fetchStrategicInfrastructure(),
     ]);
 
-    const mergedConflicts = [...ucdpRes.points]
+    const mergedConflicts = [...ucdpRes.points, ...acledRes.points]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
       .slice(0, 2400);
-    const liveStrikes = rapidRes.points
+    const liveStrikes = [...rapidRes.points, ...gdeltRes.points, ...liveuamapRes.points]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 500);
+      .slice(0, 2400);
     const carrierGroups = extractCarrierGroups(vesselsRes.points);
+    const activeConflictCountries = buildActiveConflictCountries(
+      liveStrikes,
+      mergedConflicts,
+      newsRes.points
+    );
 
     const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
       conflicts: mergedConflicts,
@@ -1441,15 +1755,18 @@ export async function GET(request: Request) {
       updatedAt: new Date().toISOString(),
       range,
       layers: filterToRequestedLayers(baseLayers, requestedLayers),
+      activeConflictCountries,
       providerHealth: [
         {
           provider: "Conflict fusion",
           ok: mergedConflicts.length > 0 || liveStrikes.length > 0,
           updatedAt: new Date().toISOString(),
-          message: `Conflicts: ${ucdpRes.points.length} UCDP events | Live strikes: ${rapidRes.points.length} corroborated events`,
+          message: `Conflicts: ${mergedConflicts.length} validated DB points | Live strikes: ${liveStrikes.length} near-live events`,
         },
         acledRes.health,
         ucdpRes.health,
+        liveuamapRes.health,
+        gdeltRes.health,
         rapidRes.health,
         flightsRes.health,
         vesselsRes.health,
