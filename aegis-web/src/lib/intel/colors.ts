@@ -7,6 +7,7 @@ export const LAYER_COLORS: Record<IntelLayerKey, [number, number, number]> = {
   vessels: [96, 165, 250],
   carriers: [248, 113, 113],
   news: [167, 139, 250],
+  escalationRisk: [244, 114, 182],
   hotspots: [253, 224, 71],
   infrastructure: [45, 212, 191],
 };

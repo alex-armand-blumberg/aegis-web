@@ -5,6 +5,8 @@ import type { IntelPoint, ProviderHealth } from "@/lib/intel/types";
 type IntelInfoPanelProps = {
   point: IntelPoint;
   providerHealth: ProviderHealth[];
+  aiSummary?: string;
+  aiLoading?: boolean;
   onClose: () => void;
 };
 
@@ -24,15 +26,27 @@ function severityColor(severity: IntelPoint["severity"]): string {
 export default function IntelInfoPanel({
   point,
   providerHealth,
+  aiSummary,
+  aiLoading = false,
   onClose,
 }: IntelInfoPanelProps) {
   const health = providerHealth.find((p) => point.source.includes(p.provider));
+  const imageUrl =
+    point.imageUrl ||
+    (typeof point.metadata?.image_url === "string" ? point.metadata.image_url : "");
   return (
     <aside className="intel-side-panel">
       <button type="button" className="intel-side-close" onClick={onClose}>
         x
       </button>
       <div className="intel-side-header">
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={point.title}
+            className="intel-side-image"
+          />
+        ) : null}
         <div className="intel-side-kicker">{point.layer.toUpperCase()}</div>
         <h3>{point.title}</h3>
         <p>{point.subtitle || point.country || "Global signal"}</p>
@@ -88,6 +102,15 @@ export default function IntelInfoPanel({
       </div>
 
       {health?.message && <p className="intel-side-note">{health.message}</p>}
+
+      <div className="intel-side-metadata">
+        <div className="intel-side-subtitle">AI statistical summary</div>
+        {aiLoading ? (
+          <p className="intel-side-note">Generating AI summary...</p>
+        ) : (
+          <p className="intel-side-note">{aiSummary || "No AI summary yet."}</p>
+        )}
+      </div>
     </aside>
   );
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  EscalationRiskCountry,
   CountryIntelResponse,
   IntelLayerKey,
   IntelPoint,
@@ -28,6 +29,7 @@ const ALL_LAYERS: IntelLayerKey[] = [
   "vessels",
   "carriers",
   "news",
+  "escalationRisk",
   "hotspots",
   "infrastructure",
 ];
@@ -40,6 +42,7 @@ function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
     vessels: true,
     carriers: true,
     news: true,
+    escalationRisk: true,
     hotspots: true,
     infrastructure: true,
   };
@@ -53,6 +56,8 @@ export default function MapPage() {
   const [selectedPoint, setSelectedPoint] = useState<IntelPoint | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [countryIntel, setCountryIntel] = useState<CountryIntelResponse | null>(null);
+  const [pointAiSummary, setPointAiSummary] = useState<string>("");
+  const [pointAiLoading, setPointAiLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
@@ -60,6 +65,7 @@ export default function MapPage() {
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const recenterRef = useRef<(() => void) | null>(null);
+  const aiSummaryCacheRef = useRef<Record<string, string>>({});
 
   const requestedLayerList = useMemo(
     () => ALL_LAYERS.filter((k) => activeLayers[k]).join(","),
@@ -117,6 +123,83 @@ export default function MapPage() {
     };
   }, [range, selectedCountry]);
 
+  useEffect(() => {
+    if (!selectedPoint) {
+      setPointAiSummary("");
+      setPointAiLoading(false);
+      return;
+    }
+
+    const summaryKey = `${selectedPoint.id}:${selectedPoint.timestamp}`;
+    const cached = aiSummaryCacheRef.current[summaryKey];
+    if (cached) {
+      setPointAiSummary(cached);
+      setPointAiLoading(false);
+      return;
+    }
+
+    const country = selectedPoint.country ?? "Unknown";
+    const layerCount = apiData?.layers[selectedPoint.layer]?.length ?? 0;
+    const sameCountrySignals =
+      apiData?.layers[selectedPoint.layer]?.filter((p) => p.country === country).length ?? 0;
+    const confidencePct =
+      typeof selectedPoint.confidence === "number"
+        ? Math.round(selectedPoint.confidence * 100)
+        : null;
+    const magnitude = typeof selectedPoint.magnitude === "number" ? selectedPoint.magnitude : null;
+
+    const statsLines = [
+      `Layer signal count: ${layerCount}`,
+      `Same-country layer count: ${sameCountrySignals}`,
+      confidencePct !== null ? `Confidence: ${confidencePct}%` : "Confidence: N/A",
+      magnitude !== null ? `Magnitude score: ${magnitude}` : "Magnitude score: N/A",
+      `Timestamp: ${selectedPoint.timestamp}`,
+    ].join("\n");
+
+    const prompt = [
+      `Event: ${selectedPoint.title}`,
+      `Subtitle: ${selectedPoint.subtitle ?? "N/A"}`,
+      `Country: ${country}`,
+      `Source: ${selectedPoint.source}`,
+      `Severity: ${selectedPoint.severity}`,
+      "Available statistics:",
+      statsLines,
+      "Write exactly 3 bullet points summarizing why this event was flagged.",
+      "Each bullet must include at least one numeric value from the provided statistics.",
+      "If a value is missing, explicitly say it is unavailable.",
+      "No policy advice. Keep neutral intelligence tone.",
+    ].join("\n");
+
+    let cancelled = false;
+    setPointAiLoading(true);
+    fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "map_insight",
+        maxTokens: 260,
+        prompt,
+      }),
+    })
+      .then(async (res) => {
+        const data = (await res.json()) as { content?: string; error?: string };
+        if (!res.ok) throw new Error(data.error ?? "Failed AI summary");
+        const content = data.content?.trim() || "AI summary unavailable for this point.";
+        aiSummaryCacheRef.current[summaryKey] = content;
+        if (!cancelled) setPointAiSummary(content);
+      })
+      .catch(() => {
+        if (!cancelled) setPointAiSummary("AI summary unavailable for this point.");
+      })
+      .finally(() => {
+        if (!cancelled) setPointAiLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiData, selectedPoint]);
+
   const handleFullscreen = useCallback(() => {
     const el = mapContainerRef.current;
     if (!el) return;
@@ -148,12 +231,15 @@ export default function MapPage() {
       vessels: [],
       carriers: [],
       news: [],
+      escalationRisk: [],
       hotspots: [],
       infrastructure: [],
     } as MapApiResponse["layers"]);
 
   const providerHealth = apiData?.providerHealth ?? [];
   const activeConflictCountries = apiData?.activeConflictCountries ?? [];
+  const escalationRiskCountries: EscalationRiskCountry[] =
+    apiData?.escalationRiskCountries ?? [];
 
   const totalVisible = ALL_LAYERS.reduce(
     (sum, layer) => sum + (activeLayers[layer] ? layers[layer].length : 0),
@@ -305,6 +391,8 @@ export default function MapPage() {
               <IntelInfoPanel
                 point={selectedPoint}
                 providerHealth={providerHealth}
+                aiSummary={pointAiSummary}
+                aiLoading={pointAiLoading}
                 onClose={() => setSelectedPoint(null)}
               />
             )}
@@ -332,6 +420,7 @@ export default function MapPage() {
                   setSelectedCountry(country);
                 }}
                 activeConflictCountries={activeConflictCountries}
+                escalationRiskCountries={escalationRiskCountries}
               />
             ) : (
               <ConflictGlobe

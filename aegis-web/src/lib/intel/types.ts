@@ -5,6 +5,7 @@ export type IntelLayerKey =
   | "vessels"
   | "carriers"
   | "news"
+  | "escalationRisk"
   | "hotspots"
   | "infrastructure";
 
@@ -23,6 +24,8 @@ export type IntelPoint = {
   timestamp: string;
   magnitude?: number;
   confidence?: number;
+  imageUrl?: string;
+  aiSummary?: string;
   metadata?: Record<string, string | number | boolean | null>;
 };
 
@@ -42,12 +45,22 @@ export type ActiveConflictCountry = {
   sources: string[];
 };
 
+export type EscalationRiskCountry = {
+  country: string;
+  riskScore: number;
+  severity: IntelSeverity;
+  trend: "rising" | "stable" | "declining";
+  latestEventAt: string;
+  signals: string[];
+};
+
 export type MapApiResponse = {
   updatedAt: string;
   range: string;
   layers: Record<IntelLayerKey, IntelPoint[]>;
   providerHealth: ProviderHealth[];
   activeConflictCountries?: ActiveConflictCountry[];
+  escalationRiskCountries?: EscalationRiskCountry[];
 };
 
 export type CountryIntelResponse = {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { COUNTRY_BBOX } from "@/lib/countryBounds";
 import type {
   ActiveConflictCountry,
+  EscalationRiskCountry,
   IntelLayerKey,
   IntelPoint,
   MapApiResponse,
@@ -41,6 +42,7 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
     "vessels",
     "carriers",
     "news",
+    "escalationRisk",
     "hotspots",
     "infrastructure",
   ];
@@ -74,7 +76,16 @@ async function timedJsonFetch<T>(
         latencyMs: Date.now() - started,
       };
     }
-    const data = (await res.json()) as T;
+    const text = await res.text();
+    if (!text.trim()) {
+      return {
+        ok: true,
+        data: undefined,
+        message: "Empty response body",
+        latencyMs: Date.now() - started,
+      };
+    }
+    const data = JSON.parse(text) as T;
     return { ok: true, data, latencyMs: Date.now() - started };
   } catch (err) {
     return {
@@ -634,6 +645,17 @@ function extractRssTag(block: string, tag: string): string | null {
   return null;
 }
 
+function extractRssImageUrl(block: string): string | null {
+  const mediaMatch = block.match(/<media:content[^>]*url="([^"]+)"/i);
+  if (mediaMatch?.[1]) return mediaMatch[1].trim();
+  const enclosureMatch = block.match(/<enclosure[^>]*url="([^"]+)"/i);
+  if (enclosureMatch?.[1]) return enclosureMatch[1].trim();
+  const desc = extractRssTag(block, "description") ?? "";
+  const imgMatch = desc.match(/<img[^>]*src="([^"]+)"/i);
+  if (imgMatch?.[1]) return imgMatch[1].trim();
+  return null;
+}
+
 const STRIKE_KEYWORDS = [
   "airstrike",
   "missile",
@@ -697,7 +719,7 @@ const CURRENT_WAR_COUNTRIES = new Set(
     "Ethiopia",
     "Afghanistan",
     "Libya",
-  ].map((c) => normalizeCountryLabel(c))
+  ].map((c) => normalizeCountryLabel(c).toLowerCase())
 );
 
 const CONFLICT_COUNTRY_ALIASES: Record<string, string> = {
@@ -1204,6 +1226,9 @@ type EventRegistryArticle = {
   title?: string;
   body?: string;
   url?: string;
+  image?: string;
+  imageUrl?: string;
+  thumbImage?: string;
   date?: string;
   time?: string;
   source?: {
@@ -1291,6 +1316,17 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
       sortBy: "date",
       resultType: "articles",
     },
+    {
+      apiKey,
+      keyword:
+        "(missile OR strike OR drone OR bombardment OR shelling OR artillery OR raid OR interception OR naval battle OR special operation) AND (Ukraine OR Russia OR Israel OR Iran OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon OR Myanmar)",
+      dateStart: from.toISOString().slice(0, 10),
+      dateEnd: now.toISOString().slice(0, 10),
+      lang: "eng",
+      articleCount: 100,
+      sortBy: "date",
+      resultType: "articles",
+    },
   ];
 
   let parsed: EventRegistryArticle[] = [];
@@ -1350,6 +1386,78 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
   }
 
   if (!parsed.length) {
+    const rssQuery = encodeURIComponent(
+      "(missile OR strike OR drone OR bombardment OR artillery OR raid) (Ukraine OR Iran OR Israel OR Sudan OR Yemen OR Syria OR Lebanon)"
+    );
+    const rssUrl = `https://news.google.com/rss/search?q=${rssQuery}&hl=en-US&gl=US&ceid=US:en`;
+    const rssCtl = new AbortController();
+    const rssTimer = setTimeout(() => rssCtl.abort(), 12000);
+    try {
+      const rssHttp = await fetch(rssUrl, {
+        cache: "no-store",
+        signal: rssCtl.signal,
+      });
+      if (!rssHttp.ok) throw new Error(`HTTP ${rssHttp.status}`);
+      const text = await rssHttp.text();
+      const itemBlocks = text.split("<item>").slice(1, 260);
+      const points: IntelPoint[] = [];
+      const cutoff = Date.now() - rangeHours * 3600_000;
+      for (const block of itemBlocks) {
+        const title = extractRssTag(block, "title");
+        const description = extractRssTag(block, "description") ?? "";
+        const imageUrl = extractRssImageUrl(block);
+        const pubRaw = extractRssTag(block, "pubDate");
+        if (!title) continue;
+        const ts = pubRaw ? Date.parse(pubRaw) : Date.now();
+        if (!Number.isFinite(ts) || ts < cutoff) continue;
+        const fullText = `${title} ${description}`;
+        const eventType = extractStrikeKeyword(fullText);
+        if (!eventType) continue;
+        const city = extractMentionedCity(fullText);
+        const country = city?.country || extractMentionedCountry(fullText);
+        if (!country) continue;
+        const bbox = COUNTRY_BBOX[country];
+        if (!bbox && !city) continue;
+        points.push({
+          id: `eventreg-rss-${country}-${ts}-${points.length + 1}`,
+          layer: "news",
+          title: city ? `${eventType} report near ${city.city}` : `${eventType} report in ${country}`,
+          subtitle: "Event Registry fallback via Google News RSS",
+          lat: city?.lat ?? bbox![4],
+          lon: city?.lon ?? bbox![5],
+          country: normalizeCountryLabel(country),
+          severity: city ? "high" : "medium",
+          source: "Event Registry fallback",
+          timestamp: new Date(ts).toISOString(),
+          magnitude: city ? 7 : 4,
+          confidence: city ? 0.62 : 0.52,
+          imageUrl: imageUrl || undefined,
+          metadata: {
+            event_type: eventType,
+            source_url: extractRssTag(block, "link"),
+            image_url: imageUrl || null,
+            original_headline: title,
+          },
+        });
+      }
+      if (points.length > 0) {
+        return {
+          points: points.slice(0, 600),
+          health: {
+            provider: "Event Registry",
+            ok: true,
+            updatedAt: new Date().toISOString(),
+            latencyMs: Date.now() - started,
+            message: `Primary API empty; fallback mapped ${points.length} event-level reports`,
+          },
+        };
+      }
+    } catch {
+      // Ignore and fall through to the primary degraded response.
+    } finally {
+      clearTimeout(rssTimer);
+    }
+
     return {
       points: [],
       health: {
@@ -1393,6 +1501,7 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
     const lat = city?.lat ?? bbox![4];
     const lon = city?.lon ?? bbox![5];
     const sourceUrl = String(a.url ?? "").trim();
+    const imageUrl = String(a.imageUrl ?? a.image ?? a.thumbImage ?? "").trim();
 
     points.push({
       id: `eventreg-${a.uri ?? `${country}-${ts}-${points.length + 1}`}`,
@@ -1407,10 +1516,12 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
       timestamp: new Date(ts).toISOString(),
       magnitude: city ? 8 : 5,
       confidence: trusted ? (city ? 0.78 : 0.7) : city ? 0.64 : 0.56,
+      imageUrl: imageUrl || undefined,
       metadata: {
         event_type: eventType,
         publisher: sourceTitle || sourceUri || "unknown",
         source_url: sourceUrl || null,
+        image_url: imageUrl || null,
         original_headline: title,
         trusted_source: trusted,
       },
@@ -1484,7 +1595,7 @@ function buildActiveConflictCountries(
     if (isWarLike(p)) push(p, 0.9);
   }
 
-  return Array.from(byCountry.entries())
+  const computed = Array.from(byCountry.entries())
     .map(([country, v]) => ({
       country,
       score: Number(v.score.toFixed(2)),
@@ -1498,6 +1609,80 @@ function buildActiveConflictCountries(
         CURRENT_WAR_COUNTRIES.has(canonicalConflictCountry(c.country))
     )
     .sort((a, b) => b.score - a.score)
+    .slice(0, 45);
+
+  const seen = new Set(computed.map((c) => canonicalConflictCountry(c.country)));
+  const nowIso = new Date().toISOString();
+  for (const warCountry of CURRENT_WAR_COUNTRIES) {
+    if (seen.has(warCountry)) continue;
+    computed.push({
+      country: warCountry,
+      score: 0.6,
+      severity: "low",
+      latestEventAt: nowIso,
+      sources: ["Curated conflict-country baseline"],
+    });
+  }
+
+  return computed
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 55);
+}
+
+function buildEscalationRiskCountries(
+  liveStrikes: IntelPoint[],
+  conflicts: IntelPoint[],
+  news: IntelPoint[]
+): EscalationRiskCountry[] {
+  const now = Date.now();
+  const recentCutoff = now - 24 * 3600_000;
+  const earlierCutoff = now - 72 * 3600_000;
+  const buckets = new Map<
+    string,
+    { recent: number; earlier: number; latest: string; signals: Set<string> }
+  >();
+
+  const push = (p: IntelPoint, weight: number) => {
+    if (!p.country) return;
+    const key = canonicalConflictCountry(p.country);
+    const ts = Date.parse(p.timestamp);
+    if (!Number.isFinite(ts) || ts < earlierCutoff) return;
+    const current = buckets.get(key) ?? {
+      recent: 0,
+      earlier: 0,
+      latest: p.timestamp,
+      signals: new Set<string>(),
+    };
+    if (ts >= recentCutoff) current.recent += weight;
+    else current.earlier += weight;
+    current.signals.add(p.source);
+    if (p.timestamp > current.latest) current.latest = p.timestamp;
+    buckets.set(key, current);
+  };
+
+  for (const p of liveStrikes) push(p, 2.6);
+  for (const p of conflicts) push(p, 1.7);
+  for (const p of news) push(p, 1.1);
+
+  return Array.from(buckets.entries())
+    .map(([country, b]) => {
+      const trendRatio = b.earlier > 0 ? b.recent / b.earlier : b.recent > 0 ? 2 : 0;
+      const trend: EscalationRiskCountry["trend"] =
+        trendRatio >= 1.35 ? "rising" : trendRatio <= 0.75 ? "declining" : "stable";
+      const riskScore = Number((b.recent * 1.4 + b.earlier * 0.6).toFixed(2));
+      const severity: EscalationRiskCountry["severity"] =
+        riskScore >= 14 ? "critical" : riskScore >= 8 ? "high" : riskScore >= 4 ? "medium" : "low";
+      return {
+        country,
+        riskScore,
+        severity,
+        trend,
+        latestEventAt: b.latest,
+        signals: Array.from(b.signals).slice(0, 6),
+      };
+    })
+    .filter((c) => c.trend === "rising" && c.riskScore >= 4)
+    .sort((a, b) => b.riskScore - a.riskScore)
     .slice(0, 45);
 }
 
@@ -1529,7 +1714,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     }
 
     const text = await res.text();
-    const itemBlocks = text.split("<item>").slice(1, 260);
+    const itemBlocks = text.split("<item>").slice(1, 520);
     const cutoff = Date.now() - rangeHours * 3600_000;
     const clusters = new Map<
       string,
@@ -1540,6 +1725,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         lat: number;
         lon: number;
         keyword: string;
+        imageUrl: string | null;
         publishers: Set<string>;
         evidence: string[];
       }
@@ -1548,6 +1734,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     for (const block of itemBlocks) {
       const title = extractRssTag(block, "title");
       const description = extractRssTag(block, "description") ?? "";
+      const imageUrl = extractRssImageUrl(block);
       const pubRaw = extractRssTag(block, "pubDate");
       if (!title) continue;
       const ts = pubRaw ? new Date(pubRaw).getTime() : Date.now();
@@ -1576,6 +1763,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         lat,
         lon,
         keyword,
+        imageUrl: imageUrl || null,
         publishers: new Set<string>(),
         evidence: [],
       };
@@ -1603,16 +1791,18 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         timestamp: new Date(c.latestTs).toISOString(),
         magnitude: 12 + corroboration * 3,
         confidence: 0.5 + norm * 0.35,
+        imageUrl: c.imageUrl || undefined,
         metadata: {
           corroborating_sources: corroboration,
           top_publishers: Array.from(c.publishers).slice(0, 3).join(", "),
           sample_event: c.evidence[0] ?? "",
+          image_url: c.imageUrl,
         },
       });
     }
 
     return {
-      points: points.slice(0, 280),
+      points: points.slice(0, 560),
       health: {
         provider: "Rapid conflict feed",
         ok: true,
@@ -1647,6 +1837,8 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "(Ukraine OR Iran OR Israel OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon OR Red Sea) (strike OR battle OR explosion OR attack)",
     "(Zaporizhzhia OR Kharkiv OR Kyiv OR Kherson OR Donetsk OR Tehran OR Isfahan OR Khartoum OR Port Sudan OR Rafah) (missile OR strike OR explosion OR bombardment)",
     "(military operation OR battlefield update OR front line OR clashes) (Ukraine OR Israel OR Iran OR Sudan OR Yemen)",
+    "(special operations OR interception OR air defense OR precision strike OR naval battle OR frigate OR destroyer) (Iran OR Israel OR Ukraine OR Russia OR Baltic Sea OR Red Sea)",
+    "(drone attack OR ballistic missile OR cruise missile OR shelling OR raid) (Tel Aviv OR Tehran OR Kyiv OR Kharkiv OR Odesa OR Sanaa OR Damascus OR Beirut)",
   ];
   const eventKeywords = [
     "missile",
@@ -1692,12 +1884,13 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         clearTimeout(timer);
       }
 
-      const itemBlocks = text.split("<item>").slice(1, 420);
+      const itemBlocks = text.split("<item>").slice(1, 800);
 
       for (let i = 0; i < itemBlocks.length; i += 1) {
         const block = itemBlocks[i];
         const title = extractRssTag(block, "title");
         const description = extractRssTag(block, "description") ?? "";
+        const imageUrl = extractRssImageUrl(block);
         const pubRaw = extractRssTag(block, "pubDate");
         if (!title) continue;
         const pubDate = pubRaw ? new Date(pubRaw).getTime() : Date.now();
@@ -1734,12 +1927,14 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
           timestamp: new Date(pubDate).toISOString(),
           magnitude: city ? 7 : 4,
           confidence: trusted ? (city ? 0.7 : 0.58) : city ? 0.6 : 0.46,
+          imageUrl: imageUrl || undefined,
           metadata: {
             event_type: keyword,
             publisher,
             original_headline: title,
             city: city?.city ?? null,
             trusted_source: trusted,
+            image_url: imageUrl || null,
           },
         });
       }
@@ -1748,7 +1943,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     points.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
     return {
-      points: points.slice(0, 1200),
+      points: points.slice(0, 2600),
       health: {
         provider: "Google News RSS",
         ok: points.length > 0,
@@ -2158,6 +2353,7 @@ function buildHotspots(layers: Record<IntelLayerKey, IntelPoint[]>): IntelPoint[
   for (const p of layers.vessels) push(p, 1.4);
   for (const p of layers.carriers) push(p, 2.2);
   for (const p of layers.news) push(p, 0.6);
+  for (const p of layers.escalationRisk) push(p, 1.9);
   for (const p of layers.infrastructure) push(p, 0.25);
 
   return Array.from(scoreByCountry.entries())
@@ -2190,6 +2386,9 @@ function filterToRequestedLayers(
     vessels: requested.includes("vessels") ? layers.vessels : [],
     carriers: requested.includes("carriers") ? layers.carriers : [],
     news: requested.includes("news") ? layers.news : [],
+    escalationRisk: requested.includes("escalationRisk")
+      ? layers.escalationRisk
+      : [],
     hotspots: requested.includes("hotspots") ? layers.hotspots : [],
     infrastructure: requested.includes("infrastructure")
       ? layers.infrastructure
@@ -2252,12 +2451,48 @@ export async function GET(request: Request) {
       .slice(0, 2400);
     const fusedNewsPoints = [...newsRes.points, ...eventRegistryRes.points]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 1600);
+      .slice(0, 2800);
     const carrierGroups = extractCarrierGroups(vesselsRes.points);
     const activeConflictCountries = buildActiveConflictCountries(
       liveStrikes,
       mergedConflicts,
       fusedNewsPoints
+    );
+    const escalationRiskCountries = buildEscalationRiskCountries(
+      liveStrikes,
+      mergedConflicts,
+      fusedNewsPoints
+    );
+    const mappedEscalationRiskPoints: Array<IntelPoint | null> = escalationRiskCountries
+      .map((risk, idx) => {
+        const canonical = risk.country;
+        const bboxEntry = Object.entries(COUNTRY_BBOX).find(
+          ([name]) => canonicalConflictCountry(name) === canonical
+        );
+        const bbox = bboxEntry?.[1];
+        if (!bbox) return null;
+        return {
+          id: `escalation-risk-${idx}-${canonical}`,
+          layer: "escalationRisk" as const,
+          title: `${bboxEntry?.[0] ?? risk.country} escalation risk`,
+          subtitle: `Trend ${risk.trend} | score ${risk.riskScore}`,
+          lat: bbox[4],
+          lon: bbox[5],
+          country: bboxEntry?.[0] ?? risk.country,
+          severity: risk.severity,
+          source: "AEGIS escalation model",
+          timestamp: risk.latestEventAt,
+          magnitude: Math.min(18, risk.riskScore),
+          confidence: 0.62,
+          metadata: {
+            risk_score: risk.riskScore,
+            trend: risk.trend,
+            signal_sources: risk.signals.join(", "),
+          },
+        };
+      });
+    const escalationRiskPoints = mappedEscalationRiskPoints.filter(
+      (p): p is IntelPoint => p !== null
     );
 
     const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
@@ -2267,6 +2502,7 @@ export async function GET(request: Request) {
       vessels: vesselsRes.points,
       carriers: carrierGroups,
       news: fusedNewsPoints,
+      escalationRisk: escalationRiskPoints,
       hotspots: [],
       infrastructure: infraRes.points,
     };
@@ -2278,6 +2514,7 @@ export async function GET(request: Request) {
       range,
       layers: filterToRequestedLayers(baseLayers, requestedLayers),
       activeConflictCountries,
+      escalationRiskCountries,
       providerHealth: [
         {
           provider: "Conflict fusion",

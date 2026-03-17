@@ -6,13 +6,19 @@ import { GeoJsonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import Map, { NavigationControl } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { ActiveConflictCountry, IntelLayerKey, IntelPoint } from "@/lib/intel/types";
+import type {
+  ActiveConflictCountry,
+  EscalationRiskCountry,
+  IntelLayerKey,
+  IntelPoint,
+} from "@/lib/intel/types";
 import { LAYER_COLORS } from "@/lib/intel/colors";
 
 export type ConflictMapProps = {
   layers: Record<IntelLayerKey, IntelPoint[]>;
   activeLayers: Record<IntelLayerKey, boolean>;
   activeConflictCountries?: ActiveConflictCountry[];
+  escalationRiskCountries?: EscalationRiskCountry[];
   recenterRef?: React.MutableRefObject<(() => void) | null>;
   onReady?: () => void;
   onError?: (message: string) => void;
@@ -69,6 +75,7 @@ export default function ConflictMap({
   layers,
   activeLayers,
   activeConflictCountries = [],
+  escalationRiskCountries = [],
   recenterRef,
   onReady,
   onError,
@@ -108,9 +115,15 @@ export default function ConflictMap({
       const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
       countryScore.set(key, c.score);
     }
+    const riskScore = new globalThis.Map<string, number>();
+    for (const c of escalationRiskCountries) {
+      const normalized = normalizeCountryName(c.country);
+      const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
+      riskScore.set(key, c.riskScore);
+    }
 
     const built: any[] = [];
-    if (activeLayers.conflicts) {
+    if (activeConflictCountries.length > 0) {
       built.push(
         new GeoJsonLayer({
           id: "country-conflict-heat",
@@ -139,6 +152,33 @@ export default function ConflictMap({
           onClick: ({ object }: any) => {
             const rawName = String(object?.properties?.name ?? "").trim();
             if (rawName) onCountrySelect?.(rawName);
+          },
+        })
+      );
+    }
+
+    if (activeLayers.escalationRisk && escalationRiskCountries.length > 0) {
+      built.push(
+        new GeoJsonLayer({
+          id: "country-escalation-risk",
+          data: COUNTRY_GEOJSON_URL,
+          pickable: false,
+          filled: true,
+          stroked: false,
+          getFillColor: (f: any) => {
+            const rawName = String(f?.properties?.name ?? "");
+            const normalized = normalizeCountryName(rawName);
+            const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
+            const score = riskScore.get(key) ?? 0;
+            if (score <= 0) return [0, 0, 0, 0];
+            if (score >= 14) return [219, 39, 119, 120];
+            if (score >= 8) return [236, 72, 153, 95];
+            return [244, 114, 182, 70];
+          },
+          updateTriggers: {
+            getFillColor: [
+              escalationRiskCountries.map((c) => `${c.country}:${c.riskScore}`).join("|"),
+            ],
           },
         })
       );
@@ -204,7 +244,14 @@ export default function ConflictMap({
     }
 
     return built;
-  }, [activeConflictCountries, activeLayers, layers, onCountrySelect, onPointSelect]);
+  }, [
+    activeConflictCountries,
+    activeLayers,
+    escalationRiskCountries,
+    layers,
+    onCountrySelect,
+    onPointSelect,
+  ]);
 
   return (
     <DeckGL
