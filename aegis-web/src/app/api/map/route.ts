@@ -1009,6 +1009,35 @@ const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }>
   idlib: { lat: 35.9306, lon: 36.6339, country: "Syria" },
   mykolaiv: { lat: 46.975, lon: 31.9946, country: "Ukraine" },
   mariupol: { lat: 47.0971, lon: 37.5434, country: "Ukraine" },
+  luhansk: { lat: 48.567, lon: 39.317, country: "Ukraine" },
+  kramatorsk: { lat: 48.7233, lon: 37.5558, country: "Ukraine" },
+  bakhmut: { lat: 48.5956, lon: 37.9999, country: "Ukraine" },
+  avdiivka: { lat: 48.1397, lon: 37.7406, country: "Ukraine" },
+  severodonetsk: { lat: 48.9481, lon: 38.4933, country: "Ukraine" },
+  chernihiv: { lat: 51.4982, lon: 31.2893, country: "Ukraine" },
+  zhytomyr: { lat: 50.2547, lon: 28.6583, country: "Ukraine" },
+  poltava: { lat: 49.5883, lon: 34.5514, country: "Ukraine" },
+  vinnytsia: { lat: 49.2328, lon: 28.4681, country: "Ukraine" },
+  ternopil: { lat: 49.5535, lon: 25.5948, country: "Ukraine" },
+  chernivtsi: { lat: 48.2917, lon: 25.9353, country: "Ukraine" },
+  uzhhorod: { lat: 48.6208, lon: 22.2879, country: "Ukraine" },
+  rivne: { lat: 50.6199, lon: 26.2516, country: "Ukraine" },
+  lutsk: { lat: 50.7472, lon: 25.3254, country: "Ukraine" },
+  kropyvnytskyi: { lat: 48.5135, lon: 32.2597, country: "Ukraine" },
+  "kryvyi rih": { lat: 47.9105, lon: 33.3919, country: "Ukraine" },
+  sevastopol: { lat: 44.6167, lon: 33.5254, country: "Ukraine" },
+  donbas: { lat: 48.0159, lon: 37.8029, country: "Ukraine" },
+  bushehr: { lat: 28.9211, lon: 50.8372, country: "Iran" },
+  shiraz: { lat: 29.5918, lon: 52.5836, country: "Iran" },
+  qom: { lat: 34.6416, lon: 50.8746, country: "Iran" },
+  ahvaz: { lat: 31.3190, lon: 48.6842, country: "Iran" },
+  kermanshah: { lat: 34.3142, lon: 47.0650, country: "Iran" },
+  pardis: { lat: 35.7417, lon: 51.7756, country: "Iran" },
+  "ramat gan": { lat: 32.0693, lon: 34.8242, country: "Israel" },
+  "bnei brak": { lat: 32.0807, lon: 34.8338, country: "Israel" },
+  nahariya: { lat: 33.0040, lon: 35.0983, country: "Israel" },
+  baghdad: { lat: 33.3152, lon: 44.3661, country: "Iraq" },
+  "green zone": { lat: 33.3152, lon: 44.3661, country: "Iraq" },
   dubai: { lat: 25.2048, lon: 55.2708, country: "United Arab Emirates" },
   "abu dhabi": { lat: 24.4539, lon: 54.3773, country: "United Arab Emirates" },
   riyadh: { lat: 24.7136, lon: 46.6753, country: "Saudi Arabia" },
@@ -1110,56 +1139,68 @@ function parseRssConflictPoints(
     if (!likelyConflict) continue;
     conflictCandidates += 1;
 
-    const city = extractMentionedCity(fullText);
+    const allCities = extractAllMentionedCities(fullText);
     const region = extractRegionFallback(fullText);
-    const country = city?.country || extractMentionedCountry(fullText) || region?.country;
-    if (!country) continue;
-    const bbox = COUNTRY_BBOX[country];
-    if (!bbox && !city && !region) continue;
-    geoMapped += 1;
-    const lat = city?.lat ?? region?.lat ?? bbox![4];
-    const lon = city?.lon ?? region?.lon ?? bbox![5];
+    const countryFromText = extractMentionedCountry(fullText) || region?.country;
+    const locations: Array<{ lat: number; lon: number; country: string; city: string | null }> = [];
+    if (allCities.length > 0) {
+      for (const c of allCities) locations.push({ lat: c.lat, lon: c.lon, country: c.country, city: c.city });
+    } else if (countryFromText) {
+      const bbox = COUNTRY_BBOX[countryFromText];
+      if (bbox || region)
+        locations.push({
+          lat: region?.lat ?? bbox![4],
+          lon: region?.lon ?? bbox![5],
+          country: countryFromText,
+          city: null,
+        });
+    }
+    if (locations.length === 0) continue;
+    geoMapped += locations.length;
     const publisher = extractPublisherFromTitle(title);
     const trusted = isTrustedPublisher(`${sourceLabel} ${publisher} ${title}`);
     const hourBucket = Math.floor(ts / 3600_000);
-    const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}|${hourBucket}|${layer}`;
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
-
-    points.push({
-      id: `${sourceLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${layer}-${hourBucket}-${i}-${points.length + 1}`,
-      layer,
-      title: city
-        ? `${descriptor.shortLabel || "Conflict event"} near ${city.city}`
-        : `${descriptor.shortLabel || "Conflict event"} in ${country}`,
-      subtitle: `${sourceLabel} | ${publisher}`,
-      lat,
-      lon,
-      country,
-      severity:
-        layer === "liveStrikes"
-          ? descriptor.isDirectKinetic
-            ? "high"
-            : "medium"
-          : city
-            ? "high"
-            : "medium",
-      source: sourceLabel,
-      timestamp: new Date(ts).toISOString(),
-      magnitude: layer === "liveStrikes" ? 9 : city ? 8 : 5,
-      confidence: trusted ? (layer === "liveStrikes" ? 0.72 : 0.68) : layer === "liveStrikes" ? 0.56 : 0.55,
-      imageUrl: imageUrl || undefined,
-      metadata: {
-        event_type: descriptor.eventType || "conflict_event",
-        short_label: descriptor.shortLabel || "Conflict event",
-        publisher,
-        source_url: sourceUrl || null,
-        image_url: imageUrl || null,
-        original_headline: title,
-        source_snippet: description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 360),
-        trusted_source: trusted,
-      },
-    });
+    const snippet = description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 360);
+    for (let locIdx = 0; locIdx < locations.length; locIdx += 1) {
+      const loc = locations[locIdx];
+      const dedupeKey = `${normalizeHeadlineForCluster(title)}|${loc.country}|${loc.city ?? ""}|${hourBucket}|${layer}|${locIdx}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      points.push({
+        id: `${sourceLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${layer}-${hourBucket}-${i}-${locIdx}-${points.length + 1}`,
+        layer,
+        title: loc.city
+          ? `${descriptor.shortLabel || "Conflict event"} near ${loc.city}`
+          : `${descriptor.shortLabel || "Conflict event"} in ${loc.country}`,
+        subtitle: `${sourceLabel} | ${publisher}`,
+        lat: loc.lat,
+        lon: loc.lon,
+        country: loc.country,
+        severity:
+          layer === "liveStrikes"
+            ? descriptor.isDirectKinetic
+              ? "high"
+              : "medium"
+            : loc.city
+              ? "high"
+              : "medium",
+        source: sourceLabel,
+        timestamp: new Date(ts).toISOString(),
+        magnitude: layer === "liveStrikes" ? 9 : loc.city ? 8 : 5,
+        confidence: trusted ? (layer === "liveStrikes" ? 0.72 : 0.68) : layer === "liveStrikes" ? 0.56 : 0.55,
+        imageUrl: imageUrl || undefined,
+        metadata: {
+          event_type: descriptor.eventType || "conflict_event",
+          short_label: descriptor.shortLabel || "Conflict event",
+          publisher,
+          source_url: sourceUrl || null,
+          image_url: imageUrl || null,
+          original_headline: title,
+          source_snippet: snippet,
+          trusted_source: trusted,
+        },
+      });
+    }
   }
 
   return {
@@ -1217,13 +1258,29 @@ function extractStrikeKeyword(text: string): string | null {
 }
 
 function extractMentionedCity(text: string): { city: string; lat: number; lon: number; country: string } | null {
-  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/g, "");
-  for (const [city, loc] of Object.entries(CITY_COORDS)) {
-    if (normalized.includes(city)) {
-      return { city, ...loc };
+  const all = extractAllMentionedCities(text);
+  return all.length > 0 ? all[0] : null;
+}
+
+/** Returns every city mentioned in the text so one article can produce multiple points (Ukraine/Iran density). */
+function extractAllMentionedCities(
+  text: string
+): Array<{ city: string; lat: number; lon: number; country: string }> {
+  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ");
+  const out: Array<{ city: string; lat: number; lon: number; country: string }> = [];
+  const seen = new Set<string>();
+  const entries = Object.entries(CITY_COORDS);
+  entries.sort((a, b) => b[0].length - a[0].length);
+  for (const [cityKey, loc] of entries) {
+    const key = cityKey.replace(/\s+/g, " ");
+    if (key.length < 3) continue;
+    const re = new RegExp("\\b" + key.replace(/\s+/g, "\\s*") + "\\b", "i");
+    if (re.test(text) && !seen.has(loc.country + "|" + key)) {
+      seen.add(loc.country + "|" + key);
+      out.push({ city: key, ...loc });
     }
   }
-  return null;
+  return out;
 }
 
 function extractRegionFallback(
@@ -2120,6 +2177,13 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     "(warship OR frigate OR destroyer OR carrier strike group OR naval task force OR anti-ship missile) (Red Sea OR Bab el-Mandeb OR Gulf of Oman OR Persian Gulf OR Black Sea OR Mediterranean)",
     "(skirmish OR clashes OR firefight OR cross-border strike OR incursion) (Lebanon OR Syria OR Iraq OR Somalia OR Sahel OR Kashmir OR Myanmar)",
     "(war OR conflict OR military operation OR missile OR drone OR artillery OR naval) (Middle East OR Europe OR Africa OR Asia)",
+    "Ukraine Russia strike OR shelling OR missile OR drone",
+    "Kharkiv OR Odesa OR Zaporizhzhia OR Kherson OR Donetsk strike OR attack OR bombardment",
+    "Kyiv OR Dnipro OR Mykolaiv OR Sumy OR Chernihiv missile OR raid OR explosion",
+    "Donbas OR Bakhmut OR Avdiivka OR Kramatorsk OR Severodonetsk fighting OR frontline",
+    "Iran Israel strike OR missile OR drone OR attack",
+    "Tehran OR Isfahan OR Bushehr strike OR explosion OR nuclear",
+    "Iran drone OR ballistic missile OR interception",
   ];
   try {
     const cutoff = Date.now() - rangeHours * 3600_000;
@@ -2173,36 +2237,46 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         if (!likelyConflict) continue;
         conflictCandidates += 1;
 
-        const city = extractMentionedCity(fullText);
+        const allCities = extractAllMentionedCities(fullText);
         const region = extractRegionFallback(fullText);
-        const country = city?.country || extractMentionedCountry(fullText) || region?.country;
-        if (!country) continue;
-        const bbox = COUNTRY_BBOX[country];
-        if (!bbox && !city && !region) continue;
-        geoMapped += 1;
-        const lat = city?.lat ?? region?.lat ?? bbox![4];
-        const lon = city?.lon ?? region?.lon ?? bbox![5];
-
+        const countryFromText = extractMentionedCountry(fullText) || region?.country;
+        const locations: Array<{ lat: number; lon: number; country: string; city: string | null }> = [];
+        if (allCities.length > 0) {
+          for (const c of allCities) locations.push({ lat: c.lat, lon: c.lon, country: c.country, city: c.city });
+        } else if (countryFromText) {
+          const bbox = COUNTRY_BBOX[countryFromText];
+          if (bbox || region)
+            locations.push({
+              lat: region?.lat ?? bbox![4],
+              lon: region?.lon ?? bbox![5],
+              country: countryFromText,
+              city: null,
+            });
+        }
+        if (locations.length === 0) continue;
+        geoMapped += locations.length;
         const publisher = extractPublisherFromTitle(title);
-        const clusterKey = `${country}|${city?.city ?? "country"}|${descriptor.eventType}|${normalizeHeadlineForCluster(
-          title
-        )}`;
-        const current = clusters.get(clusterKey) ?? {
-          latestTs: ts,
-          title,
-          country,
-          lat,
-          lon,
-          keyword: descriptor.shortLabel,
-          imageUrl: imageUrl || null,
-          publishers: new Set<string>(),
-          evidence: [],
-        };
-        current.latestTs = Math.max(current.latestTs, ts);
-        current.publishers.add(publisher);
-        if (!current.imageUrl && imageUrl) current.imageUrl = imageUrl;
-        if (current.evidence.length < 4) current.evidence.push(title);
-        clusters.set(clusterKey, current);
+        const trusted = isTrustedPublisher(publisher);
+        for (let locIdx = 0; locIdx < locations.length; locIdx += 1) {
+          const loc = locations[locIdx];
+          const clusterKey = `${loc.country}|${loc.city ?? "country"}|${descriptor.eventType}|${normalizeHeadlineForCluster(title)}|${locIdx}`;
+          const current = clusters.get(clusterKey) ?? {
+            latestTs: ts,
+            title,
+            country: loc.country,
+            lat: loc.lat,
+            lon: loc.lon,
+            keyword: descriptor.shortLabel,
+            imageUrl: imageUrl || null,
+            publishers: new Set<string>(),
+            evidence: [],
+          };
+          current.latestTs = Math.max(current.latestTs, ts);
+          current.publishers.add(publisher);
+          if (!current.imageUrl && imageUrl) current.imageUrl = imageUrl;
+          if (current.evidence.length < 4) current.evidence.push(title);
+          clusters.set(clusterKey, current);
+        }
       }
     }
 
@@ -2215,7 +2289,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         id: `rapid-${key}`,
         layer: "liveStrikes",
         title: c.title,
-        subtitle: `${c.keyword} | corroborated by ${corroboration} sources`,
+        subtitle: `${c.keyword} | ${corroboration} source(s)`,
         lat: c.lat,
         lon: c.lon,
         country: c.country,
@@ -2298,6 +2372,13 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "(port strike OR naval base strike OR harbor attack OR dry dock damage) (Sevastopol OR Odesa OR Tartus OR Latakia OR Haifa OR Hodeidah)",
     "(counteroffensive OR defensive line breach OR frontline advance OR encirclement) (Ukraine OR Sudan OR Myanmar OR Syria)",
     "(satellite imagery confirms strike OR geolocated strike footage OR verified battlefield footage) (Ukraine OR Gaza OR Sudan OR Syria OR Yemen)",
+    "Ukraine war Russia strike 7 days",
+    "Kharkiv Odesa Zaporizhzhia Kherson missile drone",
+    "Kyiv Dnipro Mykolaiv Sumy Chernihiv attack",
+    "Donbas Bakhmut Avdiivka Kramatorsk Severodonetsk frontline",
+    "Iran Israel strike missile drone",
+    "Tehran Isfahan Bushehr Iran attack",
+    "Iran nuclear Bushehr projectile",
   ];
   const eventKeywords = [
     "missile",
@@ -2382,48 +2463,61 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         const descriptor = classifyEvent(fullText);
         const likelyConflict = descriptor.isConflict || warContextRe.test(fullText);
         if (!likelyConflict) continue;
-        const city = extractMentionedCity(fullText);
+        const allCities = extractAllMentionedCities(fullText);
         const region = extractRegionFallback(fullText);
-        const country = city?.country || extractMentionedCountry(fullText) || region?.country;
-        if (!country) continue;
-        const bbox = COUNTRY_BBOX[country];
-        if (!bbox && !city && !region) continue;
-        const lat = city?.lat ?? region?.lat ?? bbox![4];
-        const lon = city?.lon ?? region?.lon ?? bbox![5];
+        const countryFromText = extractMentionedCountry(fullText) || region?.country;
+        const locations: Array<{ lat: number; lon: number; country: string; city: string | null }> = [];
+        if (allCities.length > 0) {
+          for (const c of allCities) locations.push({ lat: c.lat, lon: c.lon, country: c.country, city: c.city });
+        } else if (countryFromText) {
+          const bbox = COUNTRY_BBOX[countryFromText];
+          if (bbox || region) {
+            locations.push({
+              lat: region?.lat ?? bbox![4],
+              lon: region?.lon ?? bbox![5],
+              country: countryFromText,
+              city: null,
+            });
+          }
+        }
+        if (locations.length === 0) continue;
         const publisher = extractPublisherFromTitle(title);
         const trusted = isTrustedPublisher(`${publisher} ${title}`);
         const timeBucket = Math.floor(pubDate / 3600_000);
-        const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}|${timeBucket}`;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-
-        points.push({
-          id: `news-event-${i}-${country}-${pubDate}-${seen.size}`,
-          layer: "news",
-          title: city
-            ? `${descriptor.shortLabel || "Conflict event"} near ${city.city}`
-            : `${descriptor.shortLabel || "Conflict event"} in ${country}`,
-          subtitle: `${publisher} headline`,
-          lat,
-          lon,
-          country,
-          severity: city ? "high" : "medium",
-          source: "Google News RSS",
-          timestamp: new Date(pubDate).toISOString(),
-          magnitude: city ? 8 : 5,
-          confidence: trusted ? (city ? 0.76 : 0.64) : city ? 0.66 : 0.54,
-          imageUrl: imageUrl || undefined,
-          metadata: {
-            event_type: descriptor.eventType || "conflict_event",
-            short_label: descriptor.shortLabel || "Conflict event",
-            publisher,
-            original_headline: title,
-            city: city?.city ?? null,
-            trusted_source: trusted,
-            image_url: imageUrl || null,
-            source_snippet: description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 360),
-          },
-        });
+        const snippet = description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 360);
+        for (let locIdx = 0; locIdx < locations.length; locIdx += 1) {
+          const loc = locations[locIdx];
+          const dedupeKey = `${normalizeHeadlineForCluster(title)}|${loc.country}|${loc.city ?? ""}|${timeBucket}|${locIdx}`;
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+          points.push({
+            id: `news-event-${i}-${loc.country}-${pubDate}-${locIdx}-${seen.size}`,
+            layer: "news",
+            title: loc.city
+              ? `${descriptor.shortLabel || "Conflict event"} near ${loc.city}`
+              : `${descriptor.shortLabel || "Conflict event"} in ${loc.country}`,
+            subtitle: `${publisher} headline`,
+            lat: loc.lat,
+            lon: loc.lon,
+            country: loc.country,
+            severity: loc.city ? "high" : "medium",
+            source: "Google News RSS",
+            timestamp: new Date(pubDate).toISOString(),
+            magnitude: loc.city ? 8 : 5,
+            confidence: trusted ? (loc.city ? 0.76 : 0.64) : loc.city ? 0.66 : 0.54,
+            imageUrl: imageUrl || undefined,
+            metadata: {
+              event_type: descriptor.eventType || "conflict_event",
+              short_label: descriptor.shortLabel || "Conflict event",
+              publisher,
+              original_headline: title,
+              city: loc.city,
+              trusted_source: trusted,
+              image_url: imageUrl || null,
+              source_snippet: snippet,
+            },
+          });
+        }
       }
     }
 
