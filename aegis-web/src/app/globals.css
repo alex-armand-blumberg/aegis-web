@@ -1908,6 +1908,19 @@ footer {
   color: #e2e8f0;
   letter-spacing: 0.02em;
 }
+.map-page .map-page-title {
+  padding: 0 24px 16px;
+  border-bottom: 1px solid rgba(96, 165, 250, 0.18);
+  margin-bottom: 20px;
+}
+.map-page .map-page-title-heading {
+  margin: 0;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 700;
+  color: #e2e8f0;
+  letter-spacing: 0.04em;
+  font-family: var(--font-bebas), sans-serif;
+}
 .map-page .map-ai-assistant {
   margin-top: 16px;
   border: 1px solid rgba(96, 165, 250, 0.22);

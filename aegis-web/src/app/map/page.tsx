@@ -424,12 +424,15 @@ export default function MapPage() {
       </nav>
 
       <main className="relative z-10 pt-24 pb-12">
+        <header className="map-page-title" style={{ marginBottom: 0 }}>
+          <h1 className="map-page-title-heading">AEGIS Interactive Map</h1>
+        </header>
         <section>
           <div className="section">
             <p className="section-tag reveal">Global Intelligence</p>
-            <h1 className="reveal" style={{ marginBottom: "8px" }}>
+            <h2 className="reveal" style={{ marginBottom: "8px" }}>
               AEGIS Conflict Map (Beta)
-            </h1>
+            </h2>
             <p className="section-body reveal" style={{ marginBottom: "24px" }}>
               Multi-source map layers for current global developments. Data blends
               event-level conflict databases, corroborated live strike reports, military
@@ -559,10 +562,6 @@ export default function MapPage() {
           </div>
 
           {error && <div className="map-error-banner">{error}</div>}
-
-          <h2 className="map-header-title" style={{ marginTop: 16, marginBottom: 8, fontSize: "1.1rem", fontWeight: 600 }}>
-            AEGIS Interactive Map
-          </h2>
 
           <div ref={mapContainerRef} className="map-container" style={{ position: "relative" }}>
             <div className="map-title-overlay">■ {range.toUpperCase()} AEGIS MAP BETA</div>
