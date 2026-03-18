@@ -17,6 +17,10 @@ export async function GET() {
     ),
     ucdpToken: Boolean(process.env.UCDP_ACCESS_TOKEN?.trim()),
     newsApi: Boolean(process.env.NEWS_API?.trim()),
+    relayDigest: Boolean(process.env.INTEL_RELAY_DIGEST_URL?.trim()),
+    redisRest:
+      Boolean(process.env.UPSTASH_REDIS_REST_URL?.trim()) &&
+      Boolean(process.env.UPSTASH_REDIS_REST_TOKEN?.trim()),
   };
 
   return NextResponse.json(
@@ -30,6 +34,9 @@ export async function GET() {
         "AIS layer requires AISSTREAM_SNAPSHOT_URL relay endpoint.",
         "UCDP adds fresher event-level conflict signals when UCDP_ACCESS_TOKEN is set.",
         "Event Registry feed is enabled when NEWS_API is set.",
+        "Relay-seeded feed ingestion is enabled when INTEL_RELAY_DIGEST_URL is set.",
+        "Redis tiered cache is enabled when UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set.",
+        "Source inventory and family mapping are exposed at /api/map/sources.",
       ],
     },
     { status: 200 }

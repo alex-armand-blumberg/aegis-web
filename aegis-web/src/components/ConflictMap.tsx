@@ -5,10 +5,12 @@ import DeckGL from "@deck.gl/react";
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import Map, { NavigationControl } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
+import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type {
   ActiveConflictCountry,
   EscalationRiskCountry,
+  FrontlineOverlay,
   IntelLayerKey,
   IntelPoint,
 } from "@/lib/intel/types";
@@ -19,6 +21,7 @@ export type ConflictMapProps = {
   activeLayers: Record<IntelLayerKey, boolean>;
   activeConflictCountries?: ActiveConflictCountry[];
   escalationRiskCountries?: EscalationRiskCountry[];
+  frontlineOverlays?: FrontlineOverlay[];
   recenterRef?: React.MutableRefObject<(() => void) | null>;
   onReady?: () => void;
   onError?: (message: string) => void;
@@ -71,11 +74,49 @@ function severityRadiusMultiplier(severity: IntelPoint["severity"]): number {
   }
 }
 
+function hashString(input: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function jitteredPosition(point: IntelPoint, layerKey: IntelLayerKey): [number, number] {
+  if (layerKey !== "news" && layerKey !== "liveStrikes") return [point.lon, point.lat];
+  const seed = hashString(`${layerKey}:${point.id}:${point.timestamp}:${point.lat}:${point.lon}`);
+  const angle = ((seed % 360) * Math.PI) / 180;
+  const maxRadiusDeg = layerKey === "news" ? 0.09 : 0.06;
+  const radial = (((seed >>> 9) % 1000) / 1000) * maxRadiusDeg;
+  const lat = point.lat + Math.sin(angle) * radial;
+  const lon = point.lon + Math.cos(angle) * radial;
+  return [lon, lat];
+}
+
+function isGeoJsonFeature(value: unknown): value is Feature<Geometry, GeoJsonProperties> {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { type?: unknown; geometry?: unknown };
+  return candidate.type === "Feature" && typeof candidate.geometry === "object" && candidate.geometry !== null;
+}
+
+function isGeoJsonFeatureCollection(
+  value: unknown
+): value is FeatureCollection<Geometry, GeoJsonProperties> {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { type?: unknown; features?: unknown };
+  return (
+    candidate.type === "FeatureCollection" &&
+    Array.isArray(candidate.features)
+  );
+}
+
 export default function ConflictMap({
   layers,
   activeLayers,
   activeConflictCountries = [],
   escalationRiskCountries = [],
+  frontlineOverlays = [],
   recenterRef,
   onReady,
   onError,
@@ -184,6 +225,46 @@ export default function ConflictMap({
       );
     }
 
+    if (frontlineOverlays.length > 0) {
+      const features: Feature<Geometry, GeoJsonProperties>[] = [];
+      for (const o of frontlineOverlays) {
+        const g = o.geojson;
+        if (isGeoJsonFeature(g)) {
+          features.push(g);
+          continue;
+        }
+        if (isGeoJsonFeatureCollection(g)) {
+          for (const f of g.features) {
+            if (isGeoJsonFeature(f)) features.push(f);
+          }
+        }
+      }
+
+      const frontlineFeatureCollection: FeatureCollection<
+        Geometry,
+        GeoJsonProperties
+      > = {
+        type: "FeatureCollection",
+        features,
+      };
+      built.push(
+        new GeoJsonLayer({
+          id: "land-war-frontline-overlays",
+          data: frontlineFeatureCollection,
+          pickable: false,
+          stroked: true,
+          // Frontline/control overlays are line geometries (not filled polygons).
+          // Rendering them as filled caused visual artifacts that looked like blobs/circles.
+          filled: false,
+          lineWidthUnits: "pixels",
+          getLineWidth: 2,
+          lineWidthMinPixels: 2,
+          lineWidthMaxPixels: 2,
+          getLineColor: [253, 186, 116, 220],
+        })
+      );
+    }
+
     built.push(
       ...(Object.keys(activeLayers) as IntelLayerKey[])
       .filter((k) => activeLayers[k])
@@ -194,27 +275,46 @@ export default function ConflictMap({
         return new ScatterplotLayer<IntelPoint>({
           id: `scatter-${layerKey}`,
           data: layerPoints,
-          getPosition: (d) => [d.lon, d.lat],
+          getPosition: (d) => jitteredPosition(d, layerKey),
           getRadius: (d) => {
             const base =
               layerKey === "hotspots"
-                ? 50000
+                ? 42000
                 : layerKey === "liveStrikes"
-                  ? 36000
+                  ? 25000
+                  : layerKey === "news"
+                    ? 15500
                   : layerKey === "conflicts"
-                    ? 32000
-                    : 22000;
+                    ? 23000
+                    : 18500;
             const magnitude = Math.max(0.6, Math.min(2, (d.magnitude ?? 1) / 20));
             return base * magnitude * severityRadiusMultiplier(d.severity);
           },
-          getFillColor: [...color, layerKey === "hotspots" ? 210 : 175],
-          getLineColor: [255, 255, 255, 120],
+          getFillColor: [
+            ...color,
+            layerKey === "hotspots"
+              ? 210
+              : layerKey === "news"
+                ? 140
+                : layerKey === "liveStrikes"
+                  ? 160
+                  : 170,
+          ],
+          getLineColor: [255, 255, 255, layerKey === "news" ? 70 : 90],
           lineWidthMinPixels: 1,
           stroked: true,
           filled: true,
           pickable: true,
-          radiusMinPixels: layerKey === "hotspots" ? 5 : 3,
-          radiusMaxPixels: layerKey === "hotspots" ? 26 : 15,
+          radiusMinPixels:
+            layerKey === "hotspots" ? 5 : layerKey === "news" ? 2 : 3,
+          radiusMaxPixels:
+            layerKey === "hotspots"
+              ? 24
+              : layerKey === "news"
+                ? 10
+                : layerKey === "liveStrikes"
+                  ? 12
+                  : 14,
           onClick: ({ object }) => {
             if (object) onPointSelect?.(object);
           },
@@ -248,6 +348,7 @@ export default function ConflictMap({
     activeConflictCountries,
     activeLayers,
     escalationRiskCountries,
+    frontlineOverlays,
     layers,
     onCountrySelect,
     onPointSelect,

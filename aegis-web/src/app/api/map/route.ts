@@ -3,11 +3,16 @@ import { COUNTRY_BBOX } from "@/lib/countryBounds";
 import type {
   ActiveConflictCountry,
   EscalationRiskCountry,
+  FrontlineOverlay,
   IntelLayerKey,
   IntelPoint,
   MapApiResponse,
   ProviderHealth,
 } from "@/lib/intel/types";
+import {
+  MAP_SOURCE_FAMILY_MATRIX,
+  WORLDMONITOR_RSS_NETWORK,
+} from "@/lib/intel/sourceRegistry";
 
 const ACLED_ARCGIS_QUERY_URL =
   "https://services8.arcgis.com/xu983xJB6fIDCjpX/arcgis/rest/services/ACLED/FeatureServer/0/query";
@@ -16,6 +21,8 @@ const ACLED_FIELDS =
   "country,admin1,event_month,battles,explosions_remote_violence,protests,riots,strategic_developments,violence_against_civilians,violent_actors,fatalities,centroid_longitude,centroid_latitude,ObjectId";
 
 const COUNTRY_NAMES = Object.keys(COUNTRY_BBOX);
+const ISW_UKRAINE_FRONTLINE_GEOJSON_URL =
+  "https://services-eu1.arcgis.com/fppoCYaq7HfVFbIV/ArcGIS/rest/services/UKR_Frontline_27072025/FeatureServer/0/query?where=1%3D1&outFields=Date,Source&f=geojson";
 
 function rangeToHours(range: string): number {
   switch ((range || "").toLowerCase()) {
@@ -125,6 +132,74 @@ async function fetchTextWithRetries(
     }
   }
   return { ok: false, message: lastMessage };
+}
+
+const NETWORK_DIGEST_TTL_MS = 8 * 60 * 1000;
+type CachedNetworkDigest = {
+  points: IntelPoint[];
+  fetchedAt: number;
+  diagnostics: string;
+};
+const networkDigestCache = new Map<string, CachedNetworkDigest>();
+
+function getNetworkCacheKey(label: string, rangeHours: number): string {
+  return `${label}:${rangeHours}`;
+}
+
+async function readNetworkDigestCache(
+  label: string,
+  rangeHours: number
+): Promise<CachedNetworkDigest | null> {
+  const key = getNetworkCacheKey(label, rangeHours);
+  const mem = networkDigestCache.get(key);
+  if (mem && Date.now() - mem.fetchedAt < NETWORK_DIGEST_TTL_MS) return mem;
+
+  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (!url || !token) return null;
+  try {
+    const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { result?: string | null };
+    if (!json.result) return null;
+    const parsed = JSON.parse(json.result) as CachedNetworkDigest;
+    if (!parsed?.fetchedAt || Date.now() - parsed.fetchedAt > NETWORK_DIGEST_TTL_MS) return null;
+    networkDigestCache.set(key, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeNetworkDigestCache(
+  label: string,
+  rangeHours: number,
+  value: CachedNetworkDigest
+): Promise<void> {
+  const key = getNetworkCacheKey(label, rangeHours);
+  networkDigestCache.set(key, value);
+
+  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (!url || !token) return;
+  try {
+    const encodedValue = encodeURIComponent(JSON.stringify(value));
+    await fetch(
+      `${url}/set/${encodeURIComponent(key)}/${encodedValue}?EX=${Math.ceil(
+        NETWORK_DIGEST_TTL_MS / 1000
+      )}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }
+    );
+  } catch {
+    // Best-effort cache write only.
+  }
 }
 
 function mapSeverity(v: number): "low" | "medium" | "high" | "critical" {
@@ -248,29 +323,56 @@ async function fetchAcledConflicts(rangeHours: number): Promise<{
       const admin1 = a.admin1 ? String(a.admin1) : "";
       const ts = monthToDate(eventMonth).toISOString();
       const norm = Math.min(1, magnitude / 120);
+      const battles = Number(a.battles) || 0;
+      const explosions = Number(a.explosions_remote_violence) || 0;
+      const civilians = Number(a.violence_against_civilians) || 0;
+      const protests = Number(a.protests) || 0;
+      const riots = Number(a.riots) || 0;
+      const fatalities = Number(a.fatalities) || 0;
+      const hardKinetic = battles + explosions + civilians;
+      const protestDominant = protests >= 8 && hardKinetic <= 1 && fatalities <= 2;
+      const adjustedMagnitude = protestDominant ? Math.max(1, magnitude * 0.45) : magnitude;
+      const adjustedNorm = Math.min(1, adjustedMagnitude / 120);
+      const subtitle = protestDominant
+        ? "ACLED monthly protest-heavy signal"
+        : "ACLED monthly conflict aggregate";
+      const title = protestDominant
+        ? admin1
+          ? `${admin1}, ${country} protest signal`
+          : `${country} protest signal`
+        : admin1
+          ? `${admin1}, ${country}`
+          : country || "Unknown";
+      const severity = protestDominant
+        ? adjustedNorm >= 0.45
+          ? "medium"
+          : "low"
+        : mapSeverity(norm);
 
       points.push({
         id: `acled-${String(a.ObjectId ?? `${country}-${admin1}-${eventMonth}`)}`,
         layer: "conflicts",
-        title: admin1 ? `${admin1}, ${country}` : country || "Unknown",
-        subtitle: "ACLED monthly conflict aggregate",
+        title,
+        subtitle,
         lat,
         lon,
         country,
-        severity: mapSeverity(norm),
+        severity,
         source: "ACLED ArcGIS",
         timestamp: ts,
-        magnitude,
+        magnitude: adjustedMagnitude,
         confidence: 0.75,
         metadata: {
           eventMonth,
-          battles: Number(a.battles) || 0,
-          explosions: Number(a.explosions_remote_violence) || 0,
-          protests: Number(a.protests) || 0,
-          riots: Number(a.riots) || 0,
+          battles,
+          explosions,
+          protests,
+          riots,
           strategic: Number(a.strategic_developments) || 0,
-          civilians: Number(a.violence_against_civilians) || 0,
-          fatalities: Number(a.fatalities) || 0,
+          civilians,
+          fatalities,
+          event_type: protestDominant ? "protest_signal" : "conflict_aggregate",
+          protest_dominant: protestDominant,
         },
       });
     }
@@ -698,6 +800,10 @@ const COUNTRY_ALIASES: Array<{ keyword: string; country: string }> = [
   { keyword: "yemeni", country: "Yemen" },
   { keyword: "iranian", country: "Iran" },
   { keyword: "myanmarese", country: "Myanmar" },
+  { keyword: "burmese", country: "Myanmar" },
+  { keyword: "tatmadaw", country: "Myanmar" },
+  { keyword: "pakistani", country: "Pakistan" },
+  { keyword: "afghan", country: "Afghanistan" },
   { keyword: "uae", country: "United Arab Emirates" },
   { keyword: "emirati", country: "United Arab Emirates" },
   { keyword: "saudi", country: "Saudi Arabia" },
@@ -897,49 +1003,124 @@ const WAR_LIKE_KEYWORDS = [
   "cross-border",
 ];
 
+const KINETIC_EVENT_KEYWORDS = [
+  "missile",
+  "rocket",
+  "drone",
+  "airstrike",
+  "air raid",
+  "bombardment",
+  "shelling",
+  "artillery",
+  "interception",
+  "naval battle",
+  "naval clash",
+  "battle",
+  "firefight",
+  "incursion",
+  "infiltration",
+];
+
+const GOOGLE_NEWS_EDITIONS: Array<{ hl: string; gl: string; ceid: string }> = [
+  { hl: "en-US", gl: "US", ceid: "US:en" },
+  { hl: "en-GB", gl: "GB", ceid: "GB:en" },
+  { hl: "en-IN", gl: "IN", ceid: "IN:en" },
+  { hl: "en-PK", gl: "PK", ceid: "PK:en" },
+  { hl: "en-AE", gl: "AE", ceid: "AE:en" },
+  { hl: "en-SA", gl: "SA", ceid: "SA:en" },
+  { hl: "en-QA", gl: "QA", ceid: "QA:en" },
+];
+
+function buildGoogleNewsRssUrls(encodedQuery: string): string[] {
+  return GOOGLE_NEWS_EDITIONS.map(
+    (e) =>
+      `https://news.google.com/rss/search?q=${encodedQuery}&hl=${e.hl}&gl=${e.gl}&ceid=${e.ceid}`
+  );
+}
+
 const TRUSTED_PUBLISHER_RE =
   /\b(reuters|associated press|ap news|bbc|cnn|new york times|nytimes|washington post|wall street journal|financial times|al jazeera|france 24|deutsche welle|the guardian|bloomberg|nbc news|abc news|cbs news|npr|politico)\b/i;
 
-const TRUSTED_CONFLICT_RSS_FEEDS: Array<{ provider: string; url: string }> = [
-  { provider: "BBC World", url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
-  { provider: "BBC Middle East", url: "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml" },
-  { provider: "BBC Europe", url: "https://feeds.bbci.co.uk/news/world/europe/rss.xml" },
-  { provider: "BBC Asia", url: "https://feeds.bbci.co.uk/news/world/asia/rss.xml" },
-  { provider: "BBC Africa", url: "https://feeds.bbci.co.uk/news/world/africa/rss.xml" },
-  { provider: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml" },
-  { provider: "The Guardian World", url: "https://www.theguardian.com/world/rss" },
-  { provider: "DW", url: "https://rss.dw.com/rdf/rss-en-all" },
-  { provider: "NPR World", url: "https://feeds.npr.org/1004/rss.xml" },
-];
+const TRUSTED_CONFLICT_RSS_FEEDS: Array<{
+  provider: string;
+  url?: string;
+  domain?: string;
+  tier: string;
+}> = WORLDMONITOR_RSS_NETWORK.filter((s) =>
+  s.layers.includes("news") || s.layers.includes("liveStrikes")
+).map((s) => ({
+  provider: s.name,
+  url: s.rssUrl,
+  domain: s.domain,
+  tier: s.tier,
+}));
 
 const GDELT_CACHE_TTL_MS = 8 * 60 * 1000;
 const GDELT_COOLDOWN_MS = 15 * 60 * 1000;
 let gdeltCache: { fetchedAt: number; points: IntelPoint[] } | null = null;
 let gdeltCooldownUntil = 0;
-const CURRENT_WAR_COUNTRIES = new Set(
-  [
-    "Ukraine",
-    "Russia",
-    "Sudan",
-    "South Sudan",
-    "Yemen",
-    "Syria",
-    "Israel",
-    "Palestine",
-    "Iran",
-    "Lebanon",
-    "Myanmar",
-    "Iraq",
-    "Somalia",
-    "Mali",
-    "Niger",
-    "Democratic Republic of the Congo",
-    "Ethiopia",
-    "Afghanistan",
-    "Libya",
-  ].map((c) => normalizeCountryLabel(c).toLowerCase())
+const CURATED_CONFLICT_FALLBACK = [
+  "ukraine",
+  "south sudan",
+  "sudan",
+  "iran",
+  "myanmar",
+  "afghanistan",
+  "saudi arabia",
+  "united arab emirates",
+  "qatar",
+  "oman",
+  "kuwait",
+  "bahrain",
+];
+const ACTIVE_CONFLICT_HIGHLIGHT_ALLOWLIST = new Set(
+  CURATED_CONFLICT_FALLBACK.map((c) => normalizeCountryLabel(c).toLowerCase())
 );
-CURRENT_WAR_COUNTRIES.add(normalizeCountryLabel("Ukraine").toLowerCase());
+
+const HIGH_REPEAT_EXCLUDE_RE =
+  /\b(live updates?|minute by minute|opinion|editorial|analysis|watch live|breaking live blog)\b/i;
+
+const GENERIC_REPEAT_LABEL_RE =
+  /\b(conflict event|context report|conflict report)\b/i;
+
+const IRAN_SPECIFIC_RAPID_QUERIES = [
+  "(Iran OR Tehran OR Isfahan OR Natanz OR Fordow OR Arak OR Bushehr) (missile strike OR drone strike OR explosion OR interception OR air defense OR base attack OR launcher)",
+  "(IRGC OR Revolutionary Guards OR Quds Force) (strike OR base OR missile OR drone OR retaliation)",
+  "(Natanz OR Fordow OR Bushehr OR Arak reactor) (attack OR sabotage OR strike OR explosion)",
+];
+
+const SUDAN_SPECIFIC_RAPID_QUERIES = [
+  "(Sudan OR Khartoum OR Omdurman OR Port Sudan OR Darfur OR El Fasher) (airstrike OR shelling OR clashes OR RSF OR SAF OR battle)",
+  "(RSF OR Rapid Support Forces OR Sudanese Armed Forces) (battle OR drone strike OR artillery OR front line)",
+];
+
+const MYANMAR_SPECIFIC_RAPID_QUERIES = [
+  "(Myanmar OR Burma OR Naypyidaw OR Yangon OR Mandalay OR Sagaing OR Kachin OR Shan OR Rakhine) (airstrike OR drone strike OR artillery OR clashes OR battle OR raid)",
+  "(Tatmadaw OR junta OR PDF OR ethnic armed organization OR KIA OR KNLA OR AA) (clashes OR offensive OR shelling OR airstrike)",
+  "(Myawaddy OR Lashio OR Loikaw OR Sittwe OR Bhamo OR Muse) (battle OR shelling OR seizure OR offensive)",
+];
+
+const MENA_SOUTHASIA_RAPID_QUERIES = [
+  "(Israel OR Iran OR Iraq OR Syria OR Lebanon) (missile strike OR drone strike OR interception OR air defense OR barrage)",
+  "(Persian Gulf OR Strait of Hormuz OR Gulf of Oman OR Arabian Sea) (tanker attack OR naval clash OR interception OR warship OR frigate OR destroyer)",
+  "(Pakistan OR Afghanistan OR Balochistan OR Khyber Pakhtunkhwa OR Kabul OR Kandahar) (battle OR raid OR drone strike OR shelling OR border clash)",
+  "(Natanz OR Fordow OR Arak OR Bushehr OR Isfahan OR Bandar Abbas) (strike OR sabotage OR explosion OR air defense)",
+  "(Qatar OR UAE OR Saudi Arabia OR Bahrain OR Kuwait OR Oman) (interception OR missile OR drone OR airbase OR naval movement)",
+];
+
+const MENA_SOUTHASIA_NEWS_QUERIES = [
+  "(Israel OR Iran OR Iraq OR Syria OR Lebanon OR Jordan) (missile OR drone OR interception OR barrage OR strike)",
+  "(Persian Gulf OR Strait of Hormuz OR Gulf of Oman OR Arabian Sea OR Gulf of Aden) (shipping attack OR tanker OR warship OR naval interception)",
+  "(Pakistan OR Afghanistan OR Balochistan OR Kurram OR Waziristan OR Kabul OR Kandahar OR Herat) (battle OR raid OR clash OR shelling OR drone attack)",
+  "(Natanz OR Fordow OR Arak OR Bushehr OR Isfahan OR Parchin) (attack OR sabotage OR strike OR explosion)",
+  "(UAE OR Saudi Arabia OR Qatar OR Bahrain OR Kuwait OR Oman) (missile interception OR air defense OR drone incursion OR naval patrol)",
+];
+
+const MYANMAR_NEWS_QUERIES = [
+  "(Myanmar OR Burma) (airstrike OR shelling OR clashes OR offensive OR raid OR battle)",
+  "(Naypyidaw OR Yangon OR Mandalay OR Sagaing OR Magway OR Chin OR Kachin OR Shan OR Rakhine) (strike OR clashes OR artillery OR fighting)",
+  "(Tatmadaw OR People's Defense Force OR PDF OR KIA OR KNLA OR Arakan Army) (attack OR battle OR ambush OR shelling)",
+];
 
 const CONFLICT_COUNTRY_ALIASES: Record<string, string> = {
   "democratic republic of congo": "democratic republic of the congo",
@@ -1046,6 +1227,129 @@ const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }>
   manama: { lat: 26.2285, lon: 50.586, country: "Bahrain" },
   "kuwait city": { lat: 29.3759, lon: 47.9774, country: "Kuwait" },
   muscat: { lat: 23.5859, lon: 58.4059, country: "Oman" },
+  "fujairah": { lat: 25.1288, lon: 56.3265, country: "United Arab Emirates" },
+  "ras al khaimah": { lat: 25.8, lon: 55.9762, country: "United Arab Emirates" },
+  "al ain": { lat: 24.2075, lon: 55.7447, country: "United Arab Emirates" },
+  "al dhafra": { lat: 24.2487, lon: 54.5486, country: "United Arab Emirates" },
+  "dhahran": { lat: 26.2361, lon: 50.0393, country: "Saudi Arabia" },
+  "ras tanura": { lat: 26.6436, lon: 50.1594, country: "Saudi Arabia" },
+  "dammam": { lat: 26.4207, lon: 50.0888, country: "Saudi Arabia" },
+  "al udeid": { lat: 25.1176, lon: 51.3147, country: "Qatar" },
+  "duqm": { lat: 19.6707, lon: 57.7049, country: "Oman" },
+  "salalah": { lat: 17.0194, lon: 54.0897, country: "Oman" },
+  "kabul": { lat: 34.5553, lon: 69.2075, country: "Afghanistan" },
+  "kandahar": { lat: 31.6289, lon: 65.7372, country: "Afghanistan" },
+  "herat": { lat: 34.3529, lon: 62.204, country: "Afghanistan" },
+  "mazar i sharif": { lat: 36.7069, lon: 67.1122, country: "Afghanistan" },
+  "jalalabad": { lat: 34.4342, lon: 70.4478, country: "Afghanistan" },
+  "kunduz": { lat: 36.7289, lon: 68.857, country: "Afghanistan" },
+  "helmand": { lat: 31.5799, lon: 64.3696, country: "Afghanistan" },
+  "bagram": { lat: 34.9444, lon: 69.2583, country: "Afghanistan" },
+  "islamabad": { lat: 33.6844, lon: 73.0479, country: "Pakistan" },
+  "rawalpindi": { lat: 33.5651, lon: 73.0169, country: "Pakistan" },
+  "karachi": { lat: 24.8607, lon: 67.0011, country: "Pakistan" },
+  "gwadar": { lat: 25.1264, lon: 62.3225, country: "Pakistan" },
+  "lahore": { lat: 31.5204, lon: 74.3587, country: "Pakistan" },
+  "peshawar": { lat: 34.0151, lon: 71.5249, country: "Pakistan" },
+  "quetta": { lat: 30.1798, lon: 66.975, country: "Pakistan" },
+  "khyber": { lat: 34.0742, lon: 71.2195, country: "Pakistan" },
+  "waziristan": { lat: 32.4, lon: 69.8, country: "Pakistan" },
+  "natanz": { lat: 33.725, lon: 51.726, country: "Iran" },
+  "fordow": { lat: 34.885, lon: 50.995, country: "Iran" },
+  "arak": { lat: 34.0917, lon: 49.6892, country: "Iran" },
+  "parchin": { lat: 35.5, lon: 51.78, country: "Iran" },
+  "bandar abbas": { lat: 27.1832, lon: 56.2666, country: "Iran" },
+  "chabahar": { lat: 25.2919, lon: 60.643, country: "Iran" },
+  "kerman": { lat: 30.2839, lon: 57.0834, country: "Iran" },
+  "tabas": { lat: 33.5959, lon: 56.9244, country: "Iran" },
+  "naypyidaw": { lat: 19.7633, lon: 96.0785, country: "Myanmar" },
+  "yangon": { lat: 16.8409, lon: 96.1735, country: "Myanmar" },
+  "mandalay": { lat: 21.9588, lon: 96.0891, country: "Myanmar" },
+  "sagaing": { lat: 21.88, lon: 95.98, country: "Myanmar" },
+  "magway": { lat: 20.1496, lon: 94.9325, country: "Myanmar" },
+  "myitkyina": { lat: 25.3833, lon: 97.4, country: "Myanmar" },
+  "lashio": { lat: 22.9359, lon: 97.7498, country: "Myanmar" },
+  "sittwe": { lat: 20.1462, lon: 92.8983, country: "Myanmar" },
+  "myawaddy": { lat: 16.6891, lon: 98.5089, country: "Myanmar" },
+  "loikaw": { lat: 19.6766, lon: 97.206, country: "Myanmar" },
+  "el fasher": { lat: 13.6261, lon: 25.3494, country: "Sudan" },
+  "nyala": { lat: 12.0535, lon: 24.8807, country: "Sudan" },
+  "geneina": { lat: 13.4526, lon: 22.4472, country: "Sudan" },
+  "wad madani": { lat: 14.4012, lon: 33.5199, country: "Sudan" },
+  "kassala": { lat: 15.4509, lon: 36.3996, country: "Sudan" },
+  "atbara": { lat: 17.7, lon: 33.98, country: "Sudan" },
+  "atkala": { lat: 15.31, lon: 36.49, country: "Sudan" },
+  "nowshera": { lat: 34.008, lon: 71.982, country: "Pakistan" },
+  "miranshah": { lat: 33.0, lon: 70.07, country: "Pakistan" },
+  "parachinar": { lat: 33.9, lon: 70.1, country: "Pakistan" },
+  "zhob": { lat: 31.34, lon: 69.45, country: "Pakistan" },
+  "khost": { lat: 33.3395, lon: 69.9204, country: "Afghanistan" },
+  "ghazni": { lat: 33.5487, lon: 68.42, country: "Afghanistan" },
+  "talokan": { lat: 36.7361, lon: 69.5345, country: "Afghanistan" },
+  "farah": { lat: 32.3758, lon: 62.1164, country: "Afghanistan" },
+  "dezful": { lat: 32.3836, lon: 48.4236, country: "Iran" },
+  "urmia": { lat: 37.5527, lon: 45.076, country: "Iran" },
+  "hamedan": { lat: 34.7983, lon: 48.5148, country: "Iran" },
+  "sanandaj": { lat: 35.3219, lon: 46.9862, country: "Iran" },
+  "zahedan": { lat: 29.4963, lon: 60.8629, country: "Iran" },
+};
+
+const PRIORITY_COUNTRY_HOTSPOTS: Record<
+  string,
+  Array<{ city: string; lat: number; lon: number }>
+> = {
+  iran: [
+    { city: "Tehran", lat: 35.6892, lon: 51.389 },
+    { city: "Isfahan", lat: 32.6546, lon: 51.668 },
+    { city: "Natanz", lat: 33.725, lon: 51.726 },
+    { city: "Fordow", lat: 34.885, lon: 50.995 },
+    { city: "Bushehr", lat: 28.9211, lon: 50.8372 },
+    { city: "Bandar Abbas", lat: 27.1832, lon: 56.2666 },
+    { city: "Tabriz", lat: 38.0962, lon: 46.2738 },
+    { city: "Ahvaz", lat: 31.319, lon: 48.6842 },
+  ],
+  ukraine: [
+    { city: "Kyiv", lat: 50.4501, lon: 30.5234 },
+    { city: "Kharkiv", lat: 49.9935, lon: 36.2304 },
+    { city: "Odesa", lat: 46.4825, lon: 30.7233 },
+    { city: "Zaporizhzhia", lat: 47.8388, lon: 35.1396 },
+    { city: "Kherson", lat: 46.6354, lon: 32.6169 },
+    { city: "Donetsk", lat: 48.0159, lon: 37.8029 },
+    { city: "Dnipro", lat: 48.4647, lon: 35.0462 },
+    { city: "Sumy", lat: 50.9077, lon: 34.7981 },
+  ],
+  sudan: [
+    { city: "Khartoum", lat: 15.5007, lon: 32.5599 },
+    { city: "Omdurman", lat: 15.6445, lon: 32.4777 },
+    { city: "Port Sudan", lat: 19.6158, lon: 37.2164 },
+    { city: "El Fasher", lat: 13.6261, lon: 25.3494 },
+    { city: "Nyala", lat: 12.0535, lon: 24.8807 },
+    { city: "Geneina", lat: 13.4526, lon: 22.4472 },
+  ],
+  pakistan: [
+    { city: "Islamabad", lat: 33.6844, lon: 73.0479 },
+    { city: "Rawalpindi", lat: 33.5651, lon: 73.0169 },
+    { city: "Peshawar", lat: 34.0151, lon: 71.5249 },
+    { city: "Quetta", lat: 30.1798, lon: 66.975 },
+    { city: "Karachi", lat: 24.8607, lon: 67.0011 },
+    { city: "Gwadar", lat: 25.1264, lon: 62.3225 },
+  ],
+  afghanistan: [
+    { city: "Kabul", lat: 34.5553, lon: 69.2075 },
+    { city: "Kandahar", lat: 31.6289, lon: 65.7372 },
+    { city: "Herat", lat: 34.3529, lon: 62.204 },
+    { city: "Jalalabad", lat: 34.4342, lon: 70.4478 },
+    { city: "Kunduz", lat: 36.7289, lon: 68.857 },
+    { city: "Bagram", lat: 34.9444, lon: 69.2583 },
+  ],
+  myanmar: [
+    { city: "Naypyidaw", lat: 19.7633, lon: 96.0785 },
+    { city: "Yangon", lat: 16.8409, lon: 96.1735 },
+    { city: "Mandalay", lat: 21.9588, lon: 96.0891 },
+    { city: "Sagaing", lat: 21.88, lon: 95.98 },
+    { city: "Myitkyina", lat: 25.3833, lon: 97.4 },
+    { city: "Lashio", lat: 22.9359, lon: 97.7498 },
+  ],
 };
 
 const CONFLICT_REGION_CENTROIDS: Array<{
@@ -1063,6 +1367,20 @@ const CONFLICT_REGION_CENTROIDS: Array<{
   { re: /\bwestern pacific\b/i, country: "Japan", lat: 24.7, lon: 142.0 },
   { re: /\beastern mediterranean|levant\b/i, country: "Israel", lat: 33.9, lon: 34.9 },
   { re: /\bkashmir|line of control\b/i, country: "Pakistan", lat: 34.3, lon: 74.5 },
+  { re: /\bstrait of hormuz|hormuz\b/i, country: "Oman", lat: 26.57, lon: 56.25 },
+  { re: /\bbalochistan\b/i, country: "Pakistan", lat: 28.5, lon: 65.1 },
+  { re: /\bnatanz\b/i, country: "Iran", lat: 33.725, lon: 51.726 },
+  { re: /\bfordow\b/i, country: "Iran", lat: 34.885, lon: 50.995 },
+  { re: /\bbushehr\b/i, country: "Iran", lat: 28.9211, lon: 50.8372 },
+  { re: /\bbandar abbas\b/i, country: "Iran", lat: 27.1832, lon: 56.2666 },
+  { re: /\bkabul\b/i, country: "Afghanistan", lat: 34.5553, lon: 69.2075 },
+  { re: /\bkandahar\b/i, country: "Afghanistan", lat: 31.6289, lon: 65.7372 },
+  { re: /\bkarachi\b/i, country: "Pakistan", lat: 24.8607, lon: 67.0011 },
+  { re: /\bmyanmar|burma\b/i, country: "Myanmar", lat: 20.5, lon: 96.6 },
+  { re: /\bsagaing\b/i, country: "Myanmar", lat: 22.1, lon: 95.1 },
+  { re: /\brakhine\b/i, country: "Myanmar", lat: 20.6, lon: 93.1 },
+  { re: /\bshan\b/i, country: "Myanmar", lat: 21.2, lon: 97.2 },
+  { re: /\bkachin\b/i, country: "Myanmar", lat: 25.7, lon: 97.5 },
 ];
 
 function normalizeHeadlineForCluster(text: string): string {
@@ -1090,17 +1408,102 @@ function dedupeEventPoints(points: IntelPoint[], bucketHours = 1): IntelPoint[] 
   const seen = new Map<string, IntelPoint>();
   for (const p of points) {
     const ts = Date.parse(p.timestamp || "");
-    const bucket = Number.isFinite(ts) ? Math.floor(ts / (bucketHours * 3600_000)) : 0;
+    const effectiveBucketHours =
+      p.layer === "liveStrikes"
+        ? Math.max(0.25, Math.min(bucketHours, 0.5))
+        : p.layer === "news"
+          ? Math.max(0.5, Math.min(bucketHours, 0.75))
+          : p.layer === "conflicts"
+            ? Math.max(1.5, bucketHours)
+            : bucketHours;
+    const bucket = Number.isFinite(ts) ? Math.floor(ts / (effectiveBucketHours * 3600_000)) : 0;
     const headlineBase = normalizeHeadlineForCluster(
       String(p.metadata?.original_headline ?? p.title ?? "")
     );
-    const roundedLat = Math.round(p.lat * 2) / 2;
-    const roundedLon = Math.round(p.lon * 2) / 2;
-    const key = `${headlineBase}|${(p.country ?? "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}|${p.layer}`;
+    const eventType = String(p.metadata?.event_type ?? "generic").toLowerCase();
+    const coordStep =
+      p.layer === "liveStrikes" ? 0.12 : p.layer === "news" ? 0.2 : p.layer === "conflicts" ? 0.5 : 0.3;
+    const roundedLat = Math.round(p.lat / coordStep) * coordStep;
+    const roundedLon = Math.round(p.lon / coordStep) * coordStep;
+    const sourceUrl = String(p.metadata?.source_url ?? "").trim();
+    let sourceHost = "";
+    if (sourceUrl.startsWith("http://") || sourceUrl.startsWith("https://")) {
+      try {
+        sourceHost = new URL(sourceUrl).hostname.replace(/^www\./, "");
+      } catch {
+        sourceHost = "";
+      }
+    }
+    const sourceKey =
+      p.layer === "news" || p.layer === "liveStrikes"
+        ? (sourceHost || String(p.source || "").toLowerCase().slice(0, 40))
+        : "source-agnostic";
+    const key = `${headlineBase}|${eventType}|${(p.country ?? "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}|${p.layer}|${sourceKey}`;
     const current = seen.get(key);
     if (!current || p.timestamp > current.timestamp) seen.set(key, p);
   }
   return Array.from(seen.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+function collapseRepeatedEvents(points: IntelPoint[], layer: "news" | "liveStrikes"): IntelPoint[] {
+  const keep = new Map<string, IntelPoint>();
+  for (const p of points) {
+    const ts = Date.parse(p.timestamp || "");
+    const bucketHours = layer === "liveStrikes" ? 1.5 : 2.5;
+    const bucket = Number.isFinite(ts) ? Math.floor(ts / (bucketHours * 3600_000)) : 0;
+    const step = layer === "liveStrikes" ? 0.12 : 0.18;
+    const roundedLat = Math.round(p.lat / step) * step;
+    const roundedLon = Math.round(p.lon / step) * step;
+    const headlineBase = normalizeHeadlineForCluster(
+      String(p.metadata?.original_headline ?? p.title ?? "")
+    );
+    const eventType = String(p.metadata?.event_type ?? "generic").toLowerCase();
+    const key = `${headlineBase}|${eventType}|${(p.country ?? "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}`;
+    const current = keep.get(key);
+    if (!current) {
+      keep.set(key, p);
+      continue;
+    }
+    const score = (x: IntelPoint) =>
+      (x.severity === "critical" ? 4 : x.severity === "high" ? 3 : x.severity === "medium" ? 2 : 1) +
+      (String(x.metadata?.source_url ?? "").trim() ? 0.8 : 0) +
+      (x.imageUrl ? 0.3 : 0);
+    if (score(p) > score(current) || p.timestamp > current.timestamp) keep.set(key, p);
+  }
+  return Array.from(keep.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+function seedFromText(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function expandPriorityCountryFallbackLocations(
+  country: string,
+  sourceText: string,
+  maxCount = 3
+): Array<{ lat: number; lon: number; country: string; city: string | null }> {
+  const key = canonicalConflictCountry(country);
+  const hotspots = PRIORITY_COUNTRY_HOTSPOTS[key];
+  if (!hotspots || hotspots.length === 0) return [];
+  const seed = seedFromText(`${sourceText}|${country}`);
+  const count = Math.min(maxCount, hotspots.length);
+  const out: Array<{ lat: number; lon: number; country: string; city: string | null }> = [];
+  for (let i = 0; i < count; i += 1) {
+    const idx = (seed + i * 3) % hotspots.length;
+    const h = hotspots[idx];
+    out.push({ lat: h.lat, lon: h.lon, country, city: h.city });
+  }
+  return out;
+}
+
+function isKineticEventText(text: string): boolean {
+  const t = text.toLowerCase();
+  return KINETIC_EVENT_KEYWORDS.some((k) => t.includes(k));
 }
 
 function parseRssConflictPoints(
@@ -1146,8 +1549,16 @@ function parseRssConflictPoints(
     if (allCities.length > 0) {
       for (const c of allCities) locations.push({ lat: c.lat, lon: c.lon, country: c.country, city: c.city });
     } else if (countryFromText) {
+      const theaterFallback = expandPriorityCountryFallbackLocations(
+        countryFromText,
+        `${title} ${description}`,
+        layer === "liveStrikes" ? 4 : 3
+      );
+      if (theaterFallback.length > 0) {
+        locations.push(...theaterFallback);
+      }
       const bbox = COUNTRY_BBOX[countryFromText];
-      if (bbox || region)
+      if ((bbox || region) && locations.length === 0)
         locations.push({
           lat: region?.lat ?? bbox![4],
           lon: region?.lon ?? bbox![5],
@@ -1217,20 +1628,54 @@ async function fetchTrustedPublisherSignals(rangeHours: number): Promise<{
 }> {
   const started = Date.now();
   const cutoff = Date.now() - rangeHours * 3600_000;
+  const cached = await readNetworkDigestCache("trusted-publisher-network", rangeHours);
+  if (cached) {
+    return {
+      points: cached.points,
+      health: {
+        provider: "Trusted publisher feeds",
+        ok: cached.points.length > 0,
+        updatedAt: new Date(cached.fetchedAt).toISOString(),
+        latencyMs: Date.now() - started,
+        message: `${cached.diagnostics} [cache=warm reason=cache_hit]`,
+      },
+    };
+  }
+
   const seen = new Set<string>();
   const points: IntelPoint[] = [];
   let feedErrors = 0;
   let totalItems = 0;
   let conflictCandidates = 0;
   let geoMapped = 0;
+  let domainFallbacks = 0;
 
   for (const feed of TRUSTED_CONFLICT_RSS_FEEDS) {
-    const fetchRes = await fetchTextWithRetries([feed.url], 12000, 2);
+    const urls: string[] = [];
+    if (feed.url) urls.push(feed.url);
+    if (feed.domain) {
+      const q = encodeURIComponent(
+        `site:${feed.domain} (missile OR strike OR explosion OR shelling OR artillery OR drone OR battle OR raid OR clashes)`
+      );
+      urls.push(...buildGoogleNewsRssUrls(q));
+      domainFallbacks += 1;
+    }
+    if (urls.length === 0) {
+      feedErrors += 1;
+      continue;
+    }
+    const fetchRes = await fetchTextWithRetries(urls, 12000, 2);
     if (!fetchRes.ok || !fetchRes.text) {
       feedErrors += 1;
       continue;
     }
-    const parsed = parseRssConflictPoints(fetchRes.text, cutoff, feed.provider, "news", seen);
+    const parsed = parseRssConflictPoints(
+      fetchRes.text,
+      cutoff,
+      `${feed.provider} (${feed.tier})`,
+      "news",
+      seen
+    );
     totalItems += parsed.totalItems;
     conflictCandidates += parsed.conflictCandidates;
     geoMapped += parsed.geoMapped;
@@ -1238,6 +1683,18 @@ async function fetchTrustedPublisherSignals(rangeHours: number): Promise<{
   }
 
   const deduped = dedupeEventPoints(points, 1).slice(0, 3200);
+  const diagnostics =
+    feedErrors > 0
+      ? `Mapped ${deduped.length} event points from ${
+          TRUSTED_CONFLICT_RSS_FEEDS.length - feedErrors
+        }/${TRUSTED_CONFLICT_RSS_FEEDS.length} feeds (items ${totalItems}, conflict candidates ${conflictCandidates}, geocoded ${geoMapped}, domain_fallbacks ${domainFallbacks})`
+      : `Mapped ${deduped.length} event points (items ${totalItems}, conflict candidates ${conflictCandidates}, geocoded ${geoMapped}, domain_fallbacks ${domainFallbacks})`;
+  await writeNetworkDigestCache("trusted-publisher-network", rangeHours, {
+    points: deduped,
+    fetchedAt: Date.now(),
+    diagnostics,
+  });
+
   return {
     points: deduped,
     health: {
@@ -1245,10 +1702,117 @@ async function fetchTrustedPublisherSignals(rangeHours: number): Promise<{
       ok: deduped.length > 0,
       updatedAt: new Date().toISOString(),
       latencyMs: Date.now() - started,
-      message:
-        feedErrors > 0
-          ? `Mapped ${deduped.length} event points from ${TRUSTED_CONFLICT_RSS_FEEDS.length - feedErrors}/${TRUSTED_CONFLICT_RSS_FEEDS.length} feeds (items ${totalItems}, conflict candidates ${conflictCandidates}, geocoded ${geoMapped})`
-          : `Mapped ${deduped.length} event points (items ${totalItems}, conflict candidates ${conflictCandidates}, geocoded ${geoMapped})`,
+      message: `${diagnostics} [reason=${feedErrors > 0 ? "partial_fetch_failure" : "ok"}]`,
+    },
+  };
+}
+
+async function fetchRssNetworkSignals(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const res = await fetchTrustedPublisherSignals(rangeHours);
+  return {
+    points: res.points,
+    health: {
+      ...res.health,
+      provider: "RSS network adapter",
+      message: `${res.health.message ?? ""} [reason=network_adapter]`.trim(),
+    },
+  };
+}
+
+async function fetchRelaySeedSignals(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const relayUrl = process.env.INTEL_RELAY_DIGEST_URL?.trim();
+  if (!relayUrl) {
+    return {
+      points: [],
+      health: {
+        provider: "Relay seed digest",
+        ok: true,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: "No INTEL_RELAY_DIGEST_URL configured (optional adapter) [reason=missing_env]",
+      },
+    };
+  }
+  const res = await timedJsonFetch<{
+    points?: Array<{
+      id?: string;
+      title?: string;
+      subtitle?: string;
+      lat?: number;
+      lon?: number;
+      country?: string;
+      source?: string;
+      timestamp?: string;
+      url?: string;
+      snippet?: string;
+      imageUrl?: string;
+      severity?: string;
+      eventType?: string;
+    }>;
+  }>(`${relayUrl}${relayUrl.includes("?") ? "&" : "?"}rangeHours=${rangeHours}`, undefined, 16000);
+  if (!res.ok || !res.data) {
+    const raw = res.message ?? "Relay request failed";
+    const friendly =
+      typeof raw === "string" && (raw.includes("aborted") || raw.includes("abort"))
+        ? "Relay request timed out or aborted"
+        : raw;
+    return {
+      points: [],
+      health: {
+        provider: "Relay seed digest",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: `${friendly} (optional adapter; map still runs without relay) [reason=upstream_error]`,
+      },
+    };
+  }
+  const nowIso = new Date().toISOString();
+  const points: IntelPoint[] = [];
+  for (const p of res.data.points ?? []) {
+    const lat = Number(p.lat);
+    const lon = Number(p.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    points.push({
+      id: `relay-${p.id ?? `${lat}-${lon}-${points.length + 1}`}`,
+      layer: "news",
+      title: p.title?.trim() || "Conflict event",
+      subtitle: p.subtitle?.trim() || "Relay conflict digest",
+      lat,
+      lon,
+      country: p.country?.trim() || undefined,
+      severity:
+        p.severity === "critical" || p.severity === "high" || p.severity === "medium"
+          ? p.severity
+          : "medium",
+      source: p.source?.trim() || "Relay digest",
+      timestamp: p.timestamp?.trim() || nowIso,
+      magnitude: 8,
+      confidence: 0.7,
+      imageUrl: p.imageUrl?.trim() || undefined,
+      metadata: {
+        event_type: p.eventType?.trim() || "conflict_event",
+        source_url: p.url?.trim() || null,
+        source_snippet: p.snippet?.trim() || null,
+      },
+    });
+  }
+  const deduped = dedupeEventPoints(points, 1).slice(0, 4200);
+  return {
+    points: deduped,
+    health: {
+      provider: "Relay seed digest",
+      ok: true,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message: `Mapped ${deduped.length} relay-seeded points [reason=${deduped.length ? "ok" : "reachable_empty"}]`,
     },
   };
 }
@@ -1266,7 +1830,6 @@ function extractMentionedCity(text: string): { city: string; lat: number; lon: n
 function extractAllMentionedCities(
   text: string
 ): Array<{ city: string; lat: number; lon: number; country: string }> {
-  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ");
   const out: Array<{ city: string; lat: number; lon: number; country: string }> = [];
   const seen = new Set<string>();
   const entries = Object.entries(CITY_COORDS);
@@ -1274,7 +1837,8 @@ function extractAllMentionedCities(
   for (const [cityKey, loc] of entries) {
     const key = cityKey.replace(/\s+/g, " ");
     if (key.length < 3) continue;
-    const re = new RegExp("\\b" + key.replace(/\s+/g, "\\s*") + "\\b", "i");
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp("\\b" + escaped.replace(/\s+/g, "\\s*") + "\\b", "i");
     if (re.test(text) && !seen.has(loc.country + "|" + key)) {
       seen.add(loc.country + "|" + key);
       out.push({ city: key, ...loc });
@@ -1396,6 +1960,10 @@ async function fetchLiveuamapEvents(rangeHours: number): Promise<{
   }
 
   if (!events.length) {
+    const message =
+      typeof lastMessage === "string" && lastMessage.includes("404")
+        ? "HTTP 404 — endpoint may have changed or API access not granted."
+        : lastMessage;
     return {
       points: [],
       health: {
@@ -1403,7 +1971,7 @@ async function fetchLiveuamapEvents(rangeHours: number): Promise<{
         ok: false,
         updatedAt: new Date().toISOString(),
         latencyMs: Date.now() - started,
-        message: lastMessage,
+        message,
       },
     };
   }
@@ -2023,7 +2591,8 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
 function buildActiveConflictCountries(
   liveStrikes: IntelPoint[],
   conflicts: IntelPoint[],
-  news: IntelPoint[]
+  news: IntelPoint[],
+  allowCuratedFallback = false
 ): ActiveConflictCountry[] {
   const byCountry = new Map<
     string,
@@ -2085,28 +2654,28 @@ function buildActiveConflictCountries(
     }))
     .filter(
       (c) =>
-        c.score >= 8 &&
-        CURRENT_WAR_COUNTRIES.has(canonicalConflictCountry(c.country))
+        c.score >= 7 &&
+        ACTIVE_CONFLICT_HIGHLIGHT_ALLOWLIST.has(canonicalConflictCountry(c.country))
     )
     .sort((a, b) => b.score - a.score)
     .slice(0, 45);
 
-  const seen = new Set(computed.map((c) => canonicalConflictCountry(c.country)));
-  const nowIso = new Date().toISOString();
-  for (const warCountry of CURRENT_WAR_COUNTRIES) {
-    if (seen.has(warCountry)) continue;
-    computed.push({
-      country: warCountry,
-      score: 1.2,
-      severity: "low",
-      latestEventAt: nowIso,
-      sources: ["Curated conflict-country baseline"],
-    });
+  if (computed.length === 0 && allowCuratedFallback) {
+    const nowIso = new Date().toISOString();
+    for (const warCountry of CURATED_CONFLICT_FALLBACK) {
+      computed.push({
+        country: warCountry,
+        score: 2.2,
+        severity: "low",
+        latestEventAt: nowIso,
+        sources: ["Curated fallback (dynamic adapters sparse)"],
+      });
+    }
   }
 
   return computed
     .sort((a, b) => b.score - a.score)
-    .slice(0, 55);
+    .slice(0, 35);
 }
 
 function buildEscalationRiskCountries(
@@ -2184,6 +2753,10 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     "Iran Israel strike OR missile OR drone OR attack",
     "Tehran OR Isfahan OR Bushehr strike OR explosion OR nuclear",
     "Iran drone OR ballistic missile OR interception",
+    ...IRAN_SPECIFIC_RAPID_QUERIES,
+    ...SUDAN_SPECIFIC_RAPID_QUERIES,
+    ...MYANMAR_SPECIFIC_RAPID_QUERIES,
+    ...MENA_SOUTHASIA_RAPID_QUERIES,
   ];
   try {
     const cutoff = Date.now() - rangeHours * 3600_000;
@@ -2210,10 +2783,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
 
     for (const rawQuery of rapidQueries) {
       const encoded = encodeURIComponent(rawQuery);
-      const urls = [
-        `https://news.google.com/rss/search?q=${encoded}&hl=en-US&gl=US&ceid=US:en`,
-        `https://news.google.com/rss/search?q=${encoded}&hl=en-GB&gl=GB&ceid=GB:en`,
-      ];
+      const urls = buildGoogleNewsRssUrls(encoded);
       const fetchRes = await fetchTextWithRetries(urls, 12000, 2);
       if (!fetchRes.ok || !fetchRes.text) {
         failedQueries += 1;
@@ -2244,8 +2814,14 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         if (allCities.length > 0) {
           for (const c of allCities) locations.push({ lat: c.lat, lon: c.lon, country: c.country, city: c.city });
         } else if (countryFromText) {
+          const theaterFallback = expandPriorityCountryFallbackLocations(
+            countryFromText,
+            `${title} ${description}`,
+            4
+          );
+          if (theaterFallback.length > 0) locations.push(...theaterFallback);
           const bbox = COUNTRY_BBOX[countryFromText];
-          if (bbox || region)
+          if ((bbox || region) && locations.length === 0)
             locations.push({
               lat: region?.lat ?? bbox![4],
               lon: region?.lon ?? bbox![5],
@@ -2312,7 +2888,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     }
 
     return {
-      points: dedupeEventPoints(points, 1).slice(0, 3400),
+      points: dedupeEventPoints(points, 1).slice(0, 5200),
       health: {
         provider: "Rapid conflict feed",
         ok: points.length > 0,
@@ -2379,6 +2955,8 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "Iran Israel strike missile drone",
     "Tehran Isfahan Bushehr Iran attack",
     "Iran nuclear Bushehr projectile",
+    ...MENA_SOUTHASIA_NEWS_QUERIES,
+    ...MYANMAR_NEWS_QUERIES,
   ];
   const eventKeywords = [
     "missile",
@@ -2421,6 +2999,19 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "barrage",
     "war",
     "battlefield",
+    "airbase",
+    "launcher",
+    "warhead",
+    "salvo",
+    "tanker",
+    "frigate",
+    "destroyer",
+    "patrol boat",
+    "maritime",
+    "shipping attack",
+    "naval interception",
+    "hormuz",
+    "balochistan",
   ];
   const warContextRe =
     /\b(war|frontline|battlefield|cross-border|air raid|missile|strike|shelling|bombardment|drone attack|naval clash|skirmish|clashes|firefight|offensive|counteroffensive|insurgent|militant)\b/i;
@@ -2432,11 +3023,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
 
     for (const rawQuery of queries) {
       const query = encodeURIComponent(rawQuery);
-      const urls = [
-        `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`,
-        `https://news.google.com/rss/search?q=${query}&hl=en-GB&gl=GB&ceid=GB:en`,
-        `https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`,
-      ];
+      const urls = buildGoogleNewsRssUrls(query);
       const fetchRes = await fetchTextWithRetries(urls, 12000, 2);
       if (!fetchRes.ok || !fetchRes.text) {
         fetchErrors += 1;
@@ -2470,8 +3057,14 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         if (allCities.length > 0) {
           for (const c of allCities) locations.push({ lat: c.lat, lon: c.lon, country: c.country, city: c.city });
         } else if (countryFromText) {
+          const theaterFallback = expandPriorityCountryFallbackLocations(
+            countryFromText,
+            `${title} ${description}`,
+            3
+          );
+          if (theaterFallback.length > 0) locations.push(...theaterFallback);
           const bbox = COUNTRY_BBOX[countryFromText];
-          if (bbox || region) {
+          if ((bbox || region) && locations.length === 0) {
             locations.push({
               lat: region?.lat ?? bbox![4],
               lon: region?.lon ?? bbox![5],
@@ -2524,7 +3117,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     points.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
     return {
-      points: points.slice(0, 7600),
+      points: points.slice(0, 12800),
       health: {
         provider: "Google News RSS",
         ok: points.length > 0,
@@ -3137,6 +3730,389 @@ function buildHotspots(layers: Record<IntelLayerKey, IntelPoint[]>): IntelPoint[
     }));
 }
 
+function fallbackUkraineFrontlineFeatureCollection(): Record<string, unknown> {
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: {
+          theater: "Ukraine-Russia",
+          overlay_type: "active_frontline_fallback",
+        },
+        geometry: {
+          type: "MultiLineString",
+          coordinates: [
+            [
+              [36.62, 50.06],
+              [37.25, 49.85],
+              [37.8, 49.55],
+              [38.02, 49.1],
+              [37.9, 48.7],
+              [38.13, 48.5],
+              [38.02, 48.08],
+              [37.75, 47.75],
+              [37.3, 47.46],
+              [36.9, 47.2],
+              [36.68, 46.88],
+              [36.72, 46.56],
+              [36.58, 46.32],
+            ],
+          ],
+        },
+      },
+    ],
+  };
+}
+
+async function fetchUkraineFrontlineOverlay(nowIso: string): Promise<{
+  overlay: FrontlineOverlay;
+  sourceState: "live" | "fallback";
+}> {
+  const live = await timedJsonFetch<{
+    type?: string;
+    features?: Array<{
+      type?: string;
+      properties?: Record<string, unknown>;
+      geometry?: { type?: string; coordinates?: unknown };
+    }>;
+  }>(ISW_UKRAINE_FRONTLINE_GEOJSON_URL, undefined, 12000);
+
+  if (live.ok && live.data?.type === "FeatureCollection" && Array.isArray(live.data.features)) {
+    const lineFeatures = live.data.features.filter((f) => {
+      const t = String(f?.geometry?.type ?? "");
+      return t === "LineString" || t === "MultiLineString";
+    });
+    if (lineFeatures.length > 0) {
+      const latestEpoch = lineFeatures.reduce((max, f) => {
+        const v = Number(f?.properties?.Date ?? 0);
+        return Number.isFinite(v) && v > max ? v : max;
+      }, 0);
+      const updatedAt = latestEpoch > 0 ? new Date(latestEpoch).toISOString() : nowIso;
+      return {
+        sourceState: "live",
+        overlay: {
+          id: "ukraine-frontline-isw-live",
+          name: "Ukraine frontline (ISW/CTP)",
+          theater: "Ukraine-Russia",
+          updatedAt,
+          confidence: 92,
+          source: "ISW/CTP ArcGIS frontline layer",
+          geojson: {
+            type: "FeatureCollection",
+            features: lineFeatures,
+          },
+        },
+      };
+    }
+  }
+
+  return {
+    sourceState: "fallback",
+    overlay: {
+      id: "ukraine-frontline-fallback",
+      name: "Ukraine frontline (fallback linework)",
+      theater: "Ukraine-Russia",
+      updatedAt: nowIso,
+      confidence: 68,
+      source: "Fallback linework (used when ISW/CTP feed is unavailable)",
+      geojson: fallbackUkraineFrontlineFeatureCollection(),
+    },
+  };
+}
+
+async function buildFrontlineOverlays(): Promise<{
+  overlays: FrontlineOverlay[];
+  health: ProviderHealth;
+}> {
+  const nowIso = new Date().toISOString();
+  const ukraine = await fetchUkraineFrontlineOverlay(nowIso);
+
+  // Densify sparse linework so it renders smoothly as a boundary line.
+  // (If upstream linework has few vertices, filled geometry can look "dotty".)
+  const densifyLineCoords = (
+    coords: Array<[number, number]>,
+    pointsPerSegment: number
+  ): Array<[number, number]> => {
+    if (coords.length < 2) return coords;
+    const out: Array<[number, number]> = [coords[0]];
+    for (let i = 0; i < coords.length - 1; i += 1) {
+      const [x1, y1] = coords[i];
+      const [x2, y2] = coords[i + 1];
+      for (let j = 1; j <= pointsPerSegment; j += 1) {
+        const t = j / (pointsPerSegment + 1);
+        out.push([x1 + (x2 - x1) * t, y1 + (y2 - y1) * t]);
+      }
+      out.push([x2, y2]);
+    }
+    return out;
+  };
+
+  const sudanRawLines: Array<Array<[number, number]>> = [
+    [
+      [22.5, 13.5],
+      [23.5, 13.8],
+      [24.4, 13.7],
+      [25.2, 13.2],
+      [25.0, 12.4],
+      [24.2, 11.9],
+      [23.3, 11.8],
+    ],
+    [
+      [31.1, 15.3],
+      [31.6, 15.0],
+      [32.1, 14.8],
+      [32.7, 14.5],
+      [33.1, 14.0],
+    ],
+    [
+      [32.9, 12.8],
+      [33.3, 12.3],
+      [33.8, 11.9],
+      [34.4, 11.7],
+    ],
+  ];
+
+  const sudanDensifiedLines = sudanRawLines.map((line) =>
+    densifyLineCoords(line, 10)
+  );
+  const overlays: FrontlineOverlay[] = [
+    ukraine.overlay,
+    {
+      id: "afpak-border-line",
+      name: "Afghanistan-Pakistan Border",
+      theater: "Afghanistan-Pakistan",
+      updatedAt: nowIso,
+      confidence: 86,
+      source:
+        "Afghanistan-Pakistan shared border geometry (country-adjacent edge extraction)",
+      geojson: {
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [73.19184, 36.87703],
+            [73.00229, 36.84612],
+            [72.94586, 36.85222],
+            [72.86773, 36.83041],
+            [72.6296, 36.83295],
+            [72.45411, 36.75796],
+            [72.34621, 36.74489],
+            [72.16968, 36.71135],
+            [72.16462, 36.67006],
+            [72.0961, 36.6389],
+            [72.05041, 36.61864],
+            [72.05496, 36.59286],
+            [71.97703, 36.56304],
+            [71.89972, 36.51834],
+            [71.85859, 36.49416],
+            [71.77456, 36.44842],
+            [71.78263, 36.39654],
+            [71.73632, 36.39592],
+            [71.62915, 36.45953],
+            [71.58874, 36.41845],
+            [71.54719, 36.37163],
+            [71.55835, 36.32786],
+            [71.49582, 36.30962],
+            [71.38244, 36.21857],
+            [71.30901, 36.17273],
+            [71.2623, 36.14612],
+            [71.21263, 36.09682],
+            [71.16592, 36.04571],
+            [71.18189, 36.01884],
+            [71.25744, 35.97155],
+            [71.34157, 35.94726],
+            [71.37133, 35.88515],
+            [71.4644, 35.79472],
+            [71.47102, 35.76133],
+            [71.48135, 35.7341],
+            [71.51536, 35.70149],
+            [71.49592, 35.64661],
+            [71.51277, 35.59628],
+            [71.59349, 35.54936],
+            [71.58171, 35.49313],
+            [71.60072, 35.45546],
+            [71.62088, 35.41014],
+            [71.53158, 35.32792],
+            [71.60321, 35.22338],
+            [71.62925, 35.1701],
+            [71.50895, 35.07202],
+            [71.51132, 35.00872],
+            [71.49344, 34.99414],
+            [71.48538, 34.9835],
+            [71.45996, 34.94267],
+            [71.28948, 34.87503],
+            [71.20307, 34.74816],
+            [71.0806, 34.67292],
+            [71.07626, 34.62362],
+            [71.06582, 34.55846],
+            [70.98583, 34.55619],
+            [70.95699, 34.532],
+            [70.97084, 34.46888],
+            [71.05094, 34.38979],
+            [71.09709, 34.26246],
+            [71.10949, 34.18921],
+            [71.07388, 34.12526],
+            [71.06727, 34.07301],
+            [70.99771, 34.03332],
+            [70.95399, 34.00482],
+            [70.89431, 34.00937],
+            [70.86222, 33.96478],
+            [70.52198, 33.9387],
+            [70.32819, 33.95728],
+            [70.21885, 33.98069],
+            [69.91602, 34.03888],
+            [69.87044, 34.00134],
+            [69.85422, 33.95635],
+            [69.87649, 33.90256],
+            [69.90755, 33.83561],
+            [69.94723, 33.77197],
+            [69.99648, 33.74209],
+            [70.10815, 33.7273],
+            [70.13255, 33.66143],
+            [70.16252, 33.64324],
+            [70.17347, 33.60787],
+            [70.15497, 33.50661],
+            [70.18546, 33.46897],
+            [70.22784, 33.43995],
+            [70.30158, 33.35179],
+            [70.10536, 33.18981],
+            [70.048, 33.19407],
+            [69.99472, 33.12733],
+            [69.88093, 33.08925],
+            [69.73298, 33.1093],
+            [69.65878, 33.07842],
+            [69.60834, 33.07907],
+            [69.51419, 33.05669],
+            [69.4685, 32.99429],
+            [69.47145, 32.85223],
+            [69.38716, 32.78534],
+            [69.38324, 32.74446],
+            [69.40773, 32.72994],
+            [69.4191, 32.70046],
+            [69.41393, 32.63548],
+            [69.30211, 32.54378],
+            [69.23286, 32.46267],
+            [69.26443, 32.32237],
+            [69.25999, 32.23682],
+            [69.25105, 32.13065],
+            [69.30479, 31.94694],
+            [69.25095, 31.90705],
+            [69.10005, 31.72401],
+            [69.04011, 31.67311],
+            [68.94099, 31.64365],
+            [68.80384, 31.60257],
+            [68.70545, 31.70127],
+            [68.68829, 31.7686],
+            [68.56107, 31.81181],
+            [68.48148, 31.81568],
+            [68.42221, 31.77315],
+            [68.52127, 31.76478],
+            [68.53683, 31.74101],
+            [68.46097, 31.73047],
+            [68.27695, 31.76359],
+            [68.2323, 31.79015],
+            [68.15913, 31.82591],
+            [68.1045, 31.76876],
+            [68.06048, 31.72556],
+            [68.04657, 31.6884],
+            [67.96606, 31.63822],
+            [67.88431, 31.63564],
+            [67.78116, 31.56417],
+            [67.69631, 31.52082],
+            [67.56898, 31.52986],
+            [67.57808, 31.48211],
+            [67.61146, 31.4108],
+            [67.73429, 31.40475],
+            [67.76473, 31.33406],
+            [67.6928, 31.32522],
+            [67.60216, 31.27112],
+            [67.49333, 31.24295],
+            [67.3462, 31.20776],
+            [67.21376, 31.21226],
+            [67.13676, 31.24109],
+            [67.05821, 31.23236],
+            [67.01527, 31.24466],
+            [67.02343, 31.26486],
+            [67.01682, 31.30915],
+            [66.90592, 31.30553],
+            [66.78531, 31.23179],
+            [66.69699, 31.19582],
+            [66.55003, 30.97697],
+            [66.37536, 30.93672],
+            [66.26493, 30.55783],
+            [66.31376, 30.4783],
+            [66.30301, 30.30528],
+            [66.23635, 30.1116],
+            [66.22524, 30.04442],
+            [66.33236, 29.96608],
+            [66.32844, 29.94954],
+            [66.27521, 29.88515],
+            [66.05238, 29.79885],
+            [65.87823, 29.75449],
+            [65.70403, 29.71015],
+            [65.52973, 29.66574],
+            [65.35578, 29.62142],
+            [65.18143, 29.57711],
+            [64.82031, 29.56789],
+            [64.4777, 29.57037],
+            [64.14976, 29.45846],
+            [63.97199, 29.42957],
+            [63.41595, 29.48497],
+            [63.26868, 29.47288],
+            [63.1216, 29.46079],
+            [62.97453, 29.44864],
+            [62.82746, 29.4366],
+            [62.68039, 29.42446],
+            [62.47751, 29.40782],
+            [62.19629, 29.47492],
+            [61.94653, 29.54505],
+            [61.69663, 29.6152],
+            [61.44693, 29.68532],
+            [61.19723, 29.75534],
+            [60.94742, 29.82552],
+            [60.876, 29.84552],
+            [60.84438, 29.85818]
+          ],
+        },
+        properties: {
+          theater: "Afghanistan-Pakistan",
+          overlay_type: "afpak_border",
+        },
+      },
+    },
+    {
+      id: "sudan-frontline-liveuamap-style",
+      name: "Sudan conflict frontlines",
+      theater: "Sudan-South Sudan",
+      updatedAt: nowIso,
+      confidence: 72,
+      source: "Open-source frontline synthesis (LiveUAmap-style)",
+      geojson: {
+        type: "Feature",
+        geometry: {
+          type: "MultiLineString",
+          coordinates: sudanDensifiedLines,
+        },
+        properties: {
+          theater: "Sudan-South Sudan",
+          overlay_type: "active_frontline_synthesis",
+        },
+      },
+    },
+  ];
+
+  return {
+    overlays,
+    health: {
+      provider: "Land-war frontier overlays",
+      ok: overlays.length > 0,
+      updatedAt: nowIso,
+      message: `Loaded ${overlays.length} frontier layers [ukraine=${ukraine.sourceState}; afpak=afpak_border; sudan=line_synthesis]`,
+    },
+  };
+}
+
 function filterToRequestedLayers(
   layers: Record<IntelLayerKey, IntelPoint[]>,
   requested: IntelLayerKey[]
@@ -3158,6 +4134,59 @@ function filterToRequestedLayers(
   };
 }
 
+function buildMilitaryInfraTelemetry(params: {
+  flights: IntelPoint[];
+  vessels: IntelPoint[];
+  carriers: IntelPoint[];
+  infrastructure: IntelPoint[];
+}): ProviderHealth {
+  const { flights, vessels, carriers, infrastructure } = params;
+  const ok = flights.length > 0 || vessels.length > 0 || infrastructure.length > 0;
+  return {
+    provider: "Military & infrastructure adapters",
+    ok,
+    updatedAt: new Date().toISOString(),
+    message: `flights=${flights.length}; vessels=${vessels.length}; carriers=${carriers.length}; infrastructure=${infrastructure.length} [reason=${ok ? "ok" : "empty_layers"}]`,
+  };
+}
+
+function buildConflictAdapterTelemetry(params: {
+  acled: IntelPoint[];
+  ucdp: IntelPoint[];
+  gdelt: IntelPoint[];
+  liveuamap: IntelPoint[];
+  eventRegistry: IntelPoint[];
+  rapid: IntelPoint[];
+  rssNetwork: IntelPoint[];
+  relaySeed: IntelPoint[];
+}): ProviderHealth {
+  const {
+    acled,
+    ucdp,
+    gdelt,
+    liveuamap,
+    eventRegistry,
+    rapid,
+    rssNetwork,
+    relaySeed,
+  } = params;
+  const total =
+    acled.length +
+    ucdp.length +
+    gdelt.length +
+    liveuamap.length +
+    eventRegistry.length +
+    rapid.length +
+    rssNetwork.length +
+    relaySeed.length;
+  return {
+    provider: "Conflict adapters",
+    ok: total > 0,
+    updatedAt: new Date().toISOString(),
+    message: `acled=${acled.length}; ucdp=${ucdp.length}; gdelt=${gdelt.length}; liveuamap=${liveuamap.length}; event_registry=${eventRegistry.length}; rapid=${rapid.length}; rss_network=${rssNetwork.length}; relay_seed=${relaySeed.length} [reason=${total > 0 ? "ok" : "all_empty"}]`,
+  };
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -3176,7 +4205,8 @@ export async function GET(request: Request) {
       usniVesselsRes,
       vesselsRes,
       newsRes,
-      trustedPublisherRes,
+      rssNetworkRes,
+      relaySeedRes,
       infraRes,
     ] =
       await Promise.all([
@@ -3190,7 +4220,8 @@ export async function GET(request: Request) {
       fetchUsniFleetTrackerSignals(rangeHours),
       fetchVesselSignals(),
       fetchNewsSignals(rangeHours),
-      fetchTrustedPublisherSignals(rangeHours),
+      fetchRssNetworkSignals(rangeHours),
+      fetchRelaySeedSignals(rangeHours),
       fetchStrategicInfrastructure(),
     ]);
 
@@ -3198,7 +4229,10 @@ export async function GET(request: Request) {
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
       .slice(0, 2400);
     const eventRegistryStrikePoints: IntelPoint[] = eventRegistryRes.points
-      .filter((p) => WAR_LIKE_KEYWORDS.some((k) => `${p.title} ${p.subtitle ?? ""}`.toLowerCase().includes(k)))
+      .filter((p) => {
+        const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`;
+        return isKineticEventText(text);
+      })
       .map((p, idx) => ({
         ...p,
         id: `eventreg-strike-${p.id}-${idx}`,
@@ -3212,11 +4246,11 @@ export async function GET(request: Request) {
       ...gdeltRes.points,
       ...liveuamapRes.points,
       ...eventRegistryStrikePoints,
-      ...trustedPublisherRes.points
+      ...rssNetworkRes.points
         .filter((p) => {
           const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`.toLowerCase();
           return (
-            WAR_LIKE_KEYWORDS.some((k) => text.includes(k)) &&
+            isKineticEventText(text) &&
             !/\b(analysis|opinion|editorial|markets?|aid)\b/.test(text)
           );
         })
@@ -3228,13 +4262,26 @@ export async function GET(request: Request) {
           severity: p.severity === "critical" ? ("critical" as const) : ("high" as const),
           magnitude: Math.max(9, p.magnitude ?? 0),
         })),
+      ...relaySeedRes.points
+        .filter((p) => isKineticEventText(`${p.title} ${p.subtitle ?? ""}`))
+        .map((p, idx) => ({
+          ...p,
+          id: `relay-strike-${p.id}-${idx}`,
+          layer: "liveStrikes" as const,
+          severity: p.severity === "critical" ? ("critical" as const) : ("high" as const),
+          source: `${p.source} (relay)`,
+        })),
     ]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    const dedupedLiveStrikes = dedupeEventPoints(liveStrikes, 1).slice(0, 5200);
+    const dedupedLiveStrikes = collapseRepeatedEvents(
+      dedupeEventPoints(liveStrikes, 0.5),
+      "liveStrikes"
+    ).slice(0, 8200);
     const newsCandidates = [
       ...newsRes.points,
       ...eventRegistryRes.points,
-      ...trustedPublisherRes.points,
+      ...rssNetworkRes.points,
+      ...relaySeedRes.points,
       ...gdeltRes.points.map((p, idx) => ({
         ...p,
         id: `gdelt-news-${p.id}-${idx}`,
@@ -3248,9 +4295,23 @@ export async function GET(request: Request) {
         source: "Rapid conflict feed",
       })),
     ];
-    let fusedNewsPoints = dedupeEventPoints(newsCandidates, 1)
+    let fusedNewsPoints = dedupeEventPoints(newsCandidates, 0.75)
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 8200);
+      .slice(0, 13200);
+    fusedNewsPoints = collapseRepeatedEvents(
+      fusedNewsPoints.filter((p) => {
+        const text = `${p.title} ${p.subtitle ?? ""}`;
+        if (HIGH_REPEAT_EXCLUDE_RE.test(text)) return false;
+        if (
+          GENERIC_REPEAT_LABEL_RE.test(p.title) &&
+          !isKineticEventText(`${p.title} ${String(p.metadata?.event_type ?? "")}`)
+        ) {
+          return false;
+        }
+        return true;
+      }),
+      "news"
+    );
     if (fusedNewsPoints.length < 900) {
       const densityBackfill = dedupeEventPoints(
         [
@@ -3262,21 +4323,24 @@ export async function GET(request: Request) {
             source: `${p.source} (backfill)`,
           })),
         ],
-        1
+        0.75
       )
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-        .slice(0, 9200);
-      fusedNewsPoints = densityBackfill;
+        .slice(0, 15600);
+      fusedNewsPoints = collapseRepeatedEvents(densityBackfill, "news");
     }
     const mergedVesselPoints = dedupeVesselPoints([
       ...usniVesselsRes.points,
       ...vesselsRes.points,
     ]).slice(0, 3800);
     const carrierGroups = extractCarrierGroups(mergedVesselPoints);
+    const allowCuratedConflictFallback =
+      dedupedLiveStrikes.length + mergedConflicts.length + fusedNewsPoints.length < 25;
     const activeConflictCountries = buildActiveConflictCountries(
       dedupedLiveStrikes,
       mergedConflicts,
-      fusedNewsPoints
+      fusedNewsPoints,
+      allowCuratedConflictFallback
     );
     const escalationRiskCountries = buildEscalationRiskCountries(
       dedupedLiveStrikes,
@@ -3328,6 +4392,7 @@ export async function GET(request: Request) {
     };
 
     baseLayers.hotspots = buildHotspots(baseLayers);
+    const frontline = await buildFrontlineOverlays();
 
     const response: MapApiResponse = {
       updatedAt: new Date().toISOString(),
@@ -3335,13 +4400,36 @@ export async function GET(request: Request) {
       layers: filterToRequestedLayers(baseLayers, requestedLayers),
       activeConflictCountries,
       escalationRiskCountries,
+      frontlineOverlays: frontline.overlays,
       providerHealth: [
+        {
+          provider: "Source family matrix",
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          message: `Families ${MAP_SOURCE_FAMILY_MATRIX.length} mapped to layers (conflicts/liveStrikes/news/flights/vessels/infrastructure) [reason=inventory_loaded]`,
+        },
         {
           provider: "Conflict fusion",
           ok: mergedConflicts.length > 0 || dedupedLiveStrikes.length > 0,
           updatedAt: new Date().toISOString(),
           message: `Conflicts: ${mergedConflicts.length} validated DB points | Live strikes: ${dedupedLiveStrikes.length} near-live events | News: ${fusedNewsPoints.length}`,
         },
+        {
+          provider: "Adapter telemetry",
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; flights=${flightsRes.points.length}; vessels=${mergedVesselPoints.length}; infrastructure=${infraRes.points.length} [reason=adapter_metrics]`,
+        },
+        buildConflictAdapterTelemetry({
+          acled: acledRes.points,
+          ucdp: ucdpRes.points,
+          gdelt: gdeltRes.points,
+          liveuamap: liveuamapRes.points,
+          eventRegistry: eventRegistryRes.points,
+          rapid: rapidRes.points,
+          rssNetwork: rssNetworkRes.points,
+          relaySeed: relaySeedRes.points,
+        }),
         acledRes.health,
         ucdpRes.health,
         liveuamapRes.health,
@@ -3351,7 +4439,8 @@ export async function GET(request: Request) {
         flightsRes.health,
         usniVesselsRes.health,
         vesselsRes.health,
-        trustedPublisherRes.health,
+        rssNetworkRes.health,
+        relaySeedRes.health,
         {
           provider: "Carrier groups",
           ok: carrierGroups.length > 0,
@@ -3360,6 +4449,13 @@ export async function GET(request: Request) {
             ? `Detected ${carrierGroups.length} carrier/group contacts`
             : "No carrier groups detected in current AIS window",
         },
+        buildMilitaryInfraTelemetry({
+          flights: flightsRes.points,
+          vessels: mergedVesselPoints,
+          carriers: carrierGroups,
+          infrastructure: infraRes.points,
+        }),
+        frontline.health,
         newsRes.health,
         infraRes.health,
       ],

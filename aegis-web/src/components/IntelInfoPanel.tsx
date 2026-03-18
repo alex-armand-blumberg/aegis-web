@@ -109,7 +109,7 @@ export default function IntelInfoPanel({
       {health?.message && <p className="intel-side-note">{health.message}</p>}
 
       <div className="intel-side-metadata">
-        <div className="intel-side-subtitle">AI statistical summary</div>
+        <div className="intel-side-subtitle">AI event briefing</div>
         {aiLoading ? (
           <p className="intel-side-note">Generating AI summary...</p>
         ) : aiBulletLines.length > 0 ? (

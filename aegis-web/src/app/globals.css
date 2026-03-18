@@ -1723,7 +1723,7 @@ footer {
   color: white;
 }
 
-/* WorldMonitor-style map controls */
+/* OSINT-style map controls */
 .map-page .map-chip-label {
   font-size: 11px;
   text-transform: uppercase;
@@ -1776,6 +1776,12 @@ footer {
   border: 1px solid rgba(96, 165, 250, 0.22);
   background: rgba(2, 8, 20, 0.72);
   color: rgba(226, 232, 240, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.map-page .map-status-caption {
+  margin: -2px 0 10px;
+  color: rgba(226, 232, 240, 0.58);
   font-size: 11px;
   letter-spacing: 0.04em;
 }
@@ -1851,6 +1857,196 @@ footer {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 10px;
   margin-top: 14px;
+}
+.map-page .map-world-gauge {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  background: rgba(2, 8, 20, 0.72);
+}
+.map-page .map-world-gauge-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e2e8f0;
+}
+.map-page .map-world-gauge-track {
+  margin-top: 8px;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    rgba(34, 197, 94, 0.35) 0%,
+    rgba(234, 179, 8, 0.35) 45%,
+    rgba(239, 68, 68, 0.35) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.map-page .map-world-gauge-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22c55e 0%, #eab308 50%, #ef4444 100%);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.35);
+}
+.map-page .map-world-gauge-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(226, 232, 240, 0.72);
+}
+.map-page .map-world-gauge-explain {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: rgba(226, 232, 240, 0.64);
+}
+.map-page .map-header-title {
+  color: #e2e8f0;
+  letter-spacing: 0.02em;
+}
+.map-page .map-ai-assistant {
+  margin-top: 16px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  background: rgba(2, 8, 20, 0.72);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.map-page .map-ai-assistant-header h3 {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #e2e8f0;
+}
+.map-page .map-ai-assistant-header p {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.65);
+}
+.map-page .map-ai-assistant-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.map-page .map-ai-question {
+  width: 100%;
+  min-height: 84px;
+  margin-top: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(10, 18, 36, 0.74);
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+.map-page .map-ai-question:focus {
+  outline: none;
+  border-color: #60a5fa;
+}
+.map-page .map-ai-answer {
+  margin-top: 10px;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(226, 232, 240, 0.86);
+  background: rgba(10, 18, 36, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.map-page .map-hotspot-panel {
+  margin-top: 16px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  background: rgba(2, 8, 20, 0.72);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.map-page .map-hotspot-panel h3 {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #e2e8f0;
+}
+.map-page .map-hotspot-panel p {
+  margin-top: 6px;
+  margin-bottom: 10px;
+  color: rgba(226, 232, 240, 0.65);
+  font-size: 12px;
+}
+.map-page .map-hotspot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.map-page .map-hotspot-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(10, 18, 36, 0.65);
+  padding: 10px;
+}
+.map-page .map-hotspot-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #e2e8f0;
+  font-size: 12px;
+}
+.map-page .map-hotspot-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(226, 232, 240, 0.72);
+}
+.map-page .map-hotspot-severity {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.map-page .map-hotspot-severity-low {
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.1);
+}
+.map-page .map-hotspot-severity-medium {
+  color: #eab308;
+  border-color: rgba(234, 179, 8, 0.35);
+  background: rgba(234, 179, 8, 0.1);
+}
+.map-page .map-hotspot-severity-high,
+.map-page .map-hotspot-severity-critical {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.1);
+}
+.map-page .map-hotspot-reason {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(226, 232, 240, 0.62);
+}
+.map-page .map-hotspot-empty {
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.62);
+}
+.map-page .map-relay-note {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.58);
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 11px;
+  line-height: 1.5;
 }
 .map-page .map-limitations {
   margin-top: 16px;

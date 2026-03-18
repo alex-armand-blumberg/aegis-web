@@ -8,14 +8,194 @@ const TEMPORAL_SCOPE =
   "Use your knowledge of real-world conflict events from 2018 through the present and earlier. " +
   "Reference specific events, actors, dates, and developments. Your scope covers the full timeframe of the plot and beyond.";
 
+function extractPromptField(prompt: string, label: string): string {
+  const re = new RegExp(`^${label}:\\s*(.+)$`, "im");
+  const match = prompt.match(re);
+  return match?.[1]?.trim() ?? "";
+}
+
+const DISALLOWED_MAP_INSIGHT_RE =
+  /\b(unavailable|insufficient information|not enough information|i don't know|cannot determine|unknown|not reported)\b/i;
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function fetchTextWithTimeout(
+  url: string,
+  timeoutMs: number,
+  headers?: Record<string, string>
+): Promise<{ ok: boolean; text: string }> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      cache: "no-store",
+      headers,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return { ok: false, text: "" };
+    return { ok: true, text: await res.text() };
+  } catch {
+    return { ok: false, text: "" };
+  }
+}
+
+async function fetchArticleContext(sourceUrl: string): Promise<string | null> {
+  const cleanUrl = sourceUrl.trim();
+  if (!/^https?:\/\//i.test(cleanUrl)) return null;
+  const headers = {
+    "user-agent": "AEGIS-Intel/1.0 (+map-popup-context)",
+    accept: "text/html,application/xhtml+xml",
+  };
+  const direct = await fetchTextWithTimeout(cleanUrl, 7000, headers);
+  if (direct.ok) {
+    const text = stripHtml(direct.text).slice(0, 3200);
+    if (text.length >= 220) return text;
+  }
+
+  // Strong fallback: jina AI reader usually returns full readable article text.
+  const noScheme = cleanUrl.replace(/^https?:\/\//i, "");
+  const readerUrl = `https://r.jina.ai/http://${noScheme}`;
+  const reader = await fetchTextWithTimeout(readerUrl, 9000, {
+    "user-agent": "AEGIS-Intel/1.0 (+map-popup-context)",
+    accept: "text/plain",
+  });
+  if (!reader.ok) return null;
+  const readable = reader.text.replace(/\s+/g, " ").trim().slice(0, 4200);
+  return readable.length >= 220 ? readable : null;
+}
+
+function extractRssTag(block: string, tag: string): string {
+  const m = block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  if (!m?.[1]) return "";
+  return m[1]
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeHeadlineTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !["about", "after", "before", "from", "with", "report", "reports", "says", "said", "officials"].includes(w))
+    .slice(0, 12);
+}
+
+function inferEventKeywordBundle(headline: string): string {
+  const h = headline.toLowerCase();
+  if (/\b(missile|rocket|drone|airstrike|air raid|shelling|bombardment)\b/.test(h))
+    return "(missile OR drone OR airstrike OR shelling OR bombardment)";
+  if (/\b(nav|warship|frigate|destroyer|carrier|sea|red sea)\b/.test(h))
+    return "(naval OR warship OR carrier OR missile)";
+  if (/\b(battle|clash|firefight|raid|infiltration|incursion)\b/.test(h))
+    return "(battle OR clash OR firefight OR raid OR infiltration)";
+  return "(conflict OR strike OR battle OR drone OR shelling)";
+}
+
+async function fetchRelatedHeadlines(
+  headline: string,
+  country: string,
+  publisher: string
+): Promise<string[]> {
+  try {
+    const tokens = normalizeHeadlineTokens(headline).slice(0, 5).join(" ");
+    const eventBundle = inferEventKeywordBundle(headline);
+    const siteHint = publisher && publisher !== "Unknown" ? ` ${publisher}` : "";
+    const query = encodeURIComponent(`"${tokens}" ${country}${siteHint} ${eventBundle}`);
+    const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+    const fetched = await fetchTextWithTimeout(url, 6500);
+    if (!fetched.ok) return [];
+    const xml = fetched.text;
+    const items = xml.split("<item>").slice(1, 8);
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const sourceTokens = new Set(normalizeHeadlineTokens(headline));
+    for (const item of items) {
+      const title = extractRssTag(item, "title");
+      const pubDate = extractRssTag(item, "pubDate");
+      if (!title) continue;
+      const normTitle = title.toLowerCase();
+      if (seen.has(normTitle)) continue;
+      const overlap = normalizeHeadlineTokens(title).filter((t) => sourceTokens.has(t)).length;
+      if (overlap < 2 && !new RegExp(country, "i").test(title)) continue;
+      seen.add(normTitle);
+      out.push(pubDate ? `${pubDate}: ${title}` : title);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function extractQueryFromPrompt(prompt: string): string {
+  const userQ = extractPromptField(prompt, "User question");
+  if (userQ) return userQ;
+  const headline = extractPromptField(prompt, "Headline");
+  if (headline) return headline;
+  const trimmed = prompt.replace(/\s+/g, " ").trim();
+  return trimmed.slice(0, 220);
+}
+
+async function fetchOnlineContextForPrompt(prompt: string): Promise<string[]> {
+  const query = extractQueryFromPrompt(prompt);
+  if (!query) return [];
+  try {
+    const encoded = encodeURIComponent(
+      `${query} (conflict OR strike OR missile OR battle OR naval OR escalation)`
+    );
+    const urls = [
+      `https://news.google.com/rss/search?q=${encoded}&hl=en-US&gl=US&ceid=US:en`,
+      `https://news.google.com/rss/search?q=${encoded}&hl=en-GB&gl=GB&ceid=GB:en`,
+    ];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const url of urls) {
+      const fetched = await fetchTextWithTimeout(url, 7000);
+      if (!fetched.ok) continue;
+      const items = fetched.text.split("<item>").slice(1, 6);
+      for (const item of items) {
+        const title = extractRssTag(item, "title");
+        const pubDate = extractRssTag(item, "pubDate");
+        if (!title) continue;
+        const key = title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(pubDate ? `${pubDate}: ${title}` : title);
+      }
+    }
+    return out.slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
 function systemPromptForMode(mode: Mode): string {
   switch (mode) {
     case "map_insight":
       return (
         "You are AEGIS, an analytical assistant for a geopolitical early-warning system. " +
         "You receive one mapped event and must write a concise, event-specific intelligence brief focused on what happened, where, when, actors, and immediate trigger/background. " +
-        "Ground every statement in the provided data only. Do not speculate or give policy advice. " +
-        "Never describe confidence scores, magnitude scores, model behavior, or generic 'why flagged' explanations unless directly required by explicit event facts. " +
+        "Output exactly 4 bullet points. Every bullet must start with '- '. " +
+        "Label each bullet with either 'Confirmed:' (directly supported by evidence) or 'Inferred:' (best-effort synthesis from context). " +
+        "If direct details are sparse, infer the most plausible explanation from article text, nearby same-event context, and external corroboration headlines; do not reply with 'unknown', 'not reported', or 'insufficient information'. " +
+        "If the event is plotted, explain why it is plotted and what likely happened at that location and time. " +
+        "Include concrete numbers/statistics when available (casualties, interceptions, units, strikes, dates, distances, counts). " +
+        "Reject unrelated context that does not match the event type, place, and timeframe. " +
+        "Never describe confidence scores, magnitude scores, model behavior, or generic 'why flagged' explanations unless directly tied to factual event evidence. " +
+        "Do not give policy advice. Keep a neutral, analytical tone. " +
         TEMPORAL_SCOPE
       );
     case "news_summary":
@@ -54,6 +234,43 @@ function systemPromptForMode(mode: Mode): string {
   }
 }
 
+async function runGroqCompletion(
+  apiKey: string,
+  mode: Mode,
+  prompt: string,
+  maxTokens: number
+): Promise<{ ok: boolean; content?: string; error?: string }> {
+  const res = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama-3.1-8b-instant",
+      max_tokens: maxTokens,
+      messages: [
+        {
+          role: "system",
+          content: systemPromptForMode(mode),
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    return { ok: false, error: `Groq API error ${res.status}: ${text}` };
+  }
+  const json = (await res.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  return { ok: true, content: json.choices?.[0]?.message?.content ?? "" };
+}
+
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as {
     prompt?: string;
@@ -84,41 +301,69 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const res = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        max_tokens: maxTokens,
-        messages: [
-          {
-            role: "system",
-            content: systemPromptForMode(mode),
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-    });
+    let enrichedPrompt = prompt;
+    if (mode === "map_insight") {
+      const sourceUrl = extractPromptField(prompt, "Article URL");
+      const headline = extractPromptField(prompt, "Headline");
+      const country = extractPromptField(prompt, "Location country");
+      const publisher = extractPromptField(prompt, "Publisher");
+      const externalBlocks: string[] = [];
 
-    if (!res.ok) {
-      const text = await res.text();
-      return NextResponse.json(
-        { error: `Groq API error ${res.status}: ${text}` },
-        { status: 500 },
-      );
+      if (/^https?:\/\//i.test(sourceUrl)) {
+        const articleContext = await fetchArticleContext(sourceUrl);
+        if (articleContext) {
+          externalBlocks.push(
+            "Full article context extract (primary evidence):\n" + articleContext
+          );
+        }
+      }
+
+      if (headline) {
+        const related = await fetchRelatedHeadlines(headline, country || "global", publisher || "");
+        if (related.length > 0) {
+          externalBlocks.push(
+            "Related external headlines for corroboration:\n" +
+              related.map((h, i) => `${i + 1}. ${h}`).join("\n")
+          );
+        }
+      }
+
+      if (externalBlocks.length > 0) {
+        enrichedPrompt = `${prompt}\n\nExternal context (for corroboration and inference):\n${externalBlocks.join(
+          "\n\n"
+        )}`;
+      }
+    } else if (mode === "news_summary" || mode === "sentinel_qa") {
+      const related = await fetchOnlineContextForPrompt(prompt);
+      if (related.length > 0) {
+        enrichedPrompt = `${prompt}\n\nExternal online corroboration headlines:\n${related
+          .map((h, i) => `${i + 1}. ${h}`)
+          .join("\n")}`;
+      }
     }
 
-    const json = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
+    const firstPass = await runGroqCompletion(apiKey, mode, enrichedPrompt, maxTokens);
+    if (!firstPass.ok) {
+      return NextResponse.json({ error: firstPass.error ?? "Groq API failure" }, { status: 500 });
+    }
+    let content = firstPass.content ?? "";
 
-    const content = json.choices?.[0]?.message?.content ?? "";
+    // One-pass quality guard for map point summaries.
+    if (mode === "map_insight" && DISALLOWED_MAP_INSIGHT_RE.test(content)) {
+      const strictRetryPrompt = [
+        enrichedPrompt,
+        "",
+        "CRITICAL RETRY RULES:",
+        "- Do not use 'unavailable', 'unknown', 'not reported', 'cannot determine', or similar phrases.",
+        "- The point exists; provide the most likely event-causal explanation from available evidence.",
+        "- Keep exactly 4 bullets with Confirmed/Inferred prefixes.",
+        "- Add at least one concrete number/date/statistic if present in evidence.",
+      ].join("\n");
+      const retry = await runGroqCompletion(apiKey, mode, strictRetryPrompt, maxTokens);
+      if (retry.ok && (retry.content?.trim() ?? "").length > 0) {
+        content = retry.content ?? content;
+      }
+    }
     return NextResponse.json({ content }, { status: 200 });
   } catch (err) {
     console.error("AI API error", err);

@@ -54,6 +54,16 @@ export type EscalationRiskCountry = {
   signals: string[];
 };
 
+export type FrontlineOverlay = {
+  id: string;
+  name: string;
+  theater: string;
+  updatedAt: string;
+  confidence: number;
+  source: string;
+  geojson: unknown;
+};
+
 export type MapApiResponse = {
   updatedAt: string;
   range: string;
@@ -61,6 +71,7 @@ export type MapApiResponse = {
   providerHealth: ProviderHealth[];
   activeConflictCountries?: ActiveConflictCountry[];
   escalationRiskCountries?: EscalationRiskCountry[];
+  frontlineOverlays?: FrontlineOverlay[];
 };
 
 export type CountryIntelResponse = {

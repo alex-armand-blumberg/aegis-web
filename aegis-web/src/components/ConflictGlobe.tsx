@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { GlobeMethods } from "react-globe.gl";
-import type { IntelLayerKey, IntelPoint } from "@/lib/intel/types";
+import type { FrontlineOverlay, IntelLayerKey, IntelPoint } from "@/lib/intel/types";
 import { LAYER_COLORS } from "@/lib/intel/colors";
 
 const Globe = dynamic(() => import("react-globe.gl"), { ssr: false });
@@ -13,9 +13,49 @@ type GlobePoint = IntelPoint & {
   radius: number;
 };
 
+/** Path for globe: array of [lat, lng] (globe.gl convention). */
+type PathPoint = [number, number];
+
+function isGeoJsonFeature(value: unknown): value is { type: string; geometry?: { type: string; coordinates?: unknown } } {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as { type?: unknown; geometry?: unknown };
+  return v.type === "Feature" && typeof v.geometry === "object" && v.geometry !== null;
+}
+
+function isGeoJsonFeatureCollection(value: unknown): value is { type: string; features?: unknown[] } {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as { type?: unknown; features?: unknown };
+  return v.type === "FeatureCollection" && Array.isArray(v.features);
+}
+
+function extractFrontlinePaths(overlays: FrontlineOverlay[]): PathPoint[][] {
+  const paths: PathPoint[][] = [];
+  for (const o of overlays) {
+    const g = o.geojson;
+    const features: { type: string; geometry?: { type: string; coordinates?: unknown } }[] = [];
+    if (isGeoJsonFeature(g)) features.push(g);
+    else if (isGeoJsonFeatureCollection(g)) for (const f of g.features ?? []) if (isGeoJsonFeature(f)) features.push(f);
+    for (const f of features) {
+      const geom = f.geometry;
+      if (!geom || !geom.coordinates) continue;
+      const coords = geom.coordinates as unknown[];
+      const toLatLng = (c: unknown): PathPoint => (Array.isArray(c) && c.length >= 2 ? [Number(c[1]), Number(c[0])] : [0, 0]);
+      if (geom.type === "LineString" && Array.isArray(coords)) {
+        paths.push(coords.map(toLatLng));
+      } else if (geom.type === "MultiLineString" && Array.isArray(coords)) {
+        for (const ring of coords) {
+          if (Array.isArray(ring)) paths.push(ring.map(toLatLng));
+        }
+      }
+    }
+  }
+  return paths;
+}
+
 type ConflictGlobeProps = {
   layers: Record<IntelLayerKey, IntelPoint[]>;
   activeLayers: Record<IntelLayerKey, boolean>;
+  frontlineOverlays?: FrontlineOverlay[];
   recenterRef?: React.MutableRefObject<(() => void) | null>;
   onReady?: () => void;
   onError?: (message: string) => void;
@@ -32,6 +72,7 @@ function asRgbCss([r, g, b]: [number, number, number], alpha = 0.95): string {
 export default function ConflictGlobe({
   layers,
   activeLayers,
+  frontlineOverlays = [],
   recenterRef,
   onReady,
   onError,
@@ -60,6 +101,11 @@ export default function ConflictGlobe({
       recenterRef.current = null;
     };
   }, [recenterRef]);
+
+  const pathsData = useMemo(() => {
+    const pathArrays = extractFrontlinePaths(frontlineOverlays);
+    return pathArrays.map((points) => ({ points }));
+  }, [frontlineOverlays]);
 
   const pointsData = useMemo<GlobePoint[]>(() => {
     const out: GlobePoint[] = [];
@@ -104,6 +150,12 @@ export default function ConflictGlobe({
         showAtmosphere={true}
         atmosphereColor="#4b7fd1"
         atmosphereAltitude={0.11}
+        pathsData={pathsData}
+        pathPoints={(d) => (d as { points: PathPoint[] }).points}
+        pathPointLat={(p) => (p as PathPoint)[0]}
+        pathPointLng={(p) => (p as PathPoint)[1]}
+        pathColor={() => "rgba(253, 186, 116, 0.85)"}
+        pathStroke={1.2}
         pointsData={pointsData}
         pointLat="lat"
         pointLng="lon"

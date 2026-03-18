@@ -48,6 +48,21 @@ function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
   };
 }
 
+function severityWeight(sev: IntelPoint["severity"]): number {
+  if (sev === "critical") return 4;
+  if (sev === "high") return 3;
+  if (sev === "medium") return 2;
+  return 1;
+}
+
+function toTitleCase(value: string): string {
+  return value
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
 export default function MapPage() {
   const [mode, setMode] = useState<"2d" | "3d">("2d");
   const [range, setRange] = useState<(typeof TIME_RANGES)[number]>("7d");
@@ -62,6 +77,11 @@ export default function MapPage() {
   const [error, setError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
+  const [assistantMode, setAssistantMode] = useState<"summary" | "ask">("summary");
+  const [assistantQuestion, setAssistantQuestion] = useState("");
+  const [assistantAnswer, setAssistantAnswer] = useState("");
+  const [assistantLoading, setAssistantLoading] = useState(false);
+  const [assistantError, setAssistantError] = useState<string | null>(null);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const recenterRef = useRef<(() => void) | null>(null);
@@ -143,8 +163,20 @@ export default function MapPage() {
     const snippet = String(selectedPoint.metadata?.source_snippet ?? "").trim();
     const publisher = String(selectedPoint.metadata?.publisher ?? selectedPoint.source ?? "Unknown");
     const eventType = String(selectedPoint.metadata?.event_type ?? "conflict_event");
+    const selectedTs = Date.parse(selectedPoint.timestamp || "");
     const nearbySameCountry = (apiData?.layers.news ?? [])
-      .filter((p) => p.country === country)
+      .filter((p) => p.country === country && p.id !== selectedPoint.id)
+      .filter((p) => {
+        const pType = String(p.metadata?.event_type ?? "").toLowerCase();
+        if (!pType || pType === "conflict_event") return true;
+        return pType === eventType.toLowerCase();
+      })
+      .filter((p) => {
+        if (!Number.isFinite(selectedTs)) return true;
+        const ts = Date.parse(p.timestamp || "");
+        if (!Number.isFinite(ts)) return true;
+        return Math.abs(ts - selectedTs) <= 5 * 24 * 3600_000;
+      })
       .slice(0, 8)
       .map((p) => `${p.timestamp}: ${p.title} (${p.source})`)
       .join("\n");
@@ -164,9 +196,13 @@ export default function MapPage() {
       nearbySameCountry || "Unavailable",
       "Write exactly 4 bullet points describing the actual event and immediate context.",
       "Each line must start with '- '.",
+      "Prefix each bullet with either 'Confirmed:' or 'Inferred:'.",
       "Explain what happened, where, when, and who/what was targeted or involved.",
       "If available, include weapon/interception details and immediate trigger/background from the provided text.",
-      "Use concrete event facts and numbers from provided content only; if unavailable, say 'not reported'.",
+      "Use concrete event facts and numbers from provided content and full-article context when available.",
+      "If details are sparse, infer the most likely event context from related headlines and nearby same-event signals only (do not say 'unknown' or 'not reported').",
+      "Include at least one concrete date/number/statistic when available from evidence.",
+      "Ignore unrelated political/economic/local headlines that do not match this event type and location.",
       "Do NOT mention confidence scores, magnitude scores, layer counts, or why the model flagged the event.",
       "No policy advice. Keep neutral intelligence tone.",
     ].join("\n");
@@ -185,12 +221,17 @@ export default function MapPage() {
       .then(async (res) => {
         const data = (await res.json()) as { content?: string; error?: string };
         if (!res.ok) throw new Error(data.error ?? "Failed AI summary");
-        const content = data.content?.trim() || "AI summary unavailable for this point.";
+        const content =
+          data.content?.trim() ||
+          "- Inferred: Event context synthesis is running; this point remains tied to ongoing conflict indicators from mapped and external sources.";
         aiSummaryCacheRef.current[summaryKey] = content;
         if (!cancelled) setPointAiSummary(content);
       })
       .catch(() => {
-        if (!cancelled) setPointAiSummary("AI summary unavailable for this point.");
+        if (!cancelled)
+          setPointAiSummary(
+            "- Inferred: Event context synthesis is temporarily delayed. Re-open this point to refresh full evidence-based details."
+          );
       })
       .finally(() => {
         if (!cancelled) setPointAiLoading(false);
@@ -247,6 +288,122 @@ export default function MapPage() {
     0
   );
 
+  const worldStateRisk = useMemo(() => {
+    const weightedSignals =
+      layers.liveStrikes.reduce((s, p) => s + severityWeight(p.severity) * 2.5, 0) +
+      layers.conflicts.reduce((s, p) => s + severityWeight(p.severity) * 1.8, 0) +
+      layers.news.reduce((s, p) => s + severityWeight(p.severity) * 0.7, 0) +
+      layers.flights.length * 0.05 +
+      layers.vessels.length * 0.04;
+    const rawScaled = Math.min(100, Math.max(0, 100 - Math.exp(-weightedSignals / 260) * 100));
+    // Reserve 96–100% for imminent/active global conflict; compress display so current state doesn't sit at 100%.
+    const displayPercent = Math.round(Math.min(99, 100 * Math.pow(rawScaled / 100, 1.4)));
+    const status =
+      rawScaled >= 76 ? "Critical stress" : rawScaled >= 58 ? "Elevated stress" : rawScaled >= 38 ? "Guarded" : "Stable";
+    const bandExplanation =
+      rawScaled >= 76
+        ? "Frequent strike/conflict signals and high cross-theater activity are pushing global instability upward."
+        : rawScaled >= 58
+          ? "Sustained conflict reporting across multiple theaters is keeping risk elevated."
+          : "Signal intensity is mixed, with fewer high-severity kinetic spikes in the current window.";
+    const explanation =
+      `${bandExplanation} Based on weighted counts of live strikes, conflict reports, and news in the selected time window, plus flight and vessel activity. Closer to 100% indicates greater global stress; 96–99% would indicate imminent escalation risk, 100% reserved for active global conflict.`;
+    return { percent: displayPercent, status, explanation };
+  }, [layers]);
+
+  const hotspotSummary = useMemo(() => {
+    const seeded = [...escalationRiskCountries]
+      .sort((a, b) => b.riskScore - a.riskScore)
+      .slice(0, 8)
+      .map((h) => ({
+        country: toTitleCase(h.country),
+        score100: Math.max(0, Math.min(100, Math.round(h.riskScore * 5.5))),
+        severity: h.severity,
+        trend: h.trend,
+        latestEventAt: h.latestEventAt,
+        reason:
+          h.signals.length > 0
+            ? `Signals: ${h.signals.slice(0, 3).join(", ")}`
+            : "Signals: rising multi-source conflict indicators",
+      }));
+    const manual = [
+      { country: "South China Sea", score100: 50, severity: "medium" as const, trend: "rising" as const, reason: "Baseline tension; score not boosted by recent kinetic events. Maritime standoffs, naval patrol pressure." },
+      { country: "China", score100: 48, severity: "medium" as const, trend: "rising" as const, reason: "Baseline tension; score not boosted by recent kinetic events. Regional coercion posture." },
+      { country: "Taiwan", score100: 50, severity: "medium" as const, trend: "rising" as const, reason: "Baseline tension; score not boosted by recent kinetic events. Cross-strait pressure narratives." },
+      { country: "Cuba", score100: 41, severity: "medium" as const, trend: "stable" as const, reason: "Signals: strategic pressure potential and regional spillover sensitivity." },
+    ].map((m) => ({
+      ...m,
+      latestEventAt: new Date().toISOString(),
+    }));
+    const merged = [...seeded];
+    for (const m of manual) {
+      if (!merged.some((x) => x.country.toLowerCase() === m.country.toLowerCase())) merged.push(m);
+    }
+    return merged
+      .sort((a, b) => b.score100 - a.score100)
+      .slice(0, 10);
+  }, [escalationRiskCountries]);
+
+  const relayDigestHealth = useMemo(
+    () => providerHealth.find((h) => h.provider === "Relay seed digest"),
+    [providerHealth]
+  );
+
+  const handleAssistantRun = useCallback(async () => {
+    if (!apiData) return;
+    setAssistantLoading(true);
+    setAssistantError(null);
+    try {
+      const recent = [
+        ...layers.liveStrikes,
+        ...layers.news,
+        ...layers.conflicts,
+      ]
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, 40)
+        .map((p) => `${p.timestamp} | ${p.country ?? "Unknown"} | ${p.title} | ${p.source}`)
+        .join("\n");
+
+      const prompt =
+        assistantMode === "summary"
+          ? [
+              "Task: summarize major world conflict developments right now in short form.",
+              `Map range: ${range}`,
+              "Recent mapped events:",
+              recent || "Unavailable",
+              "Write 6 concise bullet points. Include regions, actors, and immediate developments.",
+              "Use map evidence plus external online corroboration. Keep it short and precise.",
+            ].join("\n")
+          : [
+              "Task: answer the user's map intelligence question fully.",
+              `User question: ${assistantQuestion || "No question provided."}`,
+              `Map range: ${range}`,
+              "Recent mapped events:",
+              recent || "Unavailable",
+              "Answer in 6-10 bullet points. Use map evidence and external online corroboration.",
+              "If uncertainty exists, state what is known and most likely explanation.",
+            ].join("\n");
+
+      const res = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: assistantMode === "summary" ? "news_summary" : "sentinel_qa",
+          maxTokens: 560,
+          prompt,
+        }),
+      });
+      const data = (await res.json()) as { content?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "AI assistant failed");
+      setAssistantAnswer(data.content?.trim() || "No answer returned.");
+    } catch (err) {
+      setAssistantError(err instanceof Error ? err.message : "AI assistant failed.");
+      setAssistantAnswer("");
+    } finally {
+      setAssistantLoading(false);
+    }
+  }, [apiData, assistantMode, assistantQuestion, layers, range]);
+
   const toggleLayer = (layer: IntelLayerKey) => {
     setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
   };
@@ -271,10 +428,10 @@ export default function MapPage() {
           <div className="section">
             <p className="section-tag reveal">Global Intelligence</p>
             <h1 className="reveal" style={{ marginBottom: "8px" }}>
-              Interactive Global Monitor
+              AEGIS Conflict Map (Beta)
             </h1>
             <p className="section-body reveal" style={{ marginBottom: "24px" }}>
-              Multi-source map layers inspired by modern OSINT dashboards. Data blends
+              Multi-source map layers for current global developments. Data blends
               event-level conflict databases, corroborated live strike reports, military
               flight telemetry, carrier-group signals, vessel relay feeds, and strategic
               infrastructure overlays.
@@ -382,11 +539,33 @@ export default function MapPage() {
             </span>
             <span>Range: {range}</span>
           </div>
+          <div className="map-status-caption">Zoom in for more points to become visible.</div>
+
+          <div className="map-world-gauge">
+            <div className="map-world-gauge-header">
+              <span>World Stability Gauge</span>
+              <strong>{worldStateRisk.percent}% risk</strong>
+            </div>
+            <div className="map-world-gauge-track">
+              <div
+                className="map-world-gauge-fill"
+                style={{ width: `${worldStateRisk.percent}%` }}
+              />
+            </div>
+            <div className="map-world-gauge-note">
+              Status: <strong>{worldStateRisk.status}</strong>
+            </div>
+            <div className="map-world-gauge-explain">{worldStateRisk.explanation}</div>
+          </div>
 
           {error && <div className="map-error-banner">{error}</div>}
 
+          <h2 className="map-header-title" style={{ marginTop: 16, marginBottom: 8, fontSize: "1.1rem", fontWeight: 600 }}>
+            AEGIS Interactive Map
+          </h2>
+
           <div ref={mapContainerRef} className="map-container" style={{ position: "relative" }}>
-            <div className="map-title-overlay">■ {range.toUpperCase()} INTELLIGENCE VIEW</div>
+            <div className="map-title-overlay">■ {range.toUpperCase()} AEGIS MAP BETA</div>
 
             {selectedPoint && (
               <IntelInfoPanel
@@ -422,11 +601,13 @@ export default function MapPage() {
                 }}
                 activeConflictCountries={activeConflictCountries}
                 escalationRiskCountries={escalationRiskCountries}
+                frontlineOverlays={apiData?.frontlineOverlays ?? []}
               />
             ) : (
               <ConflictGlobe
                 layers={layers}
                 activeLayers={activeLayers}
+                frontlineOverlays={apiData?.frontlineOverlays ?? []}
                 recenterRef={recenterRef}
                 onReady={() => setMapReady(true)}
                 onError={(m) => setError(m)}
@@ -459,6 +640,81 @@ export default function MapPage() {
               </div>
             ))}
           </div>
+          {relayDigestHealth && !relayDigestHealth.ok && (
+            <div className="map-relay-note">
+              Relay seed digest is optional. If it is degraded, core map adapters still run; this usually means the relay endpoint timed out or aborted upstream.
+            </div>
+          )}
+
+          <div className="map-ai-assistant">
+            <div className="map-ai-assistant-header">
+              <h3>Map AI Assistant</h3>
+              <p>Uses mapped feeds plus online corroboration.</p>
+            </div>
+            <div className="map-ai-assistant-actions">
+              <button
+                type="button"
+                className={assistantMode === "summary" ? "btn-primary" : "btn-secondary"}
+                style={{ padding: "8px 12px", fontSize: 12 }}
+                onClick={() => setAssistantMode("summary")}
+              >
+                Summarize Global Events
+              </button>
+              <button
+                type="button"
+                className={assistantMode === "ask" ? "btn-primary" : "btn-secondary"}
+                style={{ padding: "8px 12px", fontSize: 12 }}
+                onClick={() => setAssistantMode("ask")}
+              >
+                Ask Map Question
+              </button>
+            </div>
+            {assistantMode === "ask" && (
+              <textarea
+                className="map-ai-question"
+                placeholder="Ask a question about current conflicts, military moves, escalation risk, or a region..."
+                value={assistantQuestion}
+                onChange={(e) => setAssistantQuestion(e.target.value)}
+              />
+            )}
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ padding: "8px 12px", fontSize: 12, marginTop: 10 }}
+              onClick={handleAssistantRun}
+              disabled={assistantLoading || (assistantMode === "ask" && !assistantQuestion.trim())}
+            >
+              {assistantLoading ? "Thinking..." : "Run AI"}
+            </button>
+            {assistantError && <div className="map-error-banner" style={{ marginTop: 10 }}>{assistantError}</div>}
+            {assistantAnswer && <pre className="map-ai-answer">{assistantAnswer}</pre>}
+          </div>
+
+          <div className="map-hotspot-panel">
+            <h3>Geographic Escalation Risk Hotspots</h3>
+            <p>Likely near-term escalation zones based on trend and multi-source activity.</p>
+            <div className="map-hotspot-grid">
+              {hotspotSummary.length > 0 ? (
+                hotspotSummary.map((h) => (
+                  <div key={`${h.country}-${h.latestEventAt}`} className="map-hotspot-card">
+                    <div className="map-hotspot-top">
+                      <strong>{h.country}</strong>
+                      <span>{h.score100} / 100</span>
+                    </div>
+                    <div className="map-hotspot-meta">
+                      Trend: {h.trend} · Severity:{" "}
+                      <span className={`map-hotspot-severity map-hotspot-severity-${h.severity}`}>
+                        {h.severity}
+                      </span>
+                    </div>
+                    <div className="map-hotspot-reason">{h.reason}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="map-hotspot-empty">No hotspot signals available yet.</div>
+              )}
+            </div>
+          </div>
 
           <div className="map-limitations">
             <h3>Current limitations</h3>
@@ -490,12 +746,6 @@ export default function MapPage() {
         <div className="footer-links">
           <Link href="/escalation">App</Link>
           <Link href="/map">Map</Link>
-          <a href="https://www.worldmonitor.app/" target="_blank" rel="noreferrer">
-            Inspiration: WorldMonitor
-          </a>
-          <a href="https://acleddata.com" target="_blank" rel="noreferrer">
-            Data: ACLED
-          </a>
         </div>
         <div className="footer-copy">&copy; 2026 Alexander Armand-Blumberg · AEGIS</div>
       </footer>
