@@ -423,100 +423,82 @@ export default function MapPage() {
         </div>
       </nav>
 
-      <main className="relative z-10 pt-24 pb-12">
-        <header className="map-page-title" style={{ marginBottom: 0 }}>
-          <h1 className="map-page-title-heading">AEGIS Interactive Map</h1>
-        </header>
-        <section>
-          <div className="section">
-            <p className="section-tag reveal">Global Intelligence</p>
-            <h2 className="reveal" style={{ marginBottom: "8px" }}>
-              AEGIS Conflict Map (Beta)
-            </h2>
-            <p className="section-body reveal" style={{ marginBottom: "24px" }}>
-              Multi-source map layers for current global developments. Data blends
-              event-level conflict databases, corroborated live strike reports, military
-              flight telemetry, carrier-group signals, vessel relay feeds, and strategic
-              infrastructure overlays.
-            </p>
+      <main className="relative z-10 map-main-compact">
+        <div className="map-top-section">
+          <header className="map-page-title map-page-title-inline">
+            <h1 className="map-page-title-heading">AEGIS Interactive Map</h1>
+          </header>
+          <div className="map-controls map-controls-inline" style={{ justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+            <span className="map-chip-label">View</span>
+            <button
+              type="button"
+              className={mode === "2d" ? "btn-primary" : "btn-secondary"}
+              style={{ padding: "8px 14px", fontSize: 12 }}
+              onClick={() => setMode("2d")}
+            >
+              2D Map
+            </button>
+            <button
+              type="button"
+              className={mode === "3d" ? "btn-primary" : "btn-secondary"}
+              style={{ padding: "8px 14px", fontSize: 12 }}
+              onClick={() => setMode("3d")}
+            >
+              3D Globe
+            </button>
+            {mode === "3d" && (
+              <button
+                type="button"
+                className={autoRotate ? "btn-primary" : "btn-secondary"}
+                style={{ padding: "8px 14px", fontSize: 12 }}
+                onClick={() => setAutoRotate((v) => !v)}
+              >
+                Auto-Rotate {autoRotate ? "On" : "Off"}
+              </button>
+            )}
+            <span className="map-chip-label" style={{ marginLeft: 8 }}>Time</span>
+            {TIME_RANGES.map((r) => (
+              <button
+                key={r}
+                type="button"
+                className={range === r ? "btn-primary" : "btn-secondary"}
+                style={{ padding: "8px 10px", fontSize: 11 }}
+                onClick={() => setRange(r)}
+              >
+                {r}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ padding: "8px 14px", fontSize: 12 }}
+              onClick={fetchData}
+            >
+              Refresh
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ padding: "8px 14px", fontSize: 12 }}
+              onClick={handleFullscreen}
+            >
+              Fullscreen
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ padding: "8px 14px", fontSize: 12 }}
+              onClick={() => {
+                setSelectedPoint(null);
+                recenterRef.current?.();
+              }}
+            >
+              Recenter
+            </button>
           </div>
-        </section>
+        </div>
 
-        <div className="section">
-          <div className="map-controls" style={{ justifyContent: "space-between" }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="map-chip-label">View</span>
-              <button
-                type="button"
-                className={mode === "2d" ? "btn-primary" : "btn-secondary"}
-                style={{ padding: "8px 14px", fontSize: 12 }}
-                onClick={() => setMode("2d")}
-              >
-                2D Map
-              </button>
-              <button
-                type="button"
-                className={mode === "3d" ? "btn-primary" : "btn-secondary"}
-                style={{ padding: "8px 14px", fontSize: 12 }}
-                onClick={() => setMode("3d")}
-              >
-                3D Globe
-              </button>
-              {mode === "3d" && (
-                <button
-                  type="button"
-                  className={autoRotate ? "btn-primary" : "btn-secondary"}
-                  style={{ padding: "8px 14px", fontSize: 12 }}
-                  onClick={() => setAutoRotate((v) => !v)}
-                >
-                  Auto-Rotate {autoRotate ? "On" : "Off"}
-                </button>
-              )}
-            </div>
-
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="map-chip-label">Time</span>
-              {TIME_RANGES.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  className={range === r ? "btn-primary" : "btn-secondary"}
-                  style={{ padding: "8px 10px", fontSize: 11 }}
-                  onClick={() => setRange(r)}
-                >
-                  {r}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ padding: "8px 14px", fontSize: 12 }}
-                onClick={fetchData}
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ padding: "8px 14px", fontSize: 12 }}
-                onClick={handleFullscreen}
-              >
-                Fullscreen
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ padding: "8px 14px", fontSize: 12 }}
-                onClick={() => {
-                  setSelectedPoint(null);
-                  recenterRef.current?.();
-                }}
-              >
-                Recenter
-              </button>
-            </div>
-          </div>
-
+        <div className="map-content-wrap">
           <div className="map-layer-toolbar">
             {ALL_LAYERS.map((layer) => (
               <label key={layer} className="map-layer-toggle">
