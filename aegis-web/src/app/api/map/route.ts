@@ -900,6 +900,18 @@ const WAR_LIKE_KEYWORDS = [
 const TRUSTED_PUBLISHER_RE =
   /\b(reuters|associated press|ap news|bbc|cnn|new york times|nytimes|washington post|wall street journal|financial times|al jazeera|france 24|deutsche welle|the guardian|bloomberg|nbc news|abc news|cbs news|npr|politico)\b/i;
 
+const TRUSTED_CONFLICT_RSS_FEEDS: Array<{ provider: string; url: string }> = [
+  { provider: "BBC World", url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
+  { provider: "BBC Middle East", url: "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml" },
+  { provider: "BBC Europe", url: "https://feeds.bbci.co.uk/news/world/europe/rss.xml" },
+  { provider: "BBC Asia", url: "https://feeds.bbci.co.uk/news/world/asia/rss.xml" },
+  { provider: "BBC Africa", url: "https://feeds.bbci.co.uk/news/world/africa/rss.xml" },
+  { provider: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml" },
+  { provider: "The Guardian World", url: "https://www.theguardian.com/world/rss" },
+  { provider: "DW", url: "https://rss.dw.com/rdf/rss-en-all" },
+  { provider: "NPR World", url: "https://feeds.npr.org/1004/rss.xml" },
+];
+
 const GDELT_CACHE_TTL_MS = 8 * 60 * 1000;
 const GDELT_COOLDOWN_MS = 15 * 60 * 1000;
 let gdeltCache: { fetchedAt: number; points: IntelPoint[] } | null = null;
@@ -1043,6 +1055,161 @@ function extractPublisherFromTitle(title: string): string {
 
 function isTrustedPublisher(text: string): boolean {
   return TRUSTED_PUBLISHER_RE.test(text);
+}
+
+function dedupeEventPoints(points: IntelPoint[], bucketHours = 1): IntelPoint[] {
+  const seen = new Map<string, IntelPoint>();
+  for (const p of points) {
+    const ts = Date.parse(p.timestamp || "");
+    const bucket = Number.isFinite(ts) ? Math.floor(ts / (bucketHours * 3600_000)) : 0;
+    const headlineBase = normalizeHeadlineForCluster(
+      String(p.metadata?.original_headline ?? p.title ?? "")
+    );
+    const roundedLat = Math.round(p.lat * 2) / 2;
+    const roundedLon = Math.round(p.lon * 2) / 2;
+    const key = `${headlineBase}|${(p.country ?? "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}|${p.layer}`;
+    const current = seen.get(key);
+    if (!current || p.timestamp > current.timestamp) seen.set(key, p);
+  }
+  return Array.from(seen.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+function parseRssConflictPoints(
+  rssText: string,
+  cutoff: number,
+  sourceLabel: string,
+  layer: "news" | "liveStrikes",
+  seen: Set<string>
+): {
+  points: IntelPoint[];
+  totalItems: number;
+  conflictCandidates: number;
+  geoMapped: number;
+} {
+  const itemBlocks = rssText.split("<item>").slice(1, 3200);
+  const points: IntelPoint[] = [];
+  let conflictCandidates = 0;
+  let geoMapped = 0;
+  const warContextRe =
+    /\b(war|frontline|battlefield|cross-border|air raid|missile|strike|shelling|bombardment|drone attack|naval clash|skirmish|clashes|firefight|offensive|counteroffensive|insurgent|militant)\b/i;
+
+  for (let i = 0; i < itemBlocks.length; i += 1) {
+    const block = itemBlocks[i];
+    const title = extractRssTag(block, "title");
+    const description = extractRssTag(block, "description") ?? "";
+    const imageUrl = extractRssImageUrl(block);
+    const sourceUrl = extractRssTag(block, "link");
+    const pubRaw = extractRssTag(block, "pubDate");
+    if (!title) continue;
+    const ts = pubRaw ? Date.parse(pubRaw) : Date.now();
+    if (!Number.isFinite(ts) || ts < cutoff) continue;
+
+    const fullText = `${title} ${description}`;
+    const descriptor = classifyEvent(fullText);
+    const likelyConflict = descriptor.isConflict || warContextRe.test(fullText);
+    if (!likelyConflict) continue;
+    conflictCandidates += 1;
+
+    const city = extractMentionedCity(fullText);
+    const region = extractRegionFallback(fullText);
+    const country = city?.country || extractMentionedCountry(fullText) || region?.country;
+    if (!country) continue;
+    const bbox = COUNTRY_BBOX[country];
+    if (!bbox && !city && !region) continue;
+    geoMapped += 1;
+    const lat = city?.lat ?? region?.lat ?? bbox![4];
+    const lon = city?.lon ?? region?.lon ?? bbox![5];
+    const publisher = extractPublisherFromTitle(title);
+    const trusted = isTrustedPublisher(`${sourceLabel} ${publisher} ${title}`);
+    const hourBucket = Math.floor(ts / 3600_000);
+    const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}|${hourBucket}|${layer}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    points.push({
+      id: `${sourceLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${layer}-${hourBucket}-${i}-${points.length + 1}`,
+      layer,
+      title: city
+        ? `${descriptor.shortLabel || "Conflict event"} near ${city.city}`
+        : `${descriptor.shortLabel || "Conflict event"} in ${country}`,
+      subtitle: `${sourceLabel} | ${publisher}`,
+      lat,
+      lon,
+      country,
+      severity:
+        layer === "liveStrikes"
+          ? descriptor.isDirectKinetic
+            ? "high"
+            : "medium"
+          : city
+            ? "high"
+            : "medium",
+      source: sourceLabel,
+      timestamp: new Date(ts).toISOString(),
+      magnitude: layer === "liveStrikes" ? 9 : city ? 8 : 5,
+      confidence: trusted ? (layer === "liveStrikes" ? 0.72 : 0.68) : layer === "liveStrikes" ? 0.56 : 0.55,
+      imageUrl: imageUrl || undefined,
+      metadata: {
+        event_type: descriptor.eventType || "conflict_event",
+        short_label: descriptor.shortLabel || "Conflict event",
+        publisher,
+        source_url: sourceUrl || null,
+        image_url: imageUrl || null,
+        original_headline: title,
+        source_snippet: description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 360),
+        trusted_source: trusted,
+      },
+    });
+  }
+
+  return {
+    points,
+    totalItems: itemBlocks.length,
+    conflictCandidates,
+    geoMapped,
+  };
+}
+
+async function fetchTrustedPublisherSignals(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const cutoff = Date.now() - rangeHours * 3600_000;
+  const seen = new Set<string>();
+  const points: IntelPoint[] = [];
+  let feedErrors = 0;
+  let totalItems = 0;
+  let conflictCandidates = 0;
+  let geoMapped = 0;
+
+  for (const feed of TRUSTED_CONFLICT_RSS_FEEDS) {
+    const fetchRes = await fetchTextWithRetries([feed.url], 12000, 2);
+    if (!fetchRes.ok || !fetchRes.text) {
+      feedErrors += 1;
+      continue;
+    }
+    const parsed = parseRssConflictPoints(fetchRes.text, cutoff, feed.provider, "news", seen);
+    totalItems += parsed.totalItems;
+    conflictCandidates += parsed.conflictCandidates;
+    geoMapped += parsed.geoMapped;
+    points.push(...parsed.points);
+  }
+
+  const deduped = dedupeEventPoints(points, 1).slice(0, 3200);
+  return {
+    points: deduped,
+    health: {
+      provider: "Trusted publisher feeds",
+      ok: deduped.length > 0,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message:
+        feedErrors > 0
+          ? `Mapped ${deduped.length} event points from ${TRUSTED_CONFLICT_RSS_FEEDS.length - feedErrors}/${TRUSTED_CONFLICT_RSS_FEEDS.length} feeds (items ${totalItems}, conflict candidates ${conflictCandidates}, geocoded ${geoMapped})`
+          : `Mapped ${deduped.length} event points (items ${totalItems}, conflict candidates ${conflictCandidates}, geocoded ${geoMapped})`,
+    },
+  };
 }
 
 function extractStrikeKeyword(text: string): string | null {
@@ -1545,71 +1712,70 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
 
   const now = new Date();
   const from = new Date(now.getTime() - rangeHours * 3600_000);
-  const bodyCandidates: unknown[] = [
-    {
-      apiKey,
-      keyword: "missile strike",
-      dateStart: from.toISOString().slice(0, 10),
-      dateEnd: now.toISOString().slice(0, 10),
-      lang: "eng",
-      isDuplicateFilter: "skipDuplicates",
-      articleCount: 100,
-      sortBy: "date",
-      resultType: "articles",
-    },
-    {
-      apiKey,
-      keyword: "drone strike OR artillery OR battle OR interception",
-      dateStart: from.toISOString().slice(0, 10),
-      dateEnd: now.toISOString().slice(0, 10),
-      lang: "eng",
-      articleCount: 100,
-      sortBy: "date",
-      resultType: "articles",
-    },
-    {
-      apiKey,
-      keyword:
-        "(missile OR strike OR drone OR bombardment OR shelling OR artillery OR raid OR interception OR naval battle OR special operation) AND (Ukraine OR Russia OR Israel OR Iran OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon OR Myanmar)",
-      dateStart: from.toISOString().slice(0, 10),
-      dateEnd: now.toISOString().slice(0, 10),
-      lang: "eng",
-      articleCount: 100,
-      sortBy: "date",
-      resultType: "articles",
-    },
+  const keywordSeeds = [
+    "missile strike OR projectile hit OR drone strike OR artillery strike",
+    "battle OR clashes OR skirmish OR raid OR incursion OR cross-border shelling",
+    "warship OR naval battle OR anti-ship missile OR carrier strike group OR maritime attack",
+    "(missile OR strike OR drone OR bombardment OR shelling OR artillery OR raid OR interception OR naval battle OR special operation) AND (Ukraine OR Russia OR Israel OR Iran OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon OR Myanmar OR Iraq OR Somalia)",
   ];
 
   let parsed: EventRegistryArticle[] = [];
   let lastMessage = "No Event Registry articles returned";
-
-  for (const body of bodyCandidates) {
-    const res = await timedJsonFetch<unknown>(
-      "https://eventregistry.org/api/v1/article/getArticles",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(body),
-      },
-      14000
-    );
-    if (!res.ok) {
-      lastMessage = res.message ?? lastMessage;
-      continue;
-    }
-    if (res.data && typeof res.data === "object") {
-      const errObj = (res.data as Record<string, unknown>).error;
-      if (errObj && typeof errObj === "object") {
-        const maybeMsg = String(
-          (errObj as Record<string, unknown>).message ??
-            (errObj as Record<string, unknown>).description ??
-            ""
-        ).trim();
-        if (maybeMsg) lastMessage = maybeMsg;
+  for (const keyword of keywordSeeds) {
+    for (let page = 1; page <= 6; page += 1) {
+      const body: Record<string, unknown> = {
+        apiKey,
+        keyword,
+        dateStart: from.toISOString().slice(0, 10),
+        dateEnd: now.toISOString().slice(0, 10),
+        lang: "eng",
+        articleCount: 100,
+        sortBy: "date",
+        resultType: "articles",
+        isDuplicateFilter: "skipDuplicates",
+        articlesPage: page,
+        fromArticle: (page - 1) * 100,
+      };
+      const res = await timedJsonFetch<unknown>(
+        "https://eventregistry.org/api/v1/article/getArticles",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+        },
+        14000
+      );
+      if (!res.ok) {
+        lastMessage = res.message ?? lastMessage;
+        break;
       }
+      if (res.data && typeof res.data === "object") {
+        const errObj = (res.data as Record<string, unknown>).error;
+        if (errObj && typeof errObj === "object") {
+          const maybeMsg = String(
+            (errObj as Record<string, unknown>).message ??
+              (errObj as Record<string, unknown>).description ??
+              ""
+          ).trim();
+          if (maybeMsg) lastMessage = maybeMsg;
+        }
+      }
+      const pageArticles = parseEventRegistryArticles(res.data);
+      if (!pageArticles.length) break;
+      parsed.push(...pageArticles);
+      if (parsed.length >= 2600) break;
     }
-    parsed = parseEventRegistryArticles(res.data);
-    if (parsed.length) break;
+    if (parsed.length >= 2600) break;
+  }
+
+  if (parsed.length > 0) {
+    const byKey = new Map<string, EventRegistryArticle>();
+    for (const a of parsed) {
+      const ts = parseEventRegistryTimestamp(a);
+      const key = `${a.uri ?? ""}|${String(a.title ?? "").trim().toLowerCase()}|${new Date(ts).toISOString().slice(0, 13)}`;
+      if (!byKey.has(key)) byKey.set(key, a);
+    }
+    parsed = Array.from(byKey.values());
   }
 
   if (!parsed.length) {
@@ -1786,13 +1952,13 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
   }
 
   return {
-    points: points.slice(0, 1800),
+    points: dedupeEventPoints(points, 1).slice(0, 3000),
     health: {
       provider: "Event Registry",
       ok: points.length > 0,
       updatedAt: new Date().toISOString(),
       latencyMs: Date.now() - started,
-      message: `Mapped ${points.length} event-level trusted-source reports`,
+      message: `Mapped ${points.length} event-level trusted-source reports (multi-page)`,
     },
   };
 }
@@ -1953,9 +2119,12 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     "(missile OR air raid OR shelling OR rocket fire OR precision strike) (Kharkiv OR Kyiv OR Odesa OR Zaporizhzhia OR Donetsk OR Luhansk OR Kherson OR Rafah OR Gaza OR Tehran OR Isfahan OR Sanaa OR Khartoum)",
     "(warship OR frigate OR destroyer OR carrier strike group OR naval task force OR anti-ship missile) (Red Sea OR Bab el-Mandeb OR Gulf of Oman OR Persian Gulf OR Black Sea OR Mediterranean)",
     "(skirmish OR clashes OR firefight OR cross-border strike OR incursion) (Lebanon OR Syria OR Iraq OR Somalia OR Sahel OR Kashmir OR Myanmar)",
+    "(war OR conflict OR military operation OR missile OR drone OR artillery OR naval) (Middle East OR Europe OR Africa OR Asia)",
   ];
   try {
     const cutoff = Date.now() - rangeHours * 3600_000;
+    const warContextRe =
+      /\b(war|conflict|military operation|missile|strike|air raid|drone|shelling|artillery|battle|skirmish|clashes|firefight|interception|offensive|naval|incursion|cross-border)\b/i;
     const clusters = new Map<
       string,
       {
@@ -1971,6 +2140,9 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
       }
     >();
     let failedQueries = 0;
+    let totalItems = 0;
+    let conflictCandidates = 0;
+    let geoMapped = 0;
 
     for (const rawQuery of rapidQueries) {
       const encoded = encodeURIComponent(rawQuery);
@@ -1984,6 +2156,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         continue;
       }
       const itemBlocks = fetchRes.text.split("<item>").slice(1, 2200);
+      totalItems += itemBlocks.length;
 
       for (const block of itemBlocks) {
         const title = extractRssTag(block, "title");
@@ -1996,7 +2169,9 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
 
         const fullText = `${title} ${description}`;
         const descriptor = classifyEvent(fullText);
-        if (!descriptor.isConflict) continue;
+        const likelyConflict = descriptor.isConflict || warContextRe.test(fullText);
+        if (!likelyConflict) continue;
+        conflictCandidates += 1;
 
         const city = extractMentionedCity(fullText);
         const region = extractRegionFallback(fullText);
@@ -2004,6 +2179,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         if (!country) continue;
         const bbox = COUNTRY_BBOX[country];
         if (!bbox && !city && !region) continue;
+        geoMapped += 1;
         const lat = city?.lat ?? region?.lat ?? bbox![4];
         const lon = city?.lon ?? region?.lon ?? bbox![5];
 
@@ -2033,6 +2209,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     const points: IntelPoint[] = [];
     for (const [key, c] of clusters.entries()) {
       const corroboration = c.publishers.size;
+      const trusted = isTrustedPublisher(Array.from(c.publishers).join(" "));
       const norm = Math.min(1, corroboration / 4);
       points.push({
         id: `rapid-${key}`,
@@ -2042,11 +2219,11 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         lat: c.lat,
         lon: c.lon,
         country: c.country,
-        severity: corroboration >= 3 ? "critical" : corroboration >= 2 ? "high" : "medium",
-        source: "Corroborated live conflict feed",
+        severity: corroboration >= 3 ? "critical" : corroboration >= 2 || trusted ? "high" : "medium",
+        source: "Rapid conflict monitor",
         timestamp: new Date(c.latestTs).toISOString(),
-        magnitude: corroboration >= 2 ? 12 + corroboration * 3 : 8,
-        confidence: corroboration >= 2 ? 0.5 + norm * 0.35 : 0.45,
+        magnitude: corroboration >= 2 ? 12 + corroboration * 3 : trusted ? 10 : 8,
+        confidence: corroboration >= 2 ? 0.5 + norm * 0.35 : trusted ? 0.6 : 0.45,
         imageUrl: c.imageUrl || undefined,
         metadata: {
           event_type: c.keyword.toLowerCase().replace(/\s+/g, "_"),
@@ -2055,12 +2232,13 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
           top_publishers: Array.from(c.publishers).slice(0, 3).join(", "),
           sample_event: c.evidence[0] ?? "",
           image_url: c.imageUrl,
+          trusted_source: trusted,
         },
       });
     }
 
     return {
-      points: points.slice(0, 2600),
+      points: dedupeEventPoints(points, 1).slice(0, 3400),
       health: {
         provider: "Rapid conflict feed",
         ok: points.length > 0,
@@ -2068,8 +2246,8 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         latencyMs: Date.now() - started,
         message:
           failedQueries > 0
-            ? `Mapped ${points.length} near-live strike events (${failedQueries} query feeds degraded)`
-            : `Mapped ${points.length} near-live strike events`,
+            ? `Mapped ${points.length} near-live strike events (${failedQueries} feeds degraded, items ${totalItems}, conflict candidates ${conflictCandidates}, geocoded ${geoMapped})`
+            : `Mapped ${points.length} near-live strike events (items ${totalItems}, conflict candidates ${conflictCandidates}, geocoded ${geoMapped})`,
       },
     };
   } catch (err) {
@@ -2904,6 +3082,7 @@ export async function GET(request: Request) {
       usniVesselsRes,
       vesselsRes,
       newsRes,
+      trustedPublisherRes,
       infraRes,
     ] =
       await Promise.all([
@@ -2917,6 +3096,7 @@ export async function GET(request: Request) {
       fetchUsniFleetTrackerSignals(rangeHours),
       fetchVesselSignals(),
       fetchNewsSignals(rangeHours),
+      fetchTrustedPublisherSignals(rangeHours),
       fetchStrategicInfrastructure(),
     ]);
 
@@ -2938,24 +3118,74 @@ export async function GET(request: Request) {
       ...gdeltRes.points,
       ...liveuamapRes.points,
       ...eventRegistryStrikePoints,
+      ...trustedPublisherRes.points
+        .filter((p) => {
+          const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`.toLowerCase();
+          return (
+            WAR_LIKE_KEYWORDS.some((k) => text.includes(k)) &&
+            !/\b(analysis|opinion|editorial|markets?|aid)\b/.test(text)
+          );
+        })
+        .map((p, idx) => ({
+          ...p,
+          id: `trusted-strike-${p.id}-${idx}`,
+          layer: "liveStrikes" as const,
+          source: p.source || "Trusted publisher feeds",
+          severity: p.severity === "critical" ? ("critical" as const) : ("high" as const),
+          magnitude: Math.max(9, p.magnitude ?? 0),
+        })),
     ]
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    const dedupedLiveStrikes = dedupeEventPoints(liveStrikes, 1).slice(0, 5200);
+    const newsCandidates = [
+      ...newsRes.points,
+      ...eventRegistryRes.points,
+      ...trustedPublisherRes.points,
+      ...gdeltRes.points.map((p, idx) => ({
+        ...p,
+        id: `gdelt-news-${p.id}-${idx}`,
+        layer: "news" as const,
+        source: "GDELT",
+      })),
+      ...rapidRes.points.map((p, idx) => ({
+        ...p,
+        id: `rapid-news-${p.id}-${idx}`,
+        layer: "news" as const,
+        source: "Rapid conflict feed",
+      })),
+    ];
+    let fusedNewsPoints = dedupeEventPoints(newsCandidates, 1)
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 3600);
-    const fusedNewsPoints = [...newsRes.points, ...eventRegistryRes.points]
-      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 5600);
+      .slice(0, 8200);
+    if (fusedNewsPoints.length < 900) {
+      const densityBackfill = dedupeEventPoints(
+        [
+          ...fusedNewsPoints,
+          ...dedupedLiveStrikes.map((p, idx) => ({
+            ...p,
+            id: `livestrike-news-backfill-${p.id}-${idx}`,
+            layer: "news" as const,
+            source: `${p.source} (backfill)`,
+          })),
+        ],
+        1
+      )
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, 9200);
+      fusedNewsPoints = densityBackfill;
+    }
     const mergedVesselPoints = dedupeVesselPoints([
       ...usniVesselsRes.points,
       ...vesselsRes.points,
     ]).slice(0, 3800);
     const carrierGroups = extractCarrierGroups(mergedVesselPoints);
     const activeConflictCountries = buildActiveConflictCountries(
-      liveStrikes,
+      dedupedLiveStrikes,
       mergedConflicts,
       fusedNewsPoints
     );
     const escalationRiskCountries = buildEscalationRiskCountries(
-      liveStrikes,
+      dedupedLiveStrikes,
       mergedConflicts,
       fusedNewsPoints
     );
@@ -2993,7 +3223,7 @@ export async function GET(request: Request) {
 
     const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
       conflicts: mergedConflicts,
-      liveStrikes,
+      liveStrikes: dedupedLiveStrikes,
       flights: flightsRes.points,
       vessels: mergedVesselPoints,
       carriers: carrierGroups,
@@ -3014,9 +3244,9 @@ export async function GET(request: Request) {
       providerHealth: [
         {
           provider: "Conflict fusion",
-          ok: mergedConflicts.length > 0 || liveStrikes.length > 0,
+          ok: mergedConflicts.length > 0 || dedupedLiveStrikes.length > 0,
           updatedAt: new Date().toISOString(),
-          message: `Conflicts: ${mergedConflicts.length} validated DB points | Live strikes: ${liveStrikes.length} near-live events`,
+          message: `Conflicts: ${mergedConflicts.length} validated DB points | Live strikes: ${dedupedLiveStrikes.length} near-live events | News: ${fusedNewsPoints.length}`,
         },
         acledRes.health,
         ucdpRes.health,
@@ -3027,6 +3257,7 @@ export async function GET(request: Request) {
         flightsRes.health,
         usniVesselsRes.health,
         vesselsRes.health,
+        trustedPublisherRes.health,
         {
           provider: "Carrier groups",
           ok: carrierGroups.length > 0,

@@ -13,8 +13,9 @@ function systemPromptForMode(mode: Mode): string {
     case "map_insight":
       return (
         "You are AEGIS, an analytical assistant for a geopolitical early-warning system. " +
-        "You receive structured summaries of conflict hotspots and must write concise, sober intelligence briefs. " +
-        "Ground every statement in the provided data. Do not speculate or give policy advice. " +
+        "You receive one mapped event and must write a concise, event-specific intelligence brief focused on what happened, where, when, actors, and immediate trigger/background. " +
+        "Ground every statement in the provided data only. Do not speculate or give policy advice. " +
+        "Never describe confidence scores, magnitude scores, model behavior, or generic 'why flagged' explanations unless directly required by explicit event facts. " +
         TEMPORAL_SCOPE
       );
     case "news_summary":

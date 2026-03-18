@@ -139,35 +139,35 @@ export default function MapPage() {
     }
 
     const country = selectedPoint.country ?? "Unknown";
-    const layerCount = apiData?.layers[selectedPoint.layer]?.length ?? 0;
-    const sameCountrySignals =
-      apiData?.layers[selectedPoint.layer]?.filter((p) => p.country === country).length ?? 0;
-    const confidencePct =
-      typeof selectedPoint.confidence === "number"
-        ? Math.round(selectedPoint.confidence * 100)
-        : null;
-    const magnitude = typeof selectedPoint.magnitude === "number" ? selectedPoint.magnitude : null;
-
-    const statsLines = [
-      `Layer signal count: ${layerCount}`,
-      `Same-country layer count: ${sameCountrySignals}`,
-      confidencePct !== null ? `Confidence: ${confidencePct}%` : "Confidence: N/A",
-      magnitude !== null ? `Magnitude score: ${magnitude}` : "Magnitude score: N/A",
-      `Timestamp: ${selectedPoint.timestamp}`,
-    ].join("\n");
+    const sourceUrl = String(selectedPoint.metadata?.source_url ?? "").trim();
+    const snippet = String(selectedPoint.metadata?.source_snippet ?? "").trim();
+    const publisher = String(selectedPoint.metadata?.publisher ?? selectedPoint.source ?? "Unknown");
+    const eventType = String(selectedPoint.metadata?.event_type ?? "conflict_event");
+    const nearbySameCountry = (apiData?.layers.news ?? [])
+      .filter((p) => p.country === country)
+      .slice(0, 8)
+      .map((p) => `${p.timestamp}: ${p.title} (${p.source})`)
+      .join("\n");
 
     const prompt = [
-      `Event: ${selectedPoint.title}`,
+      "You are summarizing a single mapped conflict event for an intelligence popup.",
+      `Headline: ${selectedPoint.title}`,
       `Subtitle: ${selectedPoint.subtitle ?? "N/A"}`,
-      `Country: ${country}`,
-      `Source: ${selectedPoint.source}`,
-      `Severity: ${selectedPoint.severity}`,
-      "Available statistics:",
-      statsLines,
-      "Write exactly 3 bullet points summarizing why this event was flagged.",
+      `Event type: ${eventType}`,
+      `Location country: ${country}`,
+      `Timestamp: ${selectedPoint.timestamp}`,
+      `Source label: ${selectedPoint.source}`,
+      `Publisher: ${publisher}`,
+      `Article URL: ${sourceUrl || "Unavailable"}`,
+      `Source snippet: ${snippet || "Unavailable"}`,
+      "Nearby same-country conflict signals (context):",
+      nearbySameCountry || "Unavailable",
+      "Write exactly 4 bullet points describing the actual event and immediate context.",
       "Each line must start with '- '.",
-      "Each bullet must include at least one numeric value from the provided statistics.",
-      "If a value is missing, explicitly say it is unavailable.",
+      "Explain what happened, where, when, and who/what was targeted or involved.",
+      "If available, include weapon/interception details and immediate trigger/background from the provided text.",
+      "Use concrete event facts and numbers from provided content only; if unavailable, say 'not reported'.",
+      "Do NOT mention confidence scores, magnitude scores, layer counts, or why the model flagged the event.",
       "No policy advice. Keep neutral intelligence tone.",
     ].join("\n");
 
@@ -178,7 +178,7 @@ export default function MapPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode: "map_insight",
-        maxTokens: 260,
+        maxTokens: 360,
         prompt,
       }),
     })
