@@ -98,6 +98,35 @@ async function timedJsonFetch<T>(
   }
 }
 
+async function fetchTextWithRetries(
+  urls: string[],
+  timeoutMs = 12000,
+  attemptsPerUrl = 2
+): Promise<{ ok: boolean; text?: string; message?: string }> {
+  let lastMessage = "fetch failed";
+  for (const url of urls) {
+    for (let attempt = 0; attempt < attemptsPerUrl; attempt += 1) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
+        if (!res.ok) {
+          lastMessage = `HTTP ${res.status}`;
+          continue;
+        }
+        const text = await res.text();
+        if (text.trim()) return { ok: true, text };
+        lastMessage = "Empty response";
+      } catch (err) {
+        lastMessage = err instanceof Error ? err.message : "fetch failed";
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+  return { ok: false, message: lastMessage };
+}
+
 function mapSeverity(v: number): "low" | "medium" | "high" | "critical" {
   if (v >= 0.75) return "critical";
   if (v >= 0.45) return "high";
@@ -1919,30 +1948,13 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
   health: ProviderHealth;
 }> {
   const started = Date.now();
-  const query = encodeURIComponent(
-    "(airstrike OR missile strike OR bombardment OR drone strike OR explosion OR artillery OR battle OR naval clash OR interception OR border clash OR infiltration OR standoff) (Ukraine OR Russia OR Israel OR Gaza OR Iran OR Sudan OR Yemen OR Syria OR Lebanon OR Red Sea OR Gulf OR Saudi OR UAE OR Qatar OR Oman OR Somalia)"
-  );
-  const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
-
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 12000);
+  const rapidQueries = [
+    "(airstrike OR missile strike OR bombardment OR drone strike OR explosion OR artillery OR battle OR naval clash OR interception OR border clash OR infiltration OR standoff) (Ukraine OR Russia OR Israel OR Gaza OR Iran OR Sudan OR Yemen OR Syria OR Lebanon OR Red Sea OR Gulf OR Saudi OR UAE OR Qatar OR Oman OR Somalia)",
+    "(missile OR air raid OR shelling OR rocket fire OR precision strike) (Kharkiv OR Kyiv OR Odesa OR Zaporizhzhia OR Donetsk OR Luhansk OR Kherson OR Rafah OR Gaza OR Tehran OR Isfahan OR Sanaa OR Khartoum)",
+    "(warship OR frigate OR destroyer OR carrier strike group OR naval task force OR anti-ship missile) (Red Sea OR Bab el-Mandeb OR Gulf of Oman OR Persian Gulf OR Black Sea OR Mediterranean)",
+    "(skirmish OR clashes OR firefight OR cross-border strike OR incursion) (Lebanon OR Syria OR Iraq OR Somalia OR Sahel OR Kashmir OR Myanmar)",
+  ];
   try {
-    const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
-    if (!res.ok) {
-      return {
-        points: [],
-        health: {
-          provider: "Rapid conflict feed",
-          ok: false,
-          updatedAt: new Date().toISOString(),
-          latencyMs: Date.now() - started,
-          message: `HTTP ${res.status}`,
-        },
-      };
-    }
-
-    const text = await res.text();
-    const itemBlocks = text.split("<item>").slice(1, 1000);
     const cutoff = Date.now() - rangeHours * 3600_000;
     const clusters = new Map<
       string,
@@ -1958,55 +1970,69 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         evidence: string[];
       }
     >();
+    let failedQueries = 0;
 
-    for (const block of itemBlocks) {
-      const title = extractRssTag(block, "title");
-      const description = extractRssTag(block, "description") ?? "";
-      const imageUrl = extractRssImageUrl(block);
-      const pubRaw = extractRssTag(block, "pubDate");
-      if (!title) continue;
-      const ts = pubRaw ? new Date(pubRaw).getTime() : Date.now();
-      if (!Number.isFinite(ts) || ts < cutoff) continue;
+    for (const rawQuery of rapidQueries) {
+      const encoded = encodeURIComponent(rawQuery);
+      const urls = [
+        `https://news.google.com/rss/search?q=${encoded}&hl=en-US&gl=US&ceid=US:en`,
+        `https://news.google.com/rss/search?q=${encoded}&hl=en-GB&gl=GB&ceid=GB:en`,
+      ];
+      const fetchRes = await fetchTextWithRetries(urls, 12000, 2);
+      if (!fetchRes.ok || !fetchRes.text) {
+        failedQueries += 1;
+        continue;
+      }
+      const itemBlocks = fetchRes.text.split("<item>").slice(1, 2200);
 
-      const fullText = `${title} ${description}`;
-      const descriptor = classifyEvent(fullText);
-      if (!descriptor.isConflict) continue;
+      for (const block of itemBlocks) {
+        const title = extractRssTag(block, "title");
+        const description = extractRssTag(block, "description") ?? "";
+        const imageUrl = extractRssImageUrl(block);
+        const pubRaw = extractRssTag(block, "pubDate");
+        if (!title) continue;
+        const ts = pubRaw ? new Date(pubRaw).getTime() : Date.now();
+        if (!Number.isFinite(ts) || ts < cutoff) continue;
 
-      const city = extractMentionedCity(fullText);
-      const region = extractRegionFallback(fullText);
-      const country = city?.country || extractMentionedCountry(fullText) || region?.country;
-      if (!country) continue;
-      const bbox = COUNTRY_BBOX[country];
-      if (!bbox && !city && !region) continue;
-      const lat = city?.lat ?? region?.lat ?? bbox![4];
-      const lon = city?.lon ?? region?.lon ?? bbox![5];
+        const fullText = `${title} ${description}`;
+        const descriptor = classifyEvent(fullText);
+        if (!descriptor.isConflict) continue;
 
-      const publisher = extractPublisherFromTitle(title);
-      const clusterKey = `${country}|${city?.city ?? "country"}|${descriptor.eventType}|${normalizeHeadlineForCluster(
-        title
-      )}`;
-      const current = clusters.get(clusterKey) ?? {
-        latestTs: ts,
-        title,
-        country,
-        lat,
-        lon,
-        keyword: descriptor.shortLabel,
-        imageUrl: imageUrl || null,
-        publishers: new Set<string>(),
-        evidence: [],
-      };
-      current.latestTs = Math.max(current.latestTs, ts);
-      current.publishers.add(publisher);
-      if (!current.imageUrl && imageUrl) current.imageUrl = imageUrl;
-      if (current.evidence.length < 4) current.evidence.push(title);
-      clusters.set(clusterKey, current);
+        const city = extractMentionedCity(fullText);
+        const region = extractRegionFallback(fullText);
+        const country = city?.country || extractMentionedCountry(fullText) || region?.country;
+        if (!country) continue;
+        const bbox = COUNTRY_BBOX[country];
+        if (!bbox && !city && !region) continue;
+        const lat = city?.lat ?? region?.lat ?? bbox![4];
+        const lon = city?.lon ?? region?.lon ?? bbox![5];
+
+        const publisher = extractPublisherFromTitle(title);
+        const clusterKey = `${country}|${city?.city ?? "country"}|${descriptor.eventType}|${normalizeHeadlineForCluster(
+          title
+        )}`;
+        const current = clusters.get(clusterKey) ?? {
+          latestTs: ts,
+          title,
+          country,
+          lat,
+          lon,
+          keyword: descriptor.shortLabel,
+          imageUrl: imageUrl || null,
+          publishers: new Set<string>(),
+          evidence: [],
+        };
+        current.latestTs = Math.max(current.latestTs, ts);
+        current.publishers.add(publisher);
+        if (!current.imageUrl && imageUrl) current.imageUrl = imageUrl;
+        if (current.evidence.length < 4) current.evidence.push(title);
+        clusters.set(clusterKey, current);
+      }
     }
 
     const points: IntelPoint[] = [];
     for (const [key, c] of clusters.entries()) {
       const corroboration = c.publishers.size;
-      if (corroboration < 2) continue;
       const norm = Math.min(1, corroboration / 4);
       points.push({
         id: `rapid-${key}`,
@@ -2016,11 +2042,11 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         lat: c.lat,
         lon: c.lon,
         country: c.country,
-        severity: corroboration >= 3 ? "critical" : "high",
+        severity: corroboration >= 3 ? "critical" : corroboration >= 2 ? "high" : "medium",
         source: "Corroborated live conflict feed",
         timestamp: new Date(c.latestTs).toISOString(),
-        magnitude: 12 + corroboration * 3,
-        confidence: 0.5 + norm * 0.35,
+        magnitude: corroboration >= 2 ? 12 + corroboration * 3 : 8,
+        confidence: corroboration >= 2 ? 0.5 + norm * 0.35 : 0.45,
         imageUrl: c.imageUrl || undefined,
         metadata: {
           event_type: c.keyword.toLowerCase().replace(/\s+/g, "_"),
@@ -2034,13 +2060,16 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
     }
 
     return {
-      points: points.slice(0, 1200),
+      points: points.slice(0, 2600),
       health: {
         provider: "Rapid conflict feed",
-        ok: true,
+        ok: points.length > 0,
         updatedAt: new Date().toISOString(),
         latencyMs: Date.now() - started,
-        message: `Mapped ${points.length} corroborated near-live strike events`,
+        message:
+          failedQueries > 0
+            ? `Mapped ${points.length} near-live strike events (${failedQueries} query feeds degraded)`
+            : `Mapped ${points.length} near-live strike events`,
       },
     };
   } catch (err) {
@@ -2054,8 +2083,6 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         message: err instanceof Error ? err.message : "Rapid feed failed",
       },
     };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -2081,6 +2108,18 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "(Houthi OR Hezbollah OR IRGC OR Wagner OR ISIS OR Al Shabaab) (attack OR clash OR strike OR ambush)",
     "(Somalia OR Afghanistan OR Pakistan OR Kashmir OR Myanmar OR Sahel) (battle OR offensive OR raid OR clash)",
     "(UAE OR Saudi Arabia OR Qatar OR Bahrain OR Kuwait OR Oman) (missile OR interception OR naval movement OR air operation)",
+    "(ceasefire collapse OR renewed fighting OR heavy clashes OR mass casualty) (Ukraine OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon)",
+    "(drone swarm OR loitering munition OR anti-ship missile OR precision-guided munition) (Black Sea OR Red Sea OR Persian Gulf OR Gulf of Aden OR Arabian Sea)",
+    "(airport strike OR airbase strike OR military depot blast OR ammunition depot explosion) (Ukraine OR Russia OR Iran OR Israel OR Syria OR Iraq)",
+    "(insurgent attack OR convoy ambush OR IED blast OR militant raid) (Somalia OR Sahel OR Nigeria OR Mali OR Niger OR Burkina Faso OR Afghanistan)",
+    "(naval interception OR maritime interdiction OR shipping attack OR tanker attack) (Hormuz OR Bab el-Mandeb OR Red Sea OR Gulf of Oman OR Mediterranean)",
+    "(ballistic missile launch OR hypersonic missile OR cruise missile launch OR air defense intercept) (Iran OR Israel OR Russia OR Ukraine OR North Korea)",
+    "(cross-border artillery OR border firefight OR tactical withdrawal OR assault brigade) (India OR Pakistan OR Armenia OR Azerbaijan OR Lebanon OR Syria)",
+    "(fighter jet scramble OR strategic bomber patrol OR ISR flight OR military transport aircraft) (Baltic Sea OR Black Sea OR Pacific OR Taiwan Strait)",
+    "(special operation forces OR urban combat OR trench assault OR artillery barrage) (Donbas OR Zaporizhzhia OR Kherson OR Bakhmut OR Avdiivka)",
+    "(port strike OR naval base strike OR harbor attack OR dry dock damage) (Sevastopol OR Odesa OR Tartus OR Latakia OR Haifa OR Hodeidah)",
+    "(counteroffensive OR defensive line breach OR frontline advance OR encirclement) (Ukraine OR Sudan OR Myanmar OR Syria)",
+    "(satellite imagery confirms strike OR geolocated strike footage OR verified battlefield footage) (Ukraine OR Gaza OR Sudan OR Syria OR Yemen)",
   ];
   const eventKeywords = [
     "missile",
@@ -2113,7 +2152,19 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
     "anti-ship",
     "carrier strike group",
     "commandos",
+    "rocket fire",
+    "air raid",
+    "convoy",
+    "militant",
+    "insurgent",
+    "frontline",
+    "cross-border",
+    "barrage",
+    "war",
+    "battlefield",
   ];
+  const warContextRe =
+    /\b(war|frontline|battlefield|cross-border|air raid|missile|strike|shelling|bombardment|drone attack|naval clash|skirmish|clashes|firefight|offensive|counteroffensive|insurgent|militant)\b/i;
   try {
     const points: IntelPoint[] = [];
     const seen = new Set<string>();
@@ -2122,27 +2173,19 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
 
     for (const rawQuery of queries) {
       const query = encodeURIComponent(rawQuery);
-      const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 12000);
-      let text = "";
-      try {
-        const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
-        if (!res.ok) {
-          fetchErrors += 1;
-          clearTimeout(timer);
-          continue;
-        }
-        text = await res.text();
-      } catch {
+      const urls = [
+        `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`,
+        `https://news.google.com/rss/search?q=${query}&hl=en-GB&gl=GB&ceid=GB:en`,
+        `https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`,
+      ];
+      const fetchRes = await fetchTextWithRetries(urls, 12000, 2);
+      if (!fetchRes.ok || !fetchRes.text) {
         fetchErrors += 1;
-        clearTimeout(timer);
         continue;
-      } finally {
-        clearTimeout(timer);
       }
+      const text = fetchRes.text;
 
-      const itemBlocks = text.split("<item>").slice(1, 1800);
+      const itemBlocks = text.split("<item>").slice(1, 2600);
 
       for (let i = 0; i < itemBlocks.length; i += 1) {
         const block = itemBlocks[i];
@@ -2156,10 +2199,11 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
 
         const fullText = `${title} ${description}`;
         const lower = fullText.toLowerCase();
-        if (!eventKeywords.some((k) => lower.includes(k))) continue;
+        if (!eventKeywords.some((k) => lower.includes(k)) && !warContextRe.test(fullText)) continue;
 
         const descriptor = classifyEvent(fullText);
-        if (!descriptor.isConflict) continue;
+        const likelyConflict = descriptor.isConflict || warContextRe.test(fullText);
+        if (!likelyConflict) continue;
         const city = extractMentionedCity(fullText);
         const region = extractRegionFallback(fullText);
         const country = city?.country || extractMentionedCountry(fullText) || region?.country;
@@ -2170,7 +2214,7 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
         const lon = city?.lon ?? region?.lon ?? bbox![5];
         const publisher = extractPublisherFromTitle(title);
         const trusted = isTrustedPublisher(`${publisher} ${title}`);
-        const timeBucket = Math.floor(pubDate / (3 * 3600_000));
+        const timeBucket = Math.floor(pubDate / 3600_000);
         const dedupeKey = `${normalizeHeadlineForCluster(title)}|${country}|${city?.city ?? ""}|${timeBucket}`;
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
@@ -2179,8 +2223,8 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
           id: `news-event-${i}-${country}-${pubDate}-${seen.size}`,
           layer: "news",
           title: city
-            ? `${descriptor.shortLabel} near ${city.city}`
-            : `${descriptor.shortLabel} in ${country}`,
+            ? `${descriptor.shortLabel || "Conflict event"} near ${city.city}`
+            : `${descriptor.shortLabel || "Conflict event"} in ${country}`,
           subtitle: `${publisher} headline`,
           lat,
           lon,
@@ -2188,17 +2232,18 @@ async function fetchNewsSignals(rangeHours: number): Promise<{
           severity: city ? "high" : "medium",
           source: "Google News RSS",
           timestamp: new Date(pubDate).toISOString(),
-          magnitude: city ? 7 : 4,
-          confidence: trusted ? (city ? 0.74 : 0.62) : city ? 0.64 : 0.5,
+          magnitude: city ? 8 : 5,
+          confidence: trusted ? (city ? 0.76 : 0.64) : city ? 0.66 : 0.54,
           imageUrl: imageUrl || undefined,
           metadata: {
-            event_type: descriptor.eventType,
-            short_label: descriptor.shortLabel,
+            event_type: descriptor.eventType || "conflict_event",
+            short_label: descriptor.shortLabel || "Conflict event",
             publisher,
             original_headline: title,
             city: city?.city ?? null,
             trusted_source: trusted,
             image_url: imageUrl || null,
+            source_snippet: description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 360),
           },
         });
       }
