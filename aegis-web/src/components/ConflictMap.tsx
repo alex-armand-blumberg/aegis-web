@@ -55,11 +55,27 @@ const COUNTRY_NAME_ALIASES: Record<string, string> = {
   "russian federation": "russia",
   "iran islamic republic of": "iran",
   "syrian arab republic": "syria",
+  "democratic republic of congo": "democratic republic of the congo",
+  "democratic republic of the congo": "democratic republic of the congo",
+  drc: "democratic republic of the congo",
   "viet nam": "vietnam",
   "korea republic of": "south korea",
   "korea democratic peoples republic of": "north korea",
   "turkiye": "turkey",
 };
+const COUNTRY_HIGHLIGHT_DENYLIST = new Set(["india", "democratic republic of the congo"]);
+
+function isCountryHighlightDenied(name: string): boolean {
+  const normalized = normalizeCountryName(name);
+  const canonical = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
+  return COUNTRY_HIGHLIGHT_DENYLIST.has(canonical);
+}
+
+function getFeatureCountryName(feature: unknown): string {
+  if (typeof feature !== "object" || feature === null) return "";
+  const candidate = feature as { properties?: { name?: unknown } };
+  return typeof candidate.properties?.name === "string" ? candidate.properties.name : "";
+}
 
 function severityRadiusMultiplier(severity: IntelPoint["severity"]): number {
   switch (severity) {
@@ -152,18 +168,20 @@ export default function ConflictMap({
   const deckLayers = useMemo(() => {
     const countryScore = new globalThis.Map<string, number>();
     for (const c of activeConflictCountries) {
+      if (isCountryHighlightDenied(c.country)) continue;
       const normalized = normalizeCountryName(c.country);
       const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
       countryScore.set(key, c.score);
     }
     const riskScore = new globalThis.Map<string, number>();
     for (const c of escalationRiskCountries) {
+      if (isCountryHighlightDenied(c.country)) continue;
       const normalized = normalizeCountryName(c.country);
       const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
       riskScore.set(key, c.riskScore);
     }
 
-    const built: any[] = [];
+    const built: Array<GeoJsonLayer<unknown> | ScatterplotLayer<IntelPoint> | TextLayer<IntelPoint>> = [];
     if (activeConflictCountries.length > 0) {
       built.push(
         new GeoJsonLayer({
@@ -174,8 +192,9 @@ export default function ConflictMap({
           stroked: true,
           lineWidthMinPixels: 1,
           getLineColor: [148, 163, 184, 110],
-          getFillColor: (f: any) => {
-            const rawName = String(f?.properties?.name ?? "");
+          getFillColor: (f) => {
+            const rawName = getFeatureCountryName(f);
+            if (isCountryHighlightDenied(rawName)) return [0, 0, 0, 0];
             const normalized = normalizeCountryName(rawName);
             const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
             const score = countryScore.get(key) ?? 0;
@@ -190,8 +209,8 @@ export default function ConflictMap({
               activeConflictCountries.map((c) => `${c.country}:${c.score}`).join("|"),
             ],
           },
-          onClick: ({ object }: any) => {
-            const rawName = String(object?.properties?.name ?? "").trim();
+          onClick: ({ object }) => {
+            const rawName = getFeatureCountryName(object).trim();
             if (rawName) onCountrySelect?.(rawName);
           },
         })
@@ -206,8 +225,9 @@ export default function ConflictMap({
           pickable: false,
           filled: true,
           stroked: false,
-          getFillColor: (f: any) => {
-            const rawName = String(f?.properties?.name ?? "");
+          getFillColor: (f) => {
+            const rawName = getFeatureCountryName(f);
+            if (isCountryHighlightDenied(rawName)) return [0, 0, 0, 0];
             const normalized = normalizeCountryName(rawName);
             const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
             const score = riskScore.get(key) ?? 0;
@@ -361,12 +381,15 @@ export default function ConflictMap({
       controller={true}
       viewState={viewState}
       onViewStateChange={({ viewState: next }) =>
-        setViewState({
-          longitude: (next as any).longitude,
-          latitude: (next as any).latitude,
-          zoom: (next as any).zoom,
-          pitch: (next as any).pitch,
-          bearing: (next as any).bearing,
+        setViewState((prev) => {
+          const candidate = next as Partial<typeof DEFAULT_VIEW_STATE>;
+          return {
+            longitude: typeof candidate.longitude === "number" ? candidate.longitude : prev.longitude,
+            latitude: typeof candidate.latitude === "number" ? candidate.latitude : prev.latitude,
+            zoom: typeof candidate.zoom === "number" ? candidate.zoom : prev.zoom,
+            pitch: typeof candidate.pitch === "number" ? candidate.pitch : prev.pitch,
+            bearing: typeof candidate.bearing === "number" ? candidate.bearing : prev.bearing,
+          };
         })
       }
       getCursor={({ isHovering }) => (isHovering ? "pointer" : "grab")}

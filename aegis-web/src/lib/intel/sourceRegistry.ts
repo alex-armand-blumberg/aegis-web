@@ -551,6 +551,30 @@ export const WORLDMONITOR_RSS_NETWORK: MapSourceDescriptor[] = [
     layers: ["news", "liveStrikes", "vessels", "flights"],
     domain: "monitor-the-situation.com",
   },
+  {
+    id: "worldmonitor-app",
+    name: "WorldMonitor",
+    family: "news-network",
+    tier: "tier4",
+    layers: ["news", "liveStrikes", "conflicts"],
+    domain: "worldmonitor.app",
+  },
+  {
+    id: "starboard-intelligence",
+    name: "Starboard Intelligence",
+    family: "military-activity",
+    tier: "tier4",
+    layers: ["vessels", "news", "liveStrikes"],
+    domain: "starboardintelligence.com",
+  },
+  {
+    id: "liveuamap-mirror",
+    name: "LiveUAMap web",
+    family: "conflict-events",
+    tier: "tier3",
+    layers: ["news", "liveStrikes", "conflicts"],
+    domain: "liveuamap.com",
+  },
 ];
 
 export type SourceAccessMode =

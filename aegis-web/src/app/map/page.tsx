@@ -34,7 +34,7 @@ const ALL_LAYERS: IntelLayerKey[] = [
   "infrastructure",
 ];
 
-type SourcePackKey = "openSourceIntel" | "lawfareTroops";
+type SourcePackKey = "openSourceIntel" | "lawfareTroops" | "experimentalTrackers";
 const SOURCE_PACKS: Array<{
   key: SourcePackKey;
   label: string;
@@ -42,7 +42,14 @@ const SOURCE_PACKS: Array<{
 }> = [
   { key: "openSourceIntel", label: "Open-source conflict digests (new)", heavy: true },
   { key: "lawfareTroops", label: "US troop tracker (Lawfare, new)", heavy: true },
+  { key: "experimentalTrackers", label: "Experimental trackers (new)", heavy: true },
 ];
+
+const SOURCE_PACK_DEPENDENT_LAYERS: Record<SourcePackKey, IntelLayerKey[]> = {
+  openSourceIntel: ["liveStrikes", "news"],
+  lawfareTroops: ["infrastructure"],
+  experimentalTrackers: ["liveStrikes", "news"],
+};
 
 function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
   return {
@@ -62,7 +69,17 @@ function buildInitialSourcePackState(): Record<SourcePackKey, boolean> {
   return {
     openSourceIntel: false,
     lawfareTroops: false,
+    experimentalTrackers: false,
   };
+}
+
+function simplifyProviderMessage(message: string): string {
+  return message
+    .replace(/\s*\[reason=[^\]]+\]/gi, "")
+    .replace(/\s*\[source_packs=[^\]]+\]/gi, "")
+    .replace(/\s*\[cache=[^\]]+\]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function severityWeight(sev: IntelPoint["severity"]): number {
@@ -113,6 +130,21 @@ export default function MapPage() {
     () => SOURCE_PACKS.filter((s) => sourcePacks[s.key]).map((s) => s.key).join(","),
     [sourcePacks]
   );
+  const enabledSourcePackKeys = useMemo(
+    () => SOURCE_PACKS.filter((s) => sourcePacks[s.key]).map((s) => s.key),
+    [sourcePacks]
+  );
+  const sourcePackLayerMismatch = useMemo(() => {
+    const needed = new Set<IntelLayerKey>();
+    for (const key of enabledSourcePackKeys) {
+      for (const layer of SOURCE_PACK_DEPENDENT_LAYERS[key]) needed.add(layer);
+    }
+    if (needed.size === 0) return false;
+    for (const layer of needed) {
+      if (activeLayers[layer]) return false;
+    }
+    return true;
+  }, [activeLayers, enabledSourcePackKeys]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -373,6 +405,19 @@ export default function MapPage() {
     () => providerHealth.find((h) => h.provider === "Relay seed digest"),
     [providerHealth]
   );
+  const providerHealthDisplay = useMemo(
+    () =>
+      providerHealth.map((p) => ({
+        ...p,
+        message: simplifyProviderMessage(p.message || "No details"),
+      })),
+    [providerHealth]
+  );
+  const providerSummary = useMemo(() => {
+    const ok = providerHealthDisplay.filter((p) => p.ok).length;
+    const degraded = providerHealthDisplay.length - ok;
+    return { ok, degraded, total: providerHealthDisplay.length };
+  }, [providerHealthDisplay]);
 
   const handleAssistantRun = useCallback(async () => {
     if (!apiData) return;
@@ -433,7 +478,18 @@ export default function MapPage() {
     setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
   };
   const toggleSourcePack = (key: SourcePackKey) => {
-    setSourcePacks((prev) => ({ ...prev, [key]: !prev[key] }));
+    setSourcePacks((prev) => {
+      const nextEnabled = !prev[key];
+      if (nextEnabled) {
+        const deps = SOURCE_PACK_DEPENDENT_LAYERS[key];
+        setActiveLayers((current) => {
+          const next = { ...current };
+          for (const layer of deps) next[layer] = true;
+          return next;
+        });
+      }
+      return { ...prev, [key]: nextEnabled };
+    });
   };
 
   return (
@@ -561,6 +617,11 @@ export default function MapPage() {
           <div className="map-status-caption">
             Newly added high-volume feeds are off by default. Enable specific source packs above to pull extra near-live signals.
           </div>
+          {sourcePackLayerMismatch && (
+            <div className="map-pack-warning">
+              Source packs are enabled, but their mapped layers are off. Enable Live Strikes, News, or Infrastructure.
+            </div>
+          )}
 
           <div className="map-status-bar">
             <span>Visible points: {totalVisible.toLocaleString()}</span>
@@ -570,9 +631,7 @@ export default function MapPage() {
             <span>Range: {range}</span>
             <span>
               Source packs:{" "}
-              {SOURCE_PACKS.filter((s) => sourcePacks[s.key])
-                .map((s) => s.key)
-                .join(", ") || "core only"}
+              {enabledSourcePackKeys.join(", ") || "core only"}
             </span>
           </div>
           <div className="map-status-caption">Zoom in for more points to become visible.</div>
@@ -659,19 +718,25 @@ export default function MapPage() {
             )}
           </div>
 
-          <div className="map-provider-grid">
-            {providerHealth.map((p) => (
-              <div key={p.provider} className="map-provider-card">
-                <div>
-                  <div className="map-provider-name">{p.provider}</div>
-                  <div className="map-provider-note">{p.message || "No details"}</div>
+          <details className="map-provider-accordion">
+            <summary>
+              Adapter status: {providerSummary.ok}/{providerSummary.total} OK
+              {providerSummary.degraded > 0 ? `, ${providerSummary.degraded} degraded` : ""}
+            </summary>
+            <div className="map-provider-grid">
+              {providerHealthDisplay.map((p) => (
+                <div key={p.provider} className="map-provider-card">
+                  <div>
+                    <div className="map-provider-name">{p.provider}</div>
+                    <div className="map-provider-note">{p.message}</div>
+                  </div>
+                  <div className={p.ok ? "provider-ok" : "provider-bad"}>
+                    {p.ok ? "OK" : "DEGRADED"}
+                  </div>
                 </div>
-                <div className={p.ok ? "provider-ok" : "provider-bad"}>
-                  {p.ok ? "OK" : "DEGRADED"}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </details>
           {relayDigestHealth && !relayDigestHealth.ok && (
             <div className="map-relay-note">
               Relay seed digest is optional. If it is degraded, core map adapters still run; this usually means the relay endpoint timed out or aborted upstream.

@@ -63,13 +63,14 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
   return out.length ? out : defaults;
 }
 
-type SourcePackKey = "core" | "openSourceIntel" | "lawfareTroops";
+type SourcePackKey = "core" | "openSourceIntel" | "lawfareTroops" | "experimentalTrackers";
 
 const DEFAULT_SOURCE_PACKS: SourcePackKey[] = ["core"];
 const AVAILABLE_SOURCE_PACKS: SourcePackKey[] = [
   "core",
   "openSourceIntel",
   "lawfareTroops",
+  "experimentalTrackers",
 ];
 
 function parseSourcePacks(raw: string | null): SourcePackKey[] {
@@ -1105,6 +1106,7 @@ const CURATED_CONFLICT_FALLBACK = [
 const ACTIVE_CONFLICT_HIGHLIGHT_ALLOWLIST = new Set(
   CURATED_CONFLICT_FALLBACK.map((c) => normalizeCountryLabel(c).toLowerCase())
 );
+const COUNTRY_HIGHLIGHT_DENYLIST = new Set(["india", "democratic republic of the congo"]);
 
 const HIGH_REPEAT_EXCLUDE_RE =
   /\b(live updates?|minute by minute|opinion|editorial|analysis|watch live|breaking live blog)\b/i;
@@ -1727,8 +1729,9 @@ function buildHeadlinePointFromSource(params: {
   title: string;
   timestamp: string;
   idx: number;
+  sourceUrl?: string;
 }): IntelPoint | null {
-  const { source, title, timestamp, idx } = params;
+  const { source, title, timestamp, idx, sourceUrl } = params;
   const text = title.trim();
   if (!text) return null;
   const descriptor = classifyEvent(text);
@@ -1736,11 +1739,12 @@ function buildHeadlinePointFromSource(params: {
   if (!descriptor.isConflict && !gangSignal) return null;
 
   const city = extractMentionedCity(text);
-  const country = city?.country || extractMentionedCountry(text);
+  const region = extractRegionFallback(text);
+  const country = city?.country || extractMentionedCountry(text) || region?.country;
   if (!country) return null;
   const bbox = COUNTRY_BBOX[country];
-  const lat = city?.lat ?? bbox?.[4];
-  const lon = city?.lon ?? bbox?.[5];
+  const lat = city?.lat ?? bbox?.[4] ?? region?.lat;
+  const lon = city?.lon ?? bbox?.[5] ?? region?.lon;
   if (typeof lat !== "number" || typeof lon !== "number") return null;
 
   const kinetic = descriptor.isDirectKinetic;
@@ -1766,6 +1770,7 @@ function buildHeadlinePointFromSource(params: {
       short_label: descriptor.shortLabel,
       original_headline: text,
       source_category: "open_source_digest",
+      source_url: sourceUrl || null,
     },
   };
 }
@@ -1803,6 +1808,7 @@ async function fetchOpenSourceIntelSignals(rangeHours: number): Promise<{
         title: headings[i],
         timestamp: ts || nowIso,
         idx: i,
+        sourceUrl: adapter.url,
       });
       if (!point) continue;
       points.push(point);
@@ -1818,6 +1824,74 @@ async function fetchOpenSourceIntelSignals(rangeHours: number): Promise<{
       updatedAt: new Date().toISOString(),
       latencyMs: Date.now() - started,
       message: `Mapped ${deduped.length} points from ${okFeeds}/${adapters.length} sources (headlines parsed ${parsedHeadlines})`,
+    },
+  };
+}
+
+async function fetchExperimentalTrackerSignals(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const cutoff = Date.now() - rangeHours * 3600_000;
+  const nowIso = new Date().toISOString();
+  const adapters: Array<{ label: string; url: string }> = [
+    { label: "WarPulse", url: "https://warpulse.net/" },
+    { label: "WarStrikes", url: "https://warstrikes.com/" },
+    { label: "World Tension Watch", url: "https://worldtensionwatch.com/" },
+    { label: "Monitor the Situation", url: "https://monitor-the-situation.com/middle-east" },
+    { label: "Military Summary", url: "https://militarysummary.com/map" },
+    { label: "Vision of Humanity", url: "https://www.visionofhumanity.org/maps/#/" },
+  ];
+  const points: IntelPoint[] = [];
+  let okFeeds = 0;
+  let parsedHeadlines = 0;
+
+  for (const adapter of adapters) {
+    const fetchRes = await fetchTextWithRetries([adapter.url], 12000, 2);
+    if (!fetchRes.ok || !fetchRes.text) continue;
+    okFeeds += 1;
+    const headings = extractHtmlHeadlines(fetchRes.text);
+    const bodyFallback = extractVisibleBodyText(fetchRes.text)
+      .split(/\n+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 40)
+      .slice(0, 140);
+    const candidates = headings.concat(bodyFallback).slice(0, 420);
+    parsedHeadlines += candidates.length;
+    for (let i = 0; i < candidates.length; i += 1) {
+      const ts = new Date(Date.now() - i * 20000).toISOString();
+      if (Date.parse(ts) < cutoff) continue;
+      const point = buildHeadlinePointFromSource({
+        source: adapter.label,
+        title: candidates[i],
+        timestamp: ts || nowIso,
+        idx: i,
+        sourceUrl: adapter.url,
+      });
+      if (!point) continue;
+      points.push({
+        ...point,
+        id: `exp-${adapter.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${point.id}-${i}`,
+        confidence: Math.min(0.68, (point.confidence ?? 0.55) + 0.06),
+        metadata: {
+          ...point.metadata,
+          source_category: "experimental_tracker",
+          source_adapter: "experimental_tracker_pack",
+        },
+      });
+    }
+  }
+
+  const deduped = collapseRepeatedEvents(dedupeEventPoints(points, 0.5), "news").slice(0, 2600);
+  return {
+    points: deduped,
+    health: {
+      provider: "Experimental tracker feeds",
+      ok: deduped.length > 0,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message: `Mapped ${deduped.length} points from ${okFeeds}/${adapters.length} trackers (candidates parsed ${parsedHeadlines})`,
     },
   };
 }
@@ -1886,6 +1960,59 @@ async function fetchLawfareDomesticDeployments(rangeHours: number): Promise<{
     "https://www.lawfaremedia.org/projects-series/trials-of-the-trump-administration/tracking-domestic-deployments-of-the-u.s.-military";
   const fetchRes = await fetchTextWithRetries([url], 14000, 2);
   if (!fetchRes.ok || !fetchRes.text) {
+    const fallbackQuery = encodeURIComponent(
+      'site:lawfaremedia.org ("domestic deployments" OR "national guard" OR "military deployment")'
+    );
+    const rssFallback = await fetchTextWithRetries(buildGoogleNewsRssUrls(fallbackQuery), 12000, 2);
+    if (rssFallback.ok && rssFallback.text) {
+      const points: IntelPoint[] = [];
+      const blocks = rssFallback.text.split("<item>").slice(1, 240);
+      for (let i = 0; i < blocks.length; i += 1) {
+        const title = extractRssTag(blocks[i], "title") || "";
+        const description = extractRssTag(blocks[i], "description") || "";
+        const fullText = `${title} ${description}`.toLowerCase();
+        for (const [state, coord] of Object.entries(US_STATE_CENTROIDS)) {
+          if (!new RegExp(`\\b${state.replace(/\s+/g, "\\s+")}\\b`, "i").test(fullText)) continue;
+          const stateName = state
+            .split(" ")
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(" ");
+          points.push({
+            id: `lawfare-rss-${state.replace(/\s+/g, "-")}-${i}`,
+            layer: "infrastructure",
+            title: `US troop deployment signal in ${stateName}`,
+            subtitle: "Lawfare deployments tracker fallback (Google News RSS)",
+            lat: coord.lat,
+            lon: coord.lon,
+            country: "United States",
+            severity: "medium",
+            source: "Lawfare deployments tracker",
+            timestamp: new Date().toISOString(),
+            magnitude: 4.8,
+            confidence: 0.52,
+            metadata: {
+              event_type: "us_troop_deployment",
+              source_url: extractRssTag(blocks[i], "link") || url,
+              state: stateName,
+              original_headline: title || `Domestic deployment mention: ${stateName}`,
+            },
+          });
+        }
+      }
+      const fallbackDeduped = dedupeEventPoints(points, 6).slice(0, 180);
+      return {
+        points: fallbackDeduped,
+        health: {
+          provider: "Lawfare domestic deployments",
+          ok: fallbackDeduped.length > 0,
+          updatedAt: new Date().toISOString(),
+          latencyMs: Date.now() - started,
+          message: fallbackDeduped.length
+            ? `Mapped ${fallbackDeduped.length} state-level deployment signals via RSS fallback`
+            : `Lawfare page unavailable (${fetchRes.message ?? "fetch failed"}); RSS fallback returned no state-level matches`,
+        },
+      };
+    }
     return {
       points: [],
       health: {
@@ -2189,6 +2316,10 @@ function normalizeCountryLabel(country: string): string {
 function canonicalConflictCountry(country: string): string {
   const normalized = normalizeCountryLabel(country).toLowerCase();
   return CONFLICT_COUNTRY_ALIASES[normalized] ?? normalized;
+}
+
+function isCountryHighlightDenied(country: string): boolean {
+  return COUNTRY_HIGHLIGHT_DENYLIST.has(canonicalConflictCountry(country));
 }
 
 function rankSignalSeverity(points: IntelPoint[]): "low" | "medium" | "high" | "critical" {
@@ -2926,6 +3057,7 @@ function buildActiveConflictCountries(
   const push = (p: IntelPoint, weight: number) => {
     if (!p.country) return;
     const country = canonicalConflictCountry(p.country);
+    if (COUNTRY_HIGHLIGHT_DENYLIST.has(country)) return;
     const current = byCountry.get(country) ?? {
       score: 0,
       latestEventAt: p.timestamp,
@@ -2998,6 +3130,7 @@ function buildActiveConflictCountries(
   }
 
   return computed
+    .filter((c) => !isCountryHighlightDenied(c.country))
     .sort((a, b) => b.score - a.score)
     .slice(0, 35);
 }
@@ -3018,6 +3151,7 @@ function buildEscalationRiskCountries(
   const push = (p: IntelPoint, weight: number) => {
     if (!p.country) return;
     const key = canonicalConflictCountry(p.country);
+    if (COUNTRY_HIGHLIGHT_DENYLIST.has(key)) return;
     const ts = Date.parse(p.timestamp);
     if (!Number.isFinite(ts) || ts < earlierCutoff) return;
     const current = buckets.get(key) ?? {
@@ -3054,6 +3188,7 @@ function buildEscalationRiskCountries(
         signals: Array.from(b.signals).slice(0, 6),
       };
     })
+    .filter((c) => !isCountryHighlightDenied(c.country))
     .filter((c) => c.trend === "rising" && c.riskScore >= 4)
     .sort((a, b) => b.riskScore - a.riskScore)
     .slice(0, 45);
@@ -4510,6 +4645,7 @@ function buildConflictAdapterTelemetry(params: {
   rapid: IntelPoint[];
   rssNetwork: IntelPoint[];
   relaySeed: IntelPoint[];
+  experimentalTrackers: IntelPoint[];
 }): ProviderHealth {
   const {
     acled,
@@ -4520,6 +4656,7 @@ function buildConflictAdapterTelemetry(params: {
     rapid,
     rssNetwork,
     relaySeed,
+    experimentalTrackers,
   } = params;
   const total =
     acled.length +
@@ -4529,12 +4666,13 @@ function buildConflictAdapterTelemetry(params: {
     eventRegistry.length +
     rapid.length +
     rssNetwork.length +
-    relaySeed.length;
+    relaySeed.length +
+    experimentalTrackers.length;
   return {
     provider: "Conflict adapters",
     ok: total > 0,
     updatedAt: new Date().toISOString(),
-    message: `acled=${acled.length}; ucdp=${ucdp.length}; gdelt=${gdelt.length}; liveuamap=${liveuamap.length}; event_registry=${eventRegistry.length}; rapid=${rapid.length}; rss_network=${rssNetwork.length}; relay_seed=${relaySeed.length} [reason=${total > 0 ? "ok" : "all_empty"}]`,
+    message: `acled=${acled.length}; ucdp=${ucdp.length}; gdelt=${gdelt.length}; liveuamap=${liveuamap.length}; event_registry=${eventRegistry.length}; rapid=${rapid.length}; rss_network=${rssNetwork.length}; relay_seed=${relaySeed.length}; experimental=${experimentalTrackers.length} [reason=${total > 0 ? "ok" : "all_empty"}]`,
   };
 }
 
@@ -4592,6 +4730,7 @@ export async function GET(request: Request) {
       infraRes,
       openSourceIntelRes,
       lawfareDeployRes,
+      experimentalTrackersRes,
     ] =
       await Promise.all([
       fetchAcledConflicts(rangeHours),
@@ -4619,6 +4758,12 @@ export async function GET(request: Request) {
             points: [] as IntelPoint[],
             health: disabledAdapterHealth("Lawfare domestic deployments", "source_pack_disabled"),
           }),
+      sourcePackEnabled(sourcePacks, "experimentalTrackers")
+        ? fetchExperimentalTrackerSignals(rangeHours)
+        : Promise.resolve({
+            points: [] as IntelPoint[],
+            health: disabledAdapterHealth("Experimental tracker feeds", "source_pack_disabled"),
+          }),
     ]);
 
     const mergedConflicts = [...ucdpRes.points, ...acledRes.points]
@@ -4643,6 +4788,7 @@ export async function GET(request: Request) {
       ...liveuamapRes.points,
       ...eventRegistryStrikePoints,
       ...openSourceIntelRes.points.filter((p) => p.layer === "liveStrikes"),
+      ...experimentalTrackersRes.points.filter((p) => p.layer === "liveStrikes"),
       ...rssNetworkRes.points
         .filter((p) => {
           const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`.toLowerCase();
@@ -4680,6 +4826,7 @@ export async function GET(request: Request) {
       ...rssNetworkRes.points,
       ...relaySeedRes.points,
       ...openSourceIntelRes.points.filter((p) => p.layer === "news"),
+      ...experimentalTrackersRes.points.filter((p) => p.layer === "news"),
       ...gdeltRes.points.map((p, idx) => ({
         ...p,
         id: `gdelt-news-${p.id}-${idx}`,
@@ -4820,7 +4967,7 @@ export async function GET(request: Request) {
           provider: "Adapter telemetry",
           ok: true,
           updatedAt: new Date().toISOString(),
-          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
+          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
         },
         buildSourceAccessTelemetry(),
         buildConflictAdapterTelemetry({
@@ -4832,6 +4979,7 @@ export async function GET(request: Request) {
           rapid: rapidRes.points,
           rssNetwork: rssNetworkRes.points,
           relaySeed: relaySeedRes.points,
+          experimentalTrackers: experimentalTrackersRes.points,
         }),
         acledRes.health,
         ucdpRes.health,
@@ -4846,6 +4994,7 @@ export async function GET(request: Request) {
         relaySeedRes.health,
         openSourceIntelRes.health,
         lawfareDeployRes.health,
+        experimentalTrackersRes.health,
         {
           provider: "Carrier groups",
           ok: carrierGroups.length > 0,

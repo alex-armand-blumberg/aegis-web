@@ -1797,6 +1797,15 @@ footer {
   font-size: 11px;
   letter-spacing: 0.04em;
 }
+.map-page .map-pack-warning {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(120, 53, 15, 0.22);
+  color: rgba(254, 243, 199, 0.9);
+  font-size: 11px;
+}
 .map-page .map-error-banner {
   margin-bottom: 10px;
   padding: 10px 12px;
@@ -1868,7 +1877,25 @@ footer {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 10px;
+  margin-top: 10px;
+}
+.map-page .map-provider-accordion {
   margin-top: 14px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 8px;
+  background: rgba(2, 8, 20, 0.72);
+  padding: 8px 10px 10px;
+}
+.map-page .map-provider-accordion > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  color: #e2e8f0;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.map-page .map-provider-accordion > summary::-webkit-details-marker {
+  display: none;
 }
 .map-page .map-world-gauge {
   margin-bottom: 10px;
