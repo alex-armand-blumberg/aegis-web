@@ -34,6 +34,16 @@ const ALL_LAYERS: IntelLayerKey[] = [
   "infrastructure",
 ];
 
+type SourcePackKey = "openSourceIntel" | "lawfareTroops";
+const SOURCE_PACKS: Array<{
+  key: SourcePackKey;
+  label: string;
+  heavy: boolean;
+}> = [
+  { key: "openSourceIntel", label: "Open-source conflict digests (new)", heavy: true },
+  { key: "lawfareTroops", label: "US troop tracker (Lawfare, new)", heavy: true },
+];
+
 function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
   return {
     conflicts: true,
@@ -45,6 +55,13 @@ function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
     escalationRisk: true,
     hotspots: true,
     infrastructure: true,
+  };
+}
+
+function buildInitialSourcePackState(): Record<SourcePackKey, boolean> {
+  return {
+    openSourceIntel: false,
+    lawfareTroops: false,
   };
 }
 
@@ -82,6 +99,7 @@ export default function MapPage() {
   const [assistantAnswer, setAssistantAnswer] = useState("");
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState<string | null>(null);
+  const [sourcePacks, setSourcePacks] = useState(buildInitialSourcePackState);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const recenterRef = useRef<(() => void) | null>(null);
@@ -90,6 +108,10 @@ export default function MapPage() {
   const requestedLayerList = useMemo(
     () => ALL_LAYERS.filter((k) => activeLayers[k]).join(","),
     [activeLayers]
+  );
+  const requestedSourcePackList = useMemo(
+    () => SOURCE_PACKS.filter((s) => sourcePacks[s.key]).map((s) => s.key).join(","),
+    [sourcePacks]
   );
 
   const fetchData = useCallback(async () => {
@@ -101,6 +123,9 @@ export default function MapPage() {
         range,
         layers: requestedLayerList,
       });
+      if (requestedSourcePackList) {
+        params.set("sourcePacks", requestedSourcePackList);
+      }
       const res = await fetch(`/api/map?${params.toString()}`);
       const data = (await res.json()) as MapApiResponse & { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Failed to load map feeds");
@@ -111,7 +136,7 @@ export default function MapPage() {
     } finally {
       setLoading(false);
     }
-  }, [range, requestedLayerList]);
+  }, [range, requestedLayerList, requestedSourcePackList]);
 
   useEffect(() => {
     fetchData();
@@ -407,6 +432,9 @@ export default function MapPage() {
   const toggleLayer = (layer: IntelLayerKey) => {
     setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
   };
+  const toggleSourcePack = (key: SourcePackKey) => {
+    setSourcePacks((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   return (
     <div className="map-page min-h-screen text-[#e2e8f0]">
@@ -516,6 +544,23 @@ export default function MapPage() {
               </label>
             ))}
           </div>
+          <div className="map-layer-toolbar" style={{ marginTop: 8 }}>
+            {SOURCE_PACKS.map((pack) => (
+              <label key={pack.key} className="map-layer-toggle">
+                <input
+                  type="checkbox"
+                  checked={sourcePacks[pack.key]}
+                  onChange={() => toggleSourcePack(pack.key)}
+                />
+                <span className="map-layer-dot" style={{ background: "rgba(251,191,36,0.95)" }} />
+                <span>{pack.label}</span>
+                <span className="map-layer-count">{pack.heavy ? "HEAVY" : "ON"}</span>
+              </label>
+            ))}
+          </div>
+          <div className="map-status-caption">
+            Newly added high-volume feeds are off by default. Enable specific source packs above to pull extra near-live signals.
+          </div>
 
           <div className="map-status-bar">
             <span>Visible points: {totalVisible.toLocaleString()}</span>
@@ -523,6 +568,12 @@ export default function MapPage() {
               Updated: {apiData ? new Date(apiData.updatedAt).toLocaleTimeString() : "--"}
             </span>
             <span>Range: {range}</span>
+            <span>
+              Source packs:{" "}
+              {SOURCE_PACKS.filter((s) => sourcePacks[s.key])
+                .map((s) => s.key)
+                .join(", ") || "core only"}
+            </span>
           </div>
           <div className="map-status-caption">Zoom in for more points to become visible.</div>
 

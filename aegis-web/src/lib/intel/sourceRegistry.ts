@@ -438,5 +438,151 @@ export const WORLDMONITOR_RSS_NETWORK: MapSourceDescriptor[] = [
     layers: ["news", "liveStrikes"],
     domain: "alarabiya.net",
   },
+  {
+    id: "isw-map-room",
+    name: "Institute for the Study of War",
+    family: "news-network",
+    tier: "tier2",
+    layers: ["news", "liveStrikes", "conflicts"],
+    domain: "understandingwar.org",
+    notes: "Map room and theater assessments",
+  },
+  {
+    id: "critical-threats",
+    name: "Critical Threats Project",
+    family: "news-network",
+    tier: "tier2",
+    layers: ["news", "liveStrikes", "conflicts"],
+    domain: "criticalthreats.org",
+  },
+  {
+    id: "csis",
+    name: "CSIS",
+    family: "news-network",
+    tier: "tier2",
+    layers: ["news", "liveStrikes", "conflicts"],
+    domain: "csis.org",
+  },
+  {
+    id: "cfr-conflict-tracker",
+    name: "Council on Foreign Relations",
+    family: "news-network",
+    tier: "tier2",
+    layers: ["news", "conflicts"],
+    domain: "cfr.org",
+  },
+  {
+    id: "crisisgroup",
+    name: "International Crisis Group",
+    family: "news-network",
+    tier: "tier2",
+    layers: ["news", "conflicts", "liveStrikes"],
+    domain: "crisisgroup.org",
+  },
+  {
+    id: "lawfare",
+    name: "Lawfare",
+    family: "news-network",
+    tier: "tier2",
+    layers: ["news", "infrastructure"],
+    domain: "lawfaremedia.org",
+  },
+  {
+    id: "insight-crime",
+    name: "InSight Crime",
+    family: "news-network",
+    tier: "tier2",
+    layers: ["news", "conflicts"],
+    domain: "insightcrime.org",
+  },
+  {
+    id: "navcen",
+    name: "USCG NAVCEN",
+    family: "strategic-infrastructure",
+    tier: "tier2",
+    layers: ["infrastructure", "news"],
+    domain: "navcen.uscg.gov",
+  },
+  {
+    id: "vision-of-humanity",
+    name: "Vision of Humanity",
+    family: "conflict-events",
+    tier: "tier3",
+    layers: ["conflicts", "news"],
+    domain: "visionofhumanity.org",
+  },
+  {
+    id: "military-summary",
+    name: "Military Summary",
+    family: "news-network",
+    tier: "tier4",
+    layers: ["news", "liveStrikes"],
+    domain: "militarysummary.com",
+  },
+  {
+    id: "warpulse",
+    name: "WarPulse",
+    family: "news-network",
+    tier: "tier4",
+    layers: ["news", "liveStrikes", "conflicts"],
+    domain: "warpulse.net",
+  },
+  {
+    id: "warstrikes",
+    name: "WarStrikes",
+    family: "news-network",
+    tier: "tier4",
+    layers: ["news", "liveStrikes", "conflicts"],
+    domain: "warstrikes.com",
+  },
+  {
+    id: "world-tension-watch",
+    name: "World Tension Watch",
+    family: "news-network",
+    tier: "tier4",
+    layers: ["news", "conflicts"],
+    domain: "worldtensionwatch.com",
+  },
+  {
+    id: "monitor-the-situation",
+    name: "Monitor the Situation",
+    family: "news-network",
+    tier: "tier4",
+    layers: ["news", "liveStrikes", "vessels", "flights"],
+    domain: "monitor-the-situation.com",
+  },
+];
+
+export type SourceAccessMode =
+  | "direct_api"
+  | "public_rss_or_page"
+  | "credentialed_or_licensed"
+  | "blocked_or_paywalled";
+
+export const REQUESTED_SOURCE_ACCESS_MATRIX: Array<{
+  source: string;
+  mode: SourceAccessMode;
+  fallback: string | null;
+}> = [
+  { source: "LiveUAMap", mode: "credentialed_or_licensed", fallback: "GDELT + trusted RSS + rapid feed" },
+  { source: "WorldMonitor", mode: "blocked_or_paywalled", fallback: "WORLDMONITOR_RSS_NETWORK domains via Google News RSS" },
+  { source: "WSJ", mode: "blocked_or_paywalled", fallback: "Open Reuters/AP/BBC conflict RSS coverage" },
+  { source: "Copernicus Sentinel-1", mode: "public_rss_or_page", fallback: "Use only metadata/news context, not raw event stream" },
+  { source: "MarineTraffic", mode: "credentialed_or_licensed", fallback: "AISStream relay + USNI fleet tracker" },
+  { source: "ISW", mode: "public_rss_or_page", fallback: "Domain RSS/site query + page parser adapter" },
+  { source: "Critical Threats", mode: "public_rss_or_page", fallback: "Domain RSS/site query + page parser adapter" },
+  { source: "CSIS", mode: "public_rss_or_page", fallback: "Domain RSS/site query + page parser adapter" },
+  { source: "NAVCEN", mode: "public_rss_or_page", fallback: "Strategic infrastructure overlays + NAVCEN page parser" },
+  { source: "CFR Conflict Tracker", mode: "public_rss_or_page", fallback: "Conflict tracker parser + domain query" },
+  { source: "CrisisWatch", mode: "public_rss_or_page", fallback: "CrisisWatch parser + domain query" },
+  { source: "Vision of Humanity", mode: "public_rss_or_page", fallback: "Domain query + conflict context parser" },
+  { source: "Military Summary", mode: "public_rss_or_page", fallback: "Domain query if parse unavailable" },
+  { source: "WarPulse", mode: "public_rss_or_page", fallback: "Domain query if parse unavailable" },
+  { source: "WarStrikes", mode: "public_rss_or_page", fallback: "Domain query if parse unavailable" },
+  { source: "World Tension Watch", mode: "public_rss_or_page", fallback: "Domain query if parse unavailable" },
+  { source: "Monitor the Situation", mode: "public_rss_or_page", fallback: "Domain query + parser when available" },
+  { source: "Lawfare deployments", mode: "public_rss_or_page", fallback: "Dedicated parser for domestic deployment markers" },
+  { source: "InSight Crime", mode: "public_rss_or_page", fallback: "Domain RSS/site query + parser for gang events" },
+  { source: "Starboard Intelligence", mode: "credentialed_or_licensed", fallback: "AIS/open maritime sources only" },
 ];
 

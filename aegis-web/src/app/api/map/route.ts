@@ -11,6 +11,7 @@ import type {
 } from "@/lib/intel/types";
 import {
   MAP_SOURCE_FAMILY_MATRIX,
+  REQUESTED_SOURCE_ACCESS_MATRIX,
   WORLDMONITOR_RSS_NETWORK,
 } from "@/lib/intel/sourceRegistry";
 
@@ -60,6 +61,31 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
     .map((s) => s.trim())
     .filter((s): s is IntelLayerKey => allowed.has(s as IntelLayerKey));
   return out.length ? out : defaults;
+}
+
+type SourcePackKey = "core" | "openSourceIntel" | "lawfareTroops";
+
+const DEFAULT_SOURCE_PACKS: SourcePackKey[] = ["core"];
+const AVAILABLE_SOURCE_PACKS: SourcePackKey[] = [
+  "core",
+  "openSourceIntel",
+  "lawfareTroops",
+];
+
+function parseSourcePacks(raw: string | null): SourcePackKey[] {
+  if (!raw?.trim()) return DEFAULT_SOURCE_PACKS;
+  const allowed = new Set<SourcePackKey>(AVAILABLE_SOURCE_PACKS);
+  const parsed = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s): s is SourcePackKey => allowed.has(s as SourcePackKey));
+  if (!parsed.length) return DEFAULT_SOURCE_PACKS;
+  if (!parsed.includes("core")) parsed.unshift("core");
+  return Array.from(new Set(parsed));
+}
+
+function sourcePackEnabled(active: SourcePackKey[], key: SourcePackKey): boolean {
+  return active.includes(key);
 }
 
 async function timedJsonFetch<T>(
@@ -658,6 +684,7 @@ function extractOpenSkyMilitaryPoints(
         vertical_rate_ms: verticalRate,
         squawk: squawk || null,
         icao24: icao24 || null,
+        callsign: callsign || null,
         origin_country: country || null,
         on_ground: onGround,
         aircraft_role: role,
@@ -774,6 +801,8 @@ async function fetchOpenSkyFlights(): Promise<{
         speed_kts: speedKts,
         altitude_m: altitude,
         icao24: String(flight.hex ?? "").trim() || null,
+        callsign: String(flight.flight ?? "").trim() || null,
+        hex: String(flight.hex ?? "").trim() || null,
       },
     });
   }
@@ -1394,6 +1423,32 @@ function normalizeHeadlineForCluster(text: string): string {
     .join(" ");
 }
 
+function normalizeEventEntitySignature(point: IntelPoint): string {
+  const idCandidates = [
+    String(point.metadata?.mmsi ?? "").trim(),
+    String(point.metadata?.imo ?? "").trim(),
+    String(point.metadata?.icao24 ?? "").trim(),
+    String(point.metadata?.callsign ?? "").trim().toUpperCase(),
+    String(point.metadata?.hex ?? "").trim().toLowerCase(),
+  ].filter(Boolean);
+  if (idCandidates.length > 0) return idCandidates.join("|");
+  const titleSig = normalizeHeadlineForCluster(`${point.title ?? ""} ${point.subtitle ?? ""}`);
+  return titleSig.slice(0, 90);
+}
+
+function normalizeSourceUrlKey(point: IntelPoint): string {
+  const sourceUrl = String(point.metadata?.source_url ?? "").trim();
+  if (!sourceUrl || (!sourceUrl.startsWith("http://") && !sourceUrl.startsWith("https://"))) {
+    return "";
+  }
+  try {
+    const u = new URL(sourceUrl);
+    return `${u.hostname.replace(/^www\./, "")}${u.pathname}`.toLowerCase().slice(0, 140);
+  } catch {
+    return "";
+  }
+}
+
 function extractPublisherFromTitle(title: string): string {
   const parts = title.split(" - ").map((p) => p.trim()).filter(Boolean);
   if (parts.length >= 2) return parts[parts.length - 1];
@@ -1420,6 +1475,8 @@ function dedupeEventPoints(points: IntelPoint[], bucketHours = 1): IntelPoint[] 
     const headlineBase = normalizeHeadlineForCluster(
       String(p.metadata?.original_headline ?? p.title ?? "")
     );
+    const entitySignature = normalizeEventEntitySignature(p);
+    const sourceUrlKey = normalizeSourceUrlKey(p);
     const eventType = String(p.metadata?.event_type ?? "generic").toLowerCase();
     const coordStep =
       p.layer === "liveStrikes" ? 0.12 : p.layer === "news" ? 0.2 : p.layer === "conflicts" ? 0.5 : 0.3;
@@ -1438,7 +1495,7 @@ function dedupeEventPoints(points: IntelPoint[], bucketHours = 1): IntelPoint[] 
       p.layer === "news" || p.layer === "liveStrikes"
         ? (sourceHost || String(p.source || "").toLowerCase().slice(0, 40))
         : "source-agnostic";
-    const key = `${headlineBase}|${eventType}|${(p.country ?? "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}|${p.layer}|${sourceKey}`;
+    const key = `${headlineBase}|${entitySignature}|${eventType}|${(p.country ?? "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}|${p.layer}|${sourceKey}|${sourceUrlKey}`;
     const current = seen.get(key);
     if (!current || p.timestamp > current.timestamp) seen.set(key, p);
   }
@@ -1457,8 +1514,10 @@ function collapseRepeatedEvents(points: IntelPoint[], layer: "news" | "liveStrik
     const headlineBase = normalizeHeadlineForCluster(
       String(p.metadata?.original_headline ?? p.title ?? "")
     );
+    const entitySignature = normalizeEventEntitySignature(p);
+    const sourceUrlKey = normalizeSourceUrlKey(p);
     const eventType = String(p.metadata?.event_type ?? "generic").toLowerCase();
-    const key = `${headlineBase}|${eventType}|${(p.country ?? "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}`;
+    const key = `${headlineBase}|${entitySignature}|${eventType}|${(p.country ?? "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}|${sourceUrlKey}`;
     const current = keep.get(key);
     if (!current) {
       keep.set(key, p);
@@ -1619,6 +1678,271 @@ function parseRssConflictPoints(
     totalItems: itemBlocks.length,
     conflictCandidates,
     geoMapped,
+  };
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&nbsp;/gi, " ");
+}
+
+function extractHtmlHeadlines(html: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const headingRe = /<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/gi;
+  for (const match of html.matchAll(headingRe)) {
+    const raw = match[1]
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const text = decodeHtmlEntities(raw);
+    if (!text || text.length < 18 || text.length > 240) continue;
+    const normalized = text.toLowerCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(text);
+    if (out.length >= 180) break;
+  }
+  return out;
+}
+
+function extractVisibleBodyText(html: string): string {
+  return decodeHtmlEntities(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+function buildHeadlinePointFromSource(params: {
+  source: string;
+  title: string;
+  timestamp: string;
+  idx: number;
+}): IntelPoint | null {
+  const { source, title, timestamp, idx } = params;
+  const text = title.trim();
+  if (!text) return null;
+  const descriptor = classifyEvent(text);
+  const gangSignal = /\b(cartel|gang|narco|organized crime|homicide|kidnapp|extortion)\b/i.test(text);
+  if (!descriptor.isConflict && !gangSignal) return null;
+
+  const city = extractMentionedCity(text);
+  const country = city?.country || extractMentionedCountry(text);
+  if (!country) return null;
+  const bbox = COUNTRY_BBOX[country];
+  const lat = city?.lat ?? bbox?.[4];
+  const lon = city?.lon ?? bbox?.[5];
+  if (typeof lat !== "number" || typeof lon !== "number") return null;
+
+  const kinetic = descriptor.isDirectKinetic;
+  const layer = kinetic ? "liveStrikes" : ("news" as const);
+  const cleanId = source.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return {
+    id: `${cleanId}-${layer}-${Date.parse(timestamp)}-${idx}`,
+    layer,
+    title: city
+      ? `${descriptor.shortLabel || "Conflict signal"} near ${city.city}`
+      : `${descriptor.shortLabel || "Conflict signal"} in ${country}`,
+    subtitle: text,
+    lat,
+    lon,
+    country,
+    severity: kinetic ? "high" : gangSignal ? "high" : city ? "medium" : "low",
+    source,
+    timestamp,
+    magnitude: kinetic ? 9 : gangSignal ? 7 : 5,
+    confidence: kinetic ? 0.61 : 0.56,
+    metadata: {
+      event_type: gangSignal && !descriptor.isConflict ? "organized_crime_signal" : descriptor.eventType,
+      short_label: descriptor.shortLabel,
+      original_headline: text,
+      source_category: "open_source_digest",
+    },
+  };
+}
+
+async function fetchOpenSourceIntelSignals(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const cutoff = Date.now() - rangeHours * 3600_000;
+  const nowIso = new Date().toISOString();
+  const adapters: Array<{ label: string; url: string }> = [
+    { label: "ISW Map Room", url: "https://understandingwar.org/analysis/map-room/" },
+    { label: "Critical Threats", url: "https://www.criticalthreats.org/" },
+    { label: "CSIS", url: "https://www.csis.org/" },
+    { label: "CFR Conflict Tracker", url: "https://www.cfr.org/global-conflict-tracker" },
+    { label: "CrisisWatch", url: "https://www.crisisgroup.org/crisiswatch" },
+    { label: "InSight Crime", url: "https://insightcrime.org/" },
+  ];
+  const points: IntelPoint[] = [];
+  let okFeeds = 0;
+  let parsedHeadlines = 0;
+
+  for (const adapter of adapters) {
+    const fetchRes = await fetchTextWithRetries([adapter.url], 12000, 1);
+    if (!fetchRes.ok || !fetchRes.text) continue;
+    okFeeds += 1;
+    const headings = extractHtmlHeadlines(fetchRes.text);
+    parsedHeadlines += headings.length;
+    for (let i = 0; i < headings.length; i += 1) {
+      const ts = new Date(Date.now() - i * 30000).toISOString();
+      if (Date.parse(ts) < cutoff) continue;
+      const point = buildHeadlinePointFromSource({
+        source: adapter.label,
+        title: headings[i],
+        timestamp: ts || nowIso,
+        idx: i,
+      });
+      if (!point) continue;
+      points.push(point);
+    }
+  }
+
+  const deduped = dedupeEventPoints(points, 0.75).slice(0, 2400);
+  return {
+    points: deduped,
+    health: {
+      provider: "Open-source conflict digests",
+      ok: deduped.length > 0,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message: `Mapped ${deduped.length} points from ${okFeeds}/${adapters.length} sources (headlines parsed ${parsedHeadlines})`,
+    },
+  };
+}
+
+const US_STATE_CENTROIDS: Record<string, { lat: number; lon: number }> = {
+  alabama: { lat: 32.806671, lon: -86.79113 },
+  alaska: { lat: 61.370716, lon: -152.404419 },
+  arizona: { lat: 33.729759, lon: -111.431221 },
+  arkansas: { lat: 34.969704, lon: -92.373123 },
+  california: { lat: 36.116203, lon: -119.681564 },
+  colorado: { lat: 39.059811, lon: -105.311104 },
+  connecticut: { lat: 41.597782, lon: -72.755371 },
+  delaware: { lat: 39.318523, lon: -75.507141 },
+  florida: { lat: 27.766279, lon: -81.686783 },
+  georgia: { lat: 33.040619, lon: -83.643074 },
+  hawaii: { lat: 21.094318, lon: -157.498337 },
+  idaho: { lat: 44.240459, lon: -114.478828 },
+  illinois: { lat: 40.349457, lon: -88.986137 },
+  indiana: { lat: 39.849426, lon: -86.258278 },
+  iowa: { lat: 42.011539, lon: -93.210526 },
+  kansas: { lat: 38.5266, lon: -96.726486 },
+  kentucky: { lat: 37.66814, lon: -84.670067 },
+  louisiana: { lat: 31.169546, lon: -91.867805 },
+  maine: { lat: 44.693947, lon: -69.381927 },
+  maryland: { lat: 39.063946, lon: -76.802101 },
+  massachusetts: { lat: 42.230171, lon: -71.530106 },
+  michigan: { lat: 43.326618, lon: -84.536095 },
+  minnesota: { lat: 45.694454, lon: -93.900192 },
+  mississippi: { lat: 32.741646, lon: -89.678696 },
+  missouri: { lat: 38.456085, lon: -92.288368 },
+  montana: { lat: 46.921925, lon: -110.454353 },
+  nebraska: { lat: 41.12537, lon: -98.268082 },
+  nevada: { lat: 38.313515, lon: -117.055374 },
+  "new hampshire": { lat: 43.452492, lon: -71.563896 },
+  "new jersey": { lat: 40.298904, lon: -74.521011 },
+  "new mexico": { lat: 34.840515, lon: -106.248482 },
+  "new york": { lat: 42.165726, lon: -74.948051 },
+  "north carolina": { lat: 35.630066, lon: -79.806419 },
+  "north dakota": { lat: 47.528912, lon: -99.784012 },
+  ohio: { lat: 40.388783, lon: -82.764915 },
+  oklahoma: { lat: 35.565342, lon: -96.928917 },
+  oregon: { lat: 44.572021, lon: -122.070938 },
+  pennsylvania: { lat: 40.590752, lon: -77.209755 },
+  "rhode island": { lat: 41.680893, lon: -71.51178 },
+  "south carolina": { lat: 33.856892, lon: -80.945007 },
+  "south dakota": { lat: 44.299782, lon: -99.438828 },
+  tennessee: { lat: 35.747845, lon: -86.692345 },
+  texas: { lat: 31.054487, lon: -97.563461 },
+  utah: { lat: 40.150032, lon: -111.862434 },
+  vermont: { lat: 44.045876, lon: -72.710686 },
+  virginia: { lat: 37.769337, lon: -78.169968 },
+  washington: { lat: 47.400902, lon: -121.490494 },
+  "west virginia": { lat: 38.491226, lon: -80.954453 },
+  wisconsin: { lat: 44.268543, lon: -89.616508 },
+  wyoming: { lat: 42.755966, lon: -107.30249 },
+  "district of columbia": { lat: 38.9072, lon: -77.0369 },
+};
+
+async function fetchLawfareDomesticDeployments(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const cutoff = Date.now() - rangeHours * 3600_000;
+  const url =
+    "https://www.lawfaremedia.org/projects-series/trials-of-the-trump-administration/tracking-domestic-deployments-of-the-u.s.-military";
+  const fetchRes = await fetchTextWithRetries([url], 14000, 2);
+  if (!fetchRes.ok || !fetchRes.text) {
+    return {
+      points: [],
+      health: {
+        provider: "Lawfare domestic deployments",
+        ok: false,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: fetchRes.message ?? "Could not load Lawfare tracker page",
+      },
+    };
+  }
+
+  const text = extractVisibleBodyText(fetchRes.text).toLowerCase();
+  const points: IntelPoint[] = [];
+  const ts = new Date().toISOString();
+  if (Date.parse(ts) >= cutoff) {
+    for (const [state, coord] of Object.entries(US_STATE_CENTROIDS)) {
+      if (!new RegExp(`\\b${state.replace(/\s+/g, "\\s+")}\\b`, "i").test(text)) continue;
+      const stateName = state
+        .split(" ")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+      points.push({
+        id: `lawfare-deploy-${state.replace(/\s+/g, "-")}`,
+        layer: "infrastructure",
+        title: `US troop deployment signal in ${stateName}`,
+        subtitle: "Domestic deployment tracker mention",
+        lat: coord.lat,
+        lon: coord.lon,
+        country: "United States",
+        severity: "medium",
+        source: "Lawfare deployments tracker",
+        timestamp: ts,
+        magnitude: 5,
+        confidence: 0.58,
+        metadata: {
+          event_type: "us_troop_deployment",
+          source_url: url,
+          state: stateName,
+          original_headline: `Domestic deployment mention: ${stateName}`,
+        },
+      });
+    }
+  }
+
+  const deduped = dedupeEventPoints(points, 6).slice(0, 180);
+  return {
+    points: deduped,
+    health: {
+      provider: "Lawfare domestic deployments",
+      ok: deduped.length > 0,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message: deduped.length
+        ? `Mapped ${deduped.length} state-level domestic deployment signals`
+        : "No state-level deployment mentions parsed from tracker page",
+    },
   };
 }
 
@@ -3183,7 +3507,33 @@ function dedupeVesselPoints(points: IntelPoint[]): IntelPoint[] {
     const roundedLat = Math.round(p.lat * 2) / 2;
     const roundedLon = Math.round(p.lon * 2) / 2;
     const bucket = Math.floor(Date.parse(p.timestamp || new Date().toISOString()) / (8 * 3600_000));
-    const key = `${(p.title || "").toLowerCase()}|${(p.country || "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}`;
+    const objectId = [
+      String(p.metadata?.mmsi ?? "").trim(),
+      String(p.metadata?.imo ?? "").trim(),
+      String(p.metadata?.callsign ?? "").trim().toUpperCase(),
+      String(p.metadata?.hex ?? "").trim().toLowerCase(),
+      String(p.metadata?.icao24 ?? "").trim().toLowerCase(),
+    ]
+      .filter(Boolean)
+      .join("|");
+    const key = `${objectId || (p.title || "").toLowerCase()}|${(p.country || "").toLowerCase()}|${roundedLat}|${roundedLon}|${bucket}`;
+    const current = byKey.get(key);
+    if (!current || p.timestamp > current.timestamp) byKey.set(key, p);
+  }
+  return Array.from(byKey.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+function dedupeFlightPoints(points: IntelPoint[]): IntelPoint[] {
+  const byKey = new Map<string, IntelPoint>();
+  for (const p of points) {
+    const roundedLat = Math.round(p.lat / 0.35) * 0.35;
+    const roundedLon = Math.round(p.lon / 0.35) * 0.35;
+    const bucket = Math.floor(Date.parse(p.timestamp || new Date().toISOString()) / (2 * 3600_000));
+    const icao = String(p.metadata?.icao24 ?? "").trim().toLowerCase();
+    const callsign = String(p.metadata?.callsign ?? p.title ?? "")
+      .trim()
+      .toUpperCase();
+    const key = `${icao || callsign}|${roundedLat}|${roundedLon}|${bucket}`;
     const current = byKey.get(key);
     if (!current || p.timestamp > current.timestamp) byKey.set(key, p);
   }
@@ -3422,6 +3772,7 @@ async function fetchVesselSignals(): Promise<{
       metadata: {
         speed_knots: speed,
         inferred_military_movement: inferredMilitaryMovement,
+        mmsi: String(v.id ?? "").trim() || null,
       },
     });
   }
@@ -4187,11 +4538,42 @@ function buildConflictAdapterTelemetry(params: {
   };
 }
 
+function disabledAdapterHealth(provider: string, reason: string): ProviderHealth {
+  return {
+    provider,
+    ok: true,
+    updatedAt: new Date().toISOString(),
+    message: `${provider} skipped (${reason})`,
+  };
+}
+
+function buildSourceAccessTelemetry(): ProviderHealth {
+  const counters = {
+    direct: 0,
+    public: 0,
+    credentialed: 0,
+    blocked: 0,
+  };
+  for (const row of REQUESTED_SOURCE_ACCESS_MATRIX) {
+    if (row.mode === "direct_api") counters.direct += 1;
+    else if (row.mode === "public_rss_or_page") counters.public += 1;
+    else if (row.mode === "credentialed_or_licensed") counters.credentialed += 1;
+    else if (row.mode === "blocked_or_paywalled") counters.blocked += 1;
+  }
+  return {
+    provider: "Requested source access matrix",
+    ok: true,
+    updatedAt: new Date().toISOString(),
+    message: `direct=${counters.direct}; public=${counters.public}; credentialed=${counters.credentialed}; blocked=${counters.blocked}`,
+  };
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const range = searchParams.get("range") ?? "7d";
     const requestedLayers = parseLayers(searchParams.get("layers"));
+    const sourcePacks = parseSourcePacks(searchParams.get("sourcePacks"));
     const rangeHours = rangeToHours(range);
 
     const [
@@ -4208,6 +4590,8 @@ export async function GET(request: Request) {
       rssNetworkRes,
       relaySeedRes,
       infraRes,
+      openSourceIntelRes,
+      lawfareDeployRes,
     ] =
       await Promise.all([
       fetchAcledConflicts(rangeHours),
@@ -4223,6 +4607,18 @@ export async function GET(request: Request) {
       fetchRssNetworkSignals(rangeHours),
       fetchRelaySeedSignals(rangeHours),
       fetchStrategicInfrastructure(),
+      sourcePackEnabled(sourcePacks, "openSourceIntel")
+        ? fetchOpenSourceIntelSignals(rangeHours)
+        : Promise.resolve({
+            points: [] as IntelPoint[],
+            health: disabledAdapterHealth("Open-source conflict digests", "source_pack_disabled"),
+          }),
+      sourcePackEnabled(sourcePacks, "lawfareTroops")
+        ? fetchLawfareDomesticDeployments(rangeHours)
+        : Promise.resolve({
+            points: [] as IntelPoint[],
+            health: disabledAdapterHealth("Lawfare domestic deployments", "source_pack_disabled"),
+          }),
     ]);
 
     const mergedConflicts = [...ucdpRes.points, ...acledRes.points]
@@ -4246,6 +4642,7 @@ export async function GET(request: Request) {
       ...gdeltRes.points,
       ...liveuamapRes.points,
       ...eventRegistryStrikePoints,
+      ...openSourceIntelRes.points.filter((p) => p.layer === "liveStrikes"),
       ...rssNetworkRes.points
         .filter((p) => {
           const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`.toLowerCase();
@@ -4282,6 +4679,7 @@ export async function GET(request: Request) {
       ...eventRegistryRes.points,
       ...rssNetworkRes.points,
       ...relaySeedRes.points,
+      ...openSourceIntelRes.points.filter((p) => p.layer === "news"),
       ...gdeltRes.points.map((p, idx) => ({
         ...p,
         id: `gdelt-news-${p.id}-${idx}`,
@@ -4329,6 +4727,7 @@ export async function GET(request: Request) {
         .slice(0, 15600);
       fusedNewsPoints = collapseRepeatedEvents(densityBackfill, "news");
     }
+    const dedupedFlights = dedupeFlightPoints(flightsRes.points).slice(0, 2200);
     const mergedVesselPoints = dedupeVesselPoints([
       ...usniVesselsRes.points,
       ...vesselsRes.points,
@@ -4382,13 +4781,16 @@ export async function GET(request: Request) {
     const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
       conflicts: mergedConflicts,
       liveStrikes: dedupedLiveStrikes,
-      flights: flightsRes.points,
+      flights: dedupedFlights,
       vessels: mergedVesselPoints,
       carriers: carrierGroups,
       news: fusedNewsPoints,
       escalationRisk: escalationRiskPoints,
       hotspots: [],
-      infrastructure: infraRes.points,
+      infrastructure: dedupeEventPoints(
+        [...infraRes.points, ...lawfareDeployRes.points.filter((p) => p.layer === "infrastructure")],
+        6
+      ).slice(0, 2200),
     };
 
     baseLayers.hotspots = buildHotspots(baseLayers);
@@ -4418,8 +4820,9 @@ export async function GET(request: Request) {
           provider: "Adapter telemetry",
           ok: true,
           updatedAt: new Date().toISOString(),
-          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; flights=${flightsRes.points.length}; vessels=${mergedVesselPoints.length}; infrastructure=${infraRes.points.length} [reason=adapter_metrics]`,
+          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
         },
+        buildSourceAccessTelemetry(),
         buildConflictAdapterTelemetry({
           acled: acledRes.points,
           ucdp: ucdpRes.points,
@@ -4441,6 +4844,8 @@ export async function GET(request: Request) {
         vesselsRes.health,
         rssNetworkRes.health,
         relaySeedRes.health,
+        openSourceIntelRes.health,
+        lawfareDeployRes.health,
         {
           provider: "Carrier groups",
           ok: carrierGroups.length > 0,
@@ -4450,10 +4855,10 @@ export async function GET(request: Request) {
             : "No carrier groups detected in current AIS window",
         },
         buildMilitaryInfraTelemetry({
-          flights: flightsRes.points,
+          flights: dedupedFlights,
           vessels: mergedVesselPoints,
           carriers: carrierGroups,
-          infrastructure: infraRes.points,
+          infrastructure: baseLayers.infrastructure,
         }),
         frontline.health,
         newsRes.health,
