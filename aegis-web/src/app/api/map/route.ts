@@ -65,7 +65,12 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
 
 type SourcePackKey = "core" | "openSourceIntel" | "lawfareTroops" | "experimentalTrackers";
 
-const DEFAULT_SOURCE_PACKS: SourcePackKey[] = ["core"];
+const DEFAULT_SOURCE_PACKS: SourcePackKey[] = [
+  "core",
+  "openSourceIntel",
+  "lawfareTroops",
+  "experimentalTrackers",
+];
 const AVAILABLE_SOURCE_PACKS: SourcePackKey[] = [
   "core",
   "openSourceIntel",
@@ -83,10 +88,6 @@ function parseSourcePacks(raw: string | null): SourcePackKey[] {
   if (!parsed.length) return DEFAULT_SOURCE_PACKS;
   if (!parsed.includes("core")) parsed.unshift("core");
   return Array.from(new Set(parsed));
-}
-
-function sourcePackEnabled(active: SourcePackKey[], key: SourcePackKey): boolean {
-  return active.includes(key);
 }
 
 async function timedJsonFetch<T>(
@@ -1892,6 +1893,89 @@ async function fetchExperimentalTrackerSignals(rangeHours: number): Promise<{
       updatedAt: new Date().toISOString(),
       latencyMs: Date.now() - started,
       message: `Mapped ${deduped.length} points from ${okFeeds}/${adapters.length} trackers (candidates parsed ${parsedHeadlines})`,
+    },
+  };
+}
+
+async function fetchRequestedDomainLiveSignals(rangeHours: number): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+}> {
+  const started = Date.now();
+  const cutoff = Date.now() - rangeHours * 3600_000;
+  const feeds: Array<{ provider: string; domain: string; focus: string }> = [
+    { provider: "ISW Map Room", domain: "understandingwar.org", focus: "ukraine OR iran OR israel OR frontline OR strike" },
+    { provider: "Critical Threats", domain: "criticalthreats.org", focus: "iran OR strike OR missile OR drone OR offensive" },
+    { provider: "CSIS", domain: "csis.org", focus: "war OR strike OR missile OR drone OR military operation" },
+    { provider: "CFR Conflict Tracker", domain: "cfr.org", focus: "conflict OR tracker OR civil war OR confrontation" },
+    { provider: "CrisisWatch", domain: "crisisgroup.org", focus: "conflict risk OR crisiswatch OR escalation OR war" },
+    { provider: "WarPulse", domain: "warpulse.net", focus: "strike OR missile OR drone OR attack OR theater" },
+    { provider: "WarStrikes", domain: "warstrikes.com", focus: "strike OR missile OR drone OR military conflict" },
+    { provider: "World Tension Watch", domain: "worldtensionwatch.com", focus: "military OR conflict OR escalation OR diplomatic crisis" },
+    { provider: "Monitor the Situation", domain: "monitor-the-situation.com", focus: "military planes OR vessels OR strike OR conflict" },
+    { provider: "Military Summary", domain: "militarysummary.com", focus: "frontline OR strike OR battlefield OR conflict map" },
+    { provider: "Vision of Humanity", domain: "visionofhumanity.org", focus: "conflict OR escalation OR violence OR war index" },
+    { provider: "InSight Crime", domain: "insightcrime.org", focus: "cartel OR gang violence OR armed clash OR criminal violence" },
+    { provider: "USCG NAVCEN", domain: "navcen.uscg.gov", focus: "ais OR maritime safety OR vessel traffic OR nav warning" },
+    { provider: "WorldMonitor", domain: "worldmonitor.app", focus: "conflict OR strike OR military OR hotspot" },
+    { provider: "LiveUAMap web", domain: "liveuamap.com", focus: "missile OR strike OR shelling OR drone OR attack" },
+  ];
+  const seen = new Set<string>();
+  const points: IntelPoint[] = [];
+  let okFeeds = 0;
+  let totalItems = 0;
+  let conflictCandidates = 0;
+  let geoMapped = 0;
+  let failedFeeds = 0;
+
+  for (const feed of feeds) {
+    const liveQuery = encodeURIComponent(
+      `site:${feed.domain} (${feed.focus}) (missile OR strike OR drone OR shelling OR artillery OR battle OR incursion)`
+    );
+    const newsQuery = encodeURIComponent(`site:${feed.domain} (${feed.focus}) (conflict OR crisis OR military)`);
+    const liveRes = await fetchTextWithRetries(buildGoogleNewsRssUrls(liveQuery), 12000, 2);
+    if (!liveRes.ok || !liveRes.text) {
+      failedFeeds += 1;
+      continue;
+    }
+    okFeeds += 1;
+    const parsedLive = parseRssConflictPoints(
+      liveRes.text,
+      cutoff,
+      `${feed.provider} (domain live)`,
+      "liveStrikes",
+      seen
+    );
+    points.push(...parsedLive.points);
+    totalItems += parsedLive.totalItems;
+    conflictCandidates += parsedLive.conflictCandidates;
+    geoMapped += parsedLive.geoMapped;
+
+    const newsRes = await fetchTextWithRetries(buildGoogleNewsRssUrls(newsQuery), 12000, 1);
+    if (newsRes.ok && newsRes.text) {
+      const parsedNews = parseRssConflictPoints(
+        newsRes.text,
+        cutoff,
+        `${feed.provider} (domain live)`,
+        "news",
+        seen
+      );
+      points.push(...parsedNews.points);
+      totalItems += parsedNews.totalItems;
+      conflictCandidates += parsedNews.conflictCandidates;
+      geoMapped += parsedNews.geoMapped;
+    }
+  }
+
+  const deduped = collapseRepeatedEvents(dedupeEventPoints(points, 0.5), "news").slice(0, 3200);
+  return {
+    points: deduped,
+    health: {
+      provider: "Requested domain live feeds",
+      ok: deduped.length > 0,
+      updatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      message: `Mapped ${deduped.length} points from ${okFeeds}/${feeds.length} domains (items ${totalItems}, candidates ${conflictCandidates}, geocoded ${geoMapped}) [reason=${failedFeeds > 0 ? "partial_fetch_failure" : "ok"}]`,
     },
   };
 }
@@ -4646,6 +4730,7 @@ function buildConflictAdapterTelemetry(params: {
   rssNetwork: IntelPoint[];
   relaySeed: IntelPoint[];
   experimentalTrackers: IntelPoint[];
+  requestedDomainLive: IntelPoint[];
 }): ProviderHealth {
   const {
     acled,
@@ -4657,6 +4742,7 @@ function buildConflictAdapterTelemetry(params: {
     rssNetwork,
     relaySeed,
     experimentalTrackers,
+    requestedDomainLive,
   } = params;
   const total =
     acled.length +
@@ -4667,21 +4753,13 @@ function buildConflictAdapterTelemetry(params: {
     rapid.length +
     rssNetwork.length +
     relaySeed.length +
-    experimentalTrackers.length;
+    experimentalTrackers.length +
+    requestedDomainLive.length;
   return {
     provider: "Conflict adapters",
     ok: total > 0,
     updatedAt: new Date().toISOString(),
-    message: `acled=${acled.length}; ucdp=${ucdp.length}; gdelt=${gdelt.length}; liveuamap=${liveuamap.length}; event_registry=${eventRegistry.length}; rapid=${rapid.length}; rss_network=${rssNetwork.length}; relay_seed=${relaySeed.length}; experimental=${experimentalTrackers.length} [reason=${total > 0 ? "ok" : "all_empty"}]`,
-  };
-}
-
-function disabledAdapterHealth(provider: string, reason: string): ProviderHealth {
-  return {
-    provider,
-    ok: true,
-    updatedAt: new Date().toISOString(),
-    message: `${provider} skipped (${reason})`,
+    message: `acled=${acled.length}; ucdp=${ucdp.length}; gdelt=${gdelt.length}; liveuamap=${liveuamap.length}; event_registry=${eventRegistry.length}; rapid=${rapid.length}; rss_network=${rssNetwork.length}; relay_seed=${relaySeed.length}; experimental=${experimentalTrackers.length}; requested_domain_live=${requestedDomainLive.length} [reason=${total > 0 ? "ok" : "all_empty"}]`,
   };
 }
 
@@ -4731,6 +4809,7 @@ export async function GET(request: Request) {
       openSourceIntelRes,
       lawfareDeployRes,
       experimentalTrackersRes,
+      requestedDomainLiveRes,
     ] =
       await Promise.all([
       fetchAcledConflicts(rangeHours),
@@ -4746,24 +4825,10 @@ export async function GET(request: Request) {
       fetchRssNetworkSignals(rangeHours),
       fetchRelaySeedSignals(rangeHours),
       fetchStrategicInfrastructure(),
-      sourcePackEnabled(sourcePacks, "openSourceIntel")
-        ? fetchOpenSourceIntelSignals(rangeHours)
-        : Promise.resolve({
-            points: [] as IntelPoint[],
-            health: disabledAdapterHealth("Open-source conflict digests", "source_pack_disabled"),
-          }),
-      sourcePackEnabled(sourcePacks, "lawfareTroops")
-        ? fetchLawfareDomesticDeployments(rangeHours)
-        : Promise.resolve({
-            points: [] as IntelPoint[],
-            health: disabledAdapterHealth("Lawfare domestic deployments", "source_pack_disabled"),
-          }),
-      sourcePackEnabled(sourcePacks, "experimentalTrackers")
-        ? fetchExperimentalTrackerSignals(rangeHours)
-        : Promise.resolve({
-            points: [] as IntelPoint[],
-            health: disabledAdapterHealth("Experimental tracker feeds", "source_pack_disabled"),
-          }),
+      fetchOpenSourceIntelSignals(rangeHours),
+      fetchLawfareDomesticDeployments(rangeHours),
+      fetchExperimentalTrackerSignals(rangeHours),
+      fetchRequestedDomainLiveSignals(rangeHours),
     ]);
 
     const mergedConflicts = [...ucdpRes.points, ...acledRes.points]
@@ -4789,6 +4854,7 @@ export async function GET(request: Request) {
       ...eventRegistryStrikePoints,
       ...openSourceIntelRes.points.filter((p) => p.layer === "liveStrikes"),
       ...experimentalTrackersRes.points.filter((p) => p.layer === "liveStrikes"),
+      ...requestedDomainLiveRes.points.filter((p) => p.layer === "liveStrikes"),
       ...rssNetworkRes.points
         .filter((p) => {
           const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`.toLowerCase();
@@ -4827,6 +4893,7 @@ export async function GET(request: Request) {
       ...relaySeedRes.points,
       ...openSourceIntelRes.points.filter((p) => p.layer === "news"),
       ...experimentalTrackersRes.points.filter((p) => p.layer === "news"),
+      ...requestedDomainLiveRes.points.filter((p) => p.layer === "news"),
       ...gdeltRes.points.map((p, idx) => ({
         ...p,
         id: `gdelt-news-${p.id}-${idx}`,
@@ -4967,7 +5034,7 @@ export async function GET(request: Request) {
           provider: "Adapter telemetry",
           ok: true,
           updatedAt: new Date().toISOString(),
-          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
+          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
         },
         buildSourceAccessTelemetry(),
         buildConflictAdapterTelemetry({
@@ -4980,6 +5047,7 @@ export async function GET(request: Request) {
           rssNetwork: rssNetworkRes.points,
           relaySeed: relaySeedRes.points,
           experimentalTrackers: experimentalTrackersRes.points,
+          requestedDomainLive: requestedDomainLiveRes.points,
         }),
         acledRes.health,
         ucdpRes.health,
@@ -4995,6 +5063,7 @@ export async function GET(request: Request) {
         openSourceIntelRes.health,
         lawfareDeployRes.health,
         experimentalTrackersRes.health,
+        requestedDomainLiveRes.health,
         {
           provider: "Carrier groups",
           ok: carrierGroups.length > 0,
