@@ -48,7 +48,6 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
     "liveStrikes",
     "flights",
     "vessels",
-    "troopMovements",
     "carriers",
     "news",
     "escalationRisk",
@@ -634,7 +633,9 @@ function isLikelyMilitaryAdsbLolRow(
   if (MILITARY_CALLSIGN_RE.test(cs)) return true;
   const compact = cs.replace(/\s+/g, "");
   const hasMilitaryStylePattern = /^[A-Z]{2,5}\d{2,5}[A-Z]?$/.test(compact);
-  return hasMilitaryStylePattern && (velocity >= 60 || altitude >= 800);
+  // More permissive: the goal is "military-like" coverage for map density.
+  // We still keep a minimum movement/altitude threshold to avoid plotting every civil pattern.
+  return hasMilitaryStylePattern && (velocity >= 12 || altitude >= 300);
 }
 
 async function fetchOpenSkyOAuthToken(
@@ -707,6 +708,7 @@ function extractOpenSkyMilitaryPoints(
         origin_country: country || null,
         on_ground: onGround,
         aircraft_role: role,
+        purpose: role,
       },
     });
   }
@@ -805,13 +807,15 @@ async function fetchOpenSkyFlights(): Promise<{
     const altitude = Number(flight.alt_baro) || 0;
     const speedKts = Number((velocity * 1.943844).toFixed(1));
     const role = inferAircraftRole(callsign || "");
+    const country = inferCountryFromLatLon(lat, lon);
     points.push({
       id: `flight-fallback-${flight.hex ?? `${lat}-${lon}`}`,
       layer: "flights",
       title: callsign || "Military flight",
-      subtitle: `${role} • adsb.lol v2/mil`,
+      subtitle: country ? `${role} • ${country} • adsb.lol v2/mil` : `${role} • adsb.lol v2/mil`,
       lat,
       lon,
+      country,
       severity: mapSeverity(Math.min(1, velocity / 320)),
       source: "adsb.lol fallback",
       timestamp: new Date((Number(flight.t) || Date.now() / 1000) * 1000).toISOString(),
@@ -825,6 +829,7 @@ async function fetchOpenSkyFlights(): Promise<{
         callsign: callsign || null,
         hex: String(flight.hex ?? "").trim() || null,
         aircraft_role: role,
+        purpose: role,
       },
     });
   }
@@ -836,6 +841,12 @@ async function fetchOpenSkyFlights(): Promise<{
     { label: "SA", lat: 23.0, lon: 78.0 },
     { label: "EAPAC", lat: 25.0, lon: 120.0 },
     { label: "AFR", lat: 0.0, lon: 20.0 },
+    { label: "EUR", lat: 50.0, lon: 10.0 },
+    { label: "NAm", lat: 40.0, lon: -95.0 },
+    { label: "SAm", lat: 0.0, lon: -60.0 },
+    { label: "WAFR", lat: 15.0, lon: -15.0 },
+    { label: "EAS", lat: 20.0, lon: 100.0 },
+    { label: "SEA", lat: 5.0, lon: 105.0 },
   ];
   for (const c of gridCenters) {
     const gridUrl = `https://api.adsb.lol/v2/lat/${c.lat}/lon/${c.lon}/dist/250`;
@@ -863,14 +874,16 @@ async function fetchOpenSkyFlights(): Promise<{
       if (!isLikelyMilitaryAdsbLolRow(callsign, velocity, altitude)) continue;
       const speedKts = Number((velocity * 1.943844).toFixed(1));
       const role = inferAircraftRole(callsign);
+      const country = inferCountryFromLatLon(lat, lon);
 
       points.push({
         id: `flight-grid-${c.label}-${flight.hex ?? `${lat}-${lon}`}`,
         layer: "flights",
         title: callsign,
-        subtitle: `${role} • adsb.lol grid`,
+        subtitle: country ? `${role} • ${country} • adsb.lol grid` : `${role} • adsb.lol grid`,
         lat,
         lon,
+        country,
         severity: mapSeverity(Math.min(1, velocity / 320)),
         source: "adsb.lol grid fallback",
         timestamp: new Date((Number(flight.t) || Date.now() / 1000) * 1000).toISOString(),
@@ -884,6 +897,7 @@ async function fetchOpenSkyFlights(): Promise<{
           callsign: callsign || null,
           hex: String(flight.hex ?? "").trim() || null,
           aircraft_role: role,
+          purpose: role,
         },
       });
     }
@@ -935,6 +949,30 @@ function extractMentionedCountry(text: string): string | null {
     if (normalized.includes(name.toLowerCase())) return name;
   }
   return null;
+}
+
+function inferCountryFromLatLon(lat: number, lon: number): string | undefined {
+  for (const [country, bbox] of Object.entries(COUNTRY_BBOX)) {
+    const [latMin, latMax, lonMin, lonMax] = bbox;
+    if (lat >= latMin && lat <= latMax && lon >= lonMin && lon <= lonMax) return country;
+  }
+  return undefined;
+}
+
+function inferVesselPurposeFromName(name: string): string {
+  const t = name.toUpperCase();
+  if (/\b(LHD|LPD|LST|LSV|LCAC|LHA|LPH|AMPHIB|ASSAULT|LANDING)\b/.test(t)) {
+    return "Amphibious/landing operations";
+  }
+  if (/\b(AOR|AKR|T-?AKR|T-?AO|LOGISTICS|SUPPLY|REPLENISH|TANKER|OILER)\b/.test(t)) {
+    return "Logistics/Replenishment";
+  }
+  if (/\b(CARRIER)\b/.test(t)) return "Carrier aviation support";
+  if (/\b(SUBMARINE)\b/.test(t)) return "Submarine/undersea operations";
+  if (/\b(DESTROYER|FRIGATE|CORVETTE|CRUISER|DDG|CG-|FFG)\b/.test(t)) {
+    return "Surface combatant";
+  }
+  return "Vessel activity";
 }
 
 function extractRssTag(block: string, tag: string): string | null {
@@ -1673,6 +1711,18 @@ function parseRssConflictPoints(
     const description = extractRssTag(block, "description") ?? "";
     const imageUrl = extractRssImageUrl(block);
     const sourceUrl = extractRssTag(block, "link");
+    const sourceUrlKey = sourceUrl
+      ? (() => {
+          try {
+            const u = new URL(sourceUrl);
+            return `${u.hostname.replace(/^www\./, "")}${u.pathname}`
+              .toLowerCase()
+              .slice(0, 140);
+          } catch {
+            return "";
+          }
+        })()
+      : "";
     const pubRaw = extractRssTag(block, "pubDate");
     if (!title) continue;
     const ts = pubRaw ? Date.parse(pubRaw) : Date.now();
@@ -1716,7 +1766,9 @@ function parseRssConflictPoints(
     const snippet = description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 360);
     for (let locIdx = 0; locIdx < locations.length; locIdx += 1) {
       const loc = locations[locIdx];
-      const dedupeKey = `${normalizeHeadlineForCluster(title)}|${loc.country}|${loc.city ?? ""}|${hourBucket}|${layer}|${locIdx}`;
+      // Include `sourceUrlKey` so the same headline mentioned by multiple outlets
+      // doesn't collapse into a single point (higher density, WorldMonitor-like).
+      const dedupeKey = `${normalizeHeadlineForCluster(title)}|${loc.country}|${loc.city ?? ""}|${hourBucket}|${layer}|${locIdx}|${sourceUrlKey}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
       points.push({
@@ -2047,7 +2099,7 @@ async function fetchRequestedDomainLiveSignals(rangeHours: number): Promise<{
     }
   }
 
-  const deduped = collapseRepeatedEvents(dedupeEventPoints(points, 0.5), "news").slice(0, 3200);
+  const deduped = collapseRepeatedEvents(dedupeEventPoints(points, 0.5), "news").slice(0, 12000);
   return {
     points: deduped,
     health: {
@@ -2297,7 +2349,7 @@ async function fetchTrustedPublisherSignals(rangeHours: number): Promise<{
     points.push(...parsed.points);
   }
 
-  const deduped = dedupeEventPoints(points, 1).slice(0, 3200);
+  const deduped = dedupeEventPoints(points, 1).slice(0, 12000);
   const diagnostics =
     feedErrors > 0
       ? `Mapped ${deduped.length} event points from ${
@@ -3827,9 +3879,11 @@ function dedupeFlightPoints(points: IntelPoint[]): IntelPoint[] {
   const byKey = new Map<string, IntelPoint>();
   for (const p of points) {
     // Looser dedupe to allow "track-like" density without plotting exact repeats.
-    const roundedLat = Math.round(p.lat / 0.12) * 0.12;
-    const roundedLon = Math.round(p.lon / 0.12) * 0.12;
-    const bucket = Math.floor(Date.parse(p.timestamp || new Date().toISOString()) / (1 * 3600_000));
+    const roundedLat = Math.round(p.lat / 0.06) * 0.06;
+    const roundedLon = Math.round(p.lon / 0.06) * 0.06;
+    const bucket = Math.floor(
+      Date.parse(p.timestamp || new Date().toISOString()) / (30 * 60_000)
+    );
     const icao = String(p.metadata?.icao24 ?? "").trim().toLowerCase();
     const callsign = String(p.metadata?.callsign ?? p.title ?? "")
       .trim()
@@ -4161,25 +4215,40 @@ async function fetchVesselSignals(): Promise<{
     const speed = Number(v.speed) || 0;
     const hasUnknownName = !name || /\b(unknown|n\/a|none)\b/i.test(name);
     const hasUnknownFlag = !flag || /\b(unknown|n\/a|none)\b/i.test(flag);
-    const inferredMilitaryMovement = speed >= 15 && hasUnknownName && hasUnknownFlag;
-    const isGovernmentVessel =
-      GOV_VESSEL_RE.test(name) || GOV_FLAG_HINT_RE.test(flag) || inferredMilitaryMovement;
-    if (!isGovernmentVessel) continue;
+    const govByName = GOV_VESSEL_RE.test(name);
+    const govByFlag = GOV_FLAG_HINT_RE.test(flag);
+
+    // Your AIS relay currently only returns basic vessel fields (no IMO/type),
+    // so we approximate "military-like" with name/flag patterns + movement.
+    const inferredMilitaryMovement =
+      speed >= 8 && (govByName || govByFlag || hasUnknownName || hasUnknownFlag);
+
+    // Plot more vessels for density: include all relay contacts (your relay returns limited fields,
+    // so we primarily use name patterns + speed heuristics for confidence, not for inclusion).
+    const isInterestingVessel = true;
+    if (!isInterestingVessel) continue;
+
+    const purpose = inferVesselPurposeFromName(name);
+    const country = inferCountryFromLatLon(lat, lon);
     points.push({
       id: `vessel-${v.id ?? `${lat}-${lon}`}`,
       layer: "vessels",
       title: name || "Government vessel",
-      subtitle: v.flag ? `${v.flag} flag` : "AIS snapshot",
+      subtitle: `${purpose}${country ? ` • ${country}` : ""}${
+        govByName || govByFlag ? " • military-like pattern" : ""
+      } • AIS snapshot`,
       lat,
       lon,
+      country,
       severity: mapSeverity(Math.min(1, speed / 25)),
       source: "AISStream relay",
       timestamp: v.updatedAt || new Date().toISOString(),
       magnitude: speed,
-      confidence: inferredMilitaryMovement ? 0.52 : 0.7,
+      confidence: govByName || govByFlag ? 0.7 : inferredMilitaryMovement ? 0.55 : 0.42,
       metadata: {
         speed_knots: speed,
         inferred_military_movement: inferredMilitaryMovement,
+        purpose,
         mmsi: String(v.id ?? "").trim() || null,
       },
     });
@@ -4380,7 +4449,7 @@ async function fetchStrategicInfrastructure(): Promise<{
   const points: IntelPoint[] = [];
 
   if (res.ok && res.data) {
-    for (const b of res.data.slice(0, 260)) {
+    for (const b of res.data.slice(0, 5000)) {
       const lat = Number(b.lat);
       const lon = Number(b.lon);
       if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
@@ -5137,10 +5206,6 @@ export async function GET(request: Request) {
       ...vesselsRes.points,
     ]).slice(0, 9000);
     const carrierGroups = extractCarrierGroups(mergedVesselPoints);
-    const troopMovementPoints = deriveTroopMovementPointsFromTransport(
-      dedupedFlights,
-      mergedVesselPoints
-    );
     const allowCuratedConflictFallback =
       dedupedLiveStrikes.length + mergedConflicts.length + fusedNewsPoints.length < 25;
     const activeConflictCountries = buildActiveConflictCountries(
@@ -5191,7 +5256,9 @@ export async function GET(request: Request) {
       liveStrikes: dedupedLiveStrikes,
       flights: dedupedFlights,
       vessels: mergedVesselPoints,
-      troopMovements: troopMovementPoints,
+      // No verified ground-force troop movement dataset available in this build.
+      // We keep the layer key for compatibility, but it is always empty.
+      troopMovements: [],
       carriers: carrierGroups,
       news: fusedNewsPoints,
       escalationRisk: escalationRiskPoints,
@@ -5229,7 +5296,7 @@ export async function GET(request: Request) {
           provider: "Adapter telemetry",
           ok: true,
           updatedAt: new Date().toISOString(),
-          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; troop_movements=${troopMovementPoints.length}; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
+          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; troop_movements=0; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
         },
         buildSourceAccessTelemetry(),
         buildConflictAdapterTelemetry({
