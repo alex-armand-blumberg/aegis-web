@@ -3,6 +3,7 @@ export type IntelLayerKey =
   | "liveStrikes"
   | "flights"
   | "vessels"
+  | "troopMovements"
   | "carriers"
   | "news"
   | "escalationRisk"

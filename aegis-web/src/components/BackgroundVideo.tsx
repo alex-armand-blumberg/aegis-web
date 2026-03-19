@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type Props = {
@@ -19,9 +19,8 @@ export default function BackgroundVideo({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [paused, setPaused] = useState(false);
   const [hidden, setHidden] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
+  // Avoid accessing `document` during SSR; this component is client-side but can still be pre-rendered.
+  const mounted = typeof document !== "undefined";
 
   function togglePause() {
     const v = videoRef.current;

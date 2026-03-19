@@ -48,6 +48,7 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
     "liveStrikes",
     "flights",
     "vessels",
+    "troopMovements",
     "carriers",
     "news",
     "escalationRisk",
@@ -588,7 +589,7 @@ type OpenSkyStatesResponse = {
 };
 
 const MILITARY_CALLSIGN_RE =
-  /(^|\s)(RCH|REACH|DUKE|NAVY|USAF|RAF|RRR|NATO|IAF|ROKAF|QID|AIO|CNV|FORTE|HOMER|LAGR|JSTARS|COPPER|SHELL|ARAB|TUAF|SPAR|SAM|HURON|ASCOT|RFR|OMEN|MC|MIG|SU-|F-16|F-35|IL-76|ANKA|QTR|UAEAF|RSAF)/i;
+  /(^|\s)(RCH|REACH|DUKE|NAVY|USAF|RAF|RRR|NATO|IAF|ROKAF|QID|AIO|CNV|FORTE|HOMER|LAGR|JSTARS|COPPER|SHELL|ARAB|TUAF|SPAR|SAM|HURON|ASCOT|RFR|OMEN|MC|MIG|SU-|F-16|F-35|IL-76|ANKA|QTR|UAEAF|RSAF|C-?130|C-?17|A400|AN-?124|KC-?135|KC-?10|TANKER|MRTT|AWACS|E-?3|E-?2)/i;
 
 const MILITARY_ORIGIN_COUNTRY_RE =
   /\b(United States|United Kingdom|France|Germany|Italy|Turkey|Israel|Russia|Ukraine|India|Pakistan|Saudi Arabia|United Arab Emirates|Qatar|Iran|China|Japan|South Korea)\b/i;
@@ -607,17 +608,33 @@ function isLikelyMilitaryOpenSkyRow(
     !onGround &&
     hasMilitaryStylePattern &&
     MILITARY_ORIGIN_COUNTRY_RE.test(originCountry) &&
-    (velocityMs >= 105 || altitudeM >= 1500)
+    (velocityMs >= 90 || altitudeM >= 1200)
   );
 }
 
 function inferAircraftRole(callsign: string): string {
   const c = callsign.toUpperCase();
   if (/\b(AF|RCH|REACH|ASCOT|DUKE|SPAR)\b/.test(c)) return "Air force transport";
+  if (/\b(C-?130|C-?17|A400|AN-?124|IL-?76|KC-?135|KC-?10|MRTT|TANKER)\b/.test(c)) {
+    return "Air force transport";
+  }
+  if (/\b(AWACS|E-?3|E-?2)\b/.test(c)) return "ISR/Drone mission";
   if (/\b(NAVY|CNV|USS|USN)\b/.test(c)) return "Naval aviation";
   if (/\b(FORTE|RQ|MQ|UAV|DRONE)\b/.test(c)) return "ISR/Drone mission";
   if (/\b(F-16|F-35|MIG|SU-)\b/.test(c)) return "Combat jet";
   return "Military flight";
+}
+
+function isLikelyMilitaryAdsbLolRow(
+  callsign: string,
+  velocity: number,
+  altitude: number
+): boolean {
+  const cs = callsign.toUpperCase();
+  if (MILITARY_CALLSIGN_RE.test(cs)) return true;
+  const compact = cs.replace(/\s+/g, "");
+  const hasMilitaryStylePattern = /^[A-Z]{2,5}\d{2,5}[A-Z]?$/.test(compact);
+  return hasMilitaryStylePattern && (velocity >= 60 || altitude >= 800);
 }
 
 async function fetchOpenSkyOAuthToken(
@@ -740,7 +757,7 @@ async function fetchOpenSkyFlights(): Promise<{
       res.data.time ?? Math.floor(Date.now() / 1000)
     );
     return {
-      points: points.slice(0, 1600),
+      points: points.slice(0, 4500),
       health: {
         provider: "OpenSky",
         ok: true,
@@ -783,14 +800,16 @@ async function fetchOpenSkyFlights(): Promise<{
     const lat = Number(flight.lat);
     const lon = Number(flight.lon);
     if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+    const callsign = String(flight.flight ?? "").trim();
     const velocity = Number(flight.gs) || 0;
     const altitude = Number(flight.alt_baro) || 0;
     const speedKts = Number((velocity * 1.943844).toFixed(1));
+    const role = inferAircraftRole(callsign || "");
     points.push({
       id: `flight-fallback-${flight.hex ?? `${lat}-${lon}`}`,
       layer: "flights",
-      title: String(flight.flight ?? "").trim() || "Military flight",
-      subtitle: "Fallback military feed",
+      title: callsign || "Military flight",
+      subtitle: `${role} • adsb.lol v2/mil`,
       lat,
       lon,
       severity: mapSeverity(Math.min(1, velocity / 320)),
@@ -803,14 +822,75 @@ async function fetchOpenSkyFlights(): Promise<{
         speed_kts: speedKts,
         altitude_m: altitude,
         icao24: String(flight.hex ?? "").trim() || null,
-        callsign: String(flight.flight ?? "").trim() || null,
+        callsign: callsign || null,
         hex: String(flight.hex ?? "").trim() || null,
+        aircraft_role: role,
       },
     });
   }
 
+  // Enrichment when /v2/mil returns few aircraft (OpenSky often fails for auth).
+  // We query multiple geographic circles and keep only "military-like" callsigns.
+  const gridCenters: Array<{ label: string; lat: number; lon: number }> = [
+    { label: "ME", lat: 30.0, lon: 45.0 },
+    { label: "SA", lat: 23.0, lon: 78.0 },
+    { label: "EAPAC", lat: 25.0, lon: 120.0 },
+    { label: "AFR", lat: 0.0, lon: 20.0 },
+  ];
+  for (const c of gridCenters) {
+    const gridUrl = `https://api.adsb.lol/v2/lat/${c.lat}/lon/${c.lon}/dist/250`;
+    const grid = await timedJsonFetch<{
+      ac?: Array<{
+        hex?: string;
+        flight?: string;
+        lat?: number;
+        lon?: number;
+        gs?: number;
+        alt_baro?: number | string;
+        t?: number;
+      }>;
+    }>(gridUrl, undefined, 7000);
+    if (!grid.ok || !grid.data) continue;
+
+    for (const flight of grid.data.ac ?? []) {
+      const lat = Number(flight.lat);
+      const lon = Number(flight.lon);
+      if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+      const callsign = String(flight.flight ?? "").trim();
+      if (!callsign) continue;
+      const velocity = Number(flight.gs) || 0;
+      const altitude = Number(flight.alt_baro) || 0;
+      if (!isLikelyMilitaryAdsbLolRow(callsign, velocity, altitude)) continue;
+      const speedKts = Number((velocity * 1.943844).toFixed(1));
+      const role = inferAircraftRole(callsign);
+
+      points.push({
+        id: `flight-grid-${c.label}-${flight.hex ?? `${lat}-${lon}`}`,
+        layer: "flights",
+        title: callsign,
+        subtitle: `${role} • adsb.lol grid`,
+        lat,
+        lon,
+        severity: mapSeverity(Math.min(1, velocity / 320)),
+        source: "adsb.lol grid fallback",
+        timestamp: new Date((Number(flight.t) || Date.now() / 1000) * 1000).toISOString(),
+        magnitude: velocity,
+        confidence: 0.45,
+        metadata: {
+          velocity_ms: velocity,
+          speed_kts: speedKts,
+          altitude_m: altitude,
+          icao24: String(flight.hex ?? "").trim() || null,
+          callsign: callsign || null,
+          hex: String(flight.hex ?? "").trim() || null,
+          aircraft_role: role,
+        },
+      });
+    }
+  }
+
   return {
-    points: points.slice(0, 1400),
+    points: points.slice(0, 9000),
     health: {
       provider: "OpenSky",
       ok: true,
@@ -3723,9 +3803,10 @@ function inferUsniRegions(text: string): Array<{
 function dedupeVesselPoints(points: IntelPoint[]): IntelPoint[] {
   const byKey = new Map<string, IntelPoint>();
   for (const p of points) {
-    const roundedLat = Math.round(p.lat * 2) / 2;
-    const roundedLon = Math.round(p.lon * 2) / 2;
-    const bucket = Math.floor(Date.parse(p.timestamp || new Date().toISOString()) / (8 * 3600_000));
+    // Looser dedupe to allow more "track-like" density for repeated AIS snapshots.
+    const roundedLat = Math.round(p.lat / 0.1) * 0.1;
+    const roundedLon = Math.round(p.lon / 0.1) * 0.1;
+    const bucket = Math.floor(Date.parse(p.timestamp || new Date().toISOString()) / (2 * 3600_000));
     const objectId = [
       String(p.metadata?.mmsi ?? "").trim(),
       String(p.metadata?.imo ?? "").trim(),
@@ -3745,9 +3826,10 @@ function dedupeVesselPoints(points: IntelPoint[]): IntelPoint[] {
 function dedupeFlightPoints(points: IntelPoint[]): IntelPoint[] {
   const byKey = new Map<string, IntelPoint>();
   for (const p of points) {
-    const roundedLat = Math.round(p.lat / 0.35) * 0.35;
-    const roundedLon = Math.round(p.lon / 0.35) * 0.35;
-    const bucket = Math.floor(Date.parse(p.timestamp || new Date().toISOString()) / (2 * 3600_000));
+    // Looser dedupe to allow "track-like" density without plotting exact repeats.
+    const roundedLat = Math.round(p.lat / 0.12) * 0.12;
+    const roundedLon = Math.round(p.lon / 0.12) * 0.12;
+    const bucket = Math.floor(Date.parse(p.timestamp || new Date().toISOString()) / (1 * 3600_000));
     const icao = String(p.metadata?.icao24 ?? "").trim().toLowerCase();
     const callsign = String(p.metadata?.callsign ?? p.title ?? "")
       .trim()
@@ -3757,6 +3839,101 @@ function dedupeFlightPoints(points: IntelPoint[]): IntelPoint[] {
     if (!current || p.timestamp > current.timestamp) byKey.set(key, p);
   }
   return Array.from(byKey.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+function dedupeTroopMovementPoints(points: IntelPoint[]): IntelPoint[] {
+  const byKey = new Map<string, IntelPoint>();
+  for (const p of points) {
+    const roundedLat = Math.round(p.lat / 0.12) * 0.12;
+    const roundedLon = Math.round(p.lon / 0.12) * 0.12;
+    const bucket = Math.floor(
+      Date.parse(p.timestamp || new Date().toISOString()) / (1 * 3600_000)
+    );
+    const sourcePointId = String(p.metadata?.source_point_id ?? "").trim().toLowerCase();
+    const key = `${sourcePointId}|${roundedLat}|${roundedLon}|${bucket}`;
+    const current = byKey.get(key);
+    if (!current || p.timestamp > current.timestamp) byKey.set(key, p);
+  }
+  return Array.from(byKey.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+function deriveTroopMovementPointsFromTransport(
+  flights: IntelPoint[],
+  vessels: IntelPoint[]
+): IntelPoint[] {
+  const TRANSPORT_AIRCRAFT_RE =
+    /\b(C-?130|C-?17|A400|AN-?124|IL-?76|KC-?135|KC-?10|MRTT|AIRLIFT|TRANSPORT|ASSAULT)\b/i;
+  const TROOP_TRANSPORT_VESSEL_RE =
+    /\b(LHD|LPD|LST|LSV|LCAC|LHA|LPH|AMPHIB|ASSAULT|LANDING|LOGISTICS|SUPPLY|AOR|AKR|T-?AKR|T-?AO|TANKER)\b/i;
+
+  const points: IntelPoint[] = [];
+  const nowIso = new Date().toISOString();
+
+  for (const f of flights) {
+    const role = String(f.metadata?.aircraft_role ?? "");
+    const callsign = String(f.metadata?.callsign ?? f.title ?? "");
+    const isTransport = role === "Air force transport" || TRANSPORT_AIRCRAFT_RE.test(callsign);
+    if (!isTransport) continue;
+
+    const bumpedSeverity: IntelPoint["severity"] =
+      f.severity === "medium" ? "high" : f.severity;
+
+    points.push({
+      id: `troop-move-flight-${f.id}-${points.length + 1}`,
+      layer: "troopMovements",
+      title: f.title || "Transport aircraft",
+      subtitle: "Troop movement proxy (transport-like aircraft)",
+      lat: f.lat,
+      lon: f.lon,
+      country: f.country,
+      severity: bumpedSeverity,
+      source: "AEGIS troop movement derivation (air)",
+      timestamp: f.timestamp || nowIso,
+      magnitude: (f.magnitude ?? 10) * 1.1,
+      confidence: Math.min(0.95, (f.confidence ?? 0.6) + 0.1),
+      metadata: {
+        event_type: "troop_movement_proxy",
+        source_point_id: f.id,
+        source_point_layer: f.layer,
+        source_point_role: role || null,
+        source_url: String(f.metadata?.source_url ?? "").trim() || null,
+      },
+    });
+  }
+
+  for (const v of vessels) {
+    const title = String(v.title ?? "");
+    const inferred = Boolean(v.metadata?.inferred_military_movement);
+    const isTroopVessel = inferred || TROOP_TRANSPORT_VESSEL_RE.test(title.toUpperCase());
+    if (!isTroopVessel) continue;
+
+    const bumpedSeverity: IntelPoint["severity"] =
+      inferred || v.severity === "critical" ? "high" : v.severity;
+
+    points.push({
+      id: `troop-move-vessel-${v.id}-${points.length + 1}`,
+      layer: "troopMovements",
+      title: v.title || "Transport vessel",
+      subtitle: "Troop movement proxy (transport-like vessel)",
+      lat: v.lat,
+      lon: v.lon,
+      country: v.country,
+      severity: bumpedSeverity,
+      source: "AEGIS troop movement derivation (sea)",
+      timestamp: v.timestamp || nowIso,
+      magnitude: (v.magnitude ?? 10) * 1.05,
+      confidence: inferred ? 0.72 : Math.min(0.9, (v.confidence ?? 0.6) + 0.08),
+      metadata: {
+        event_type: "troop_movement_proxy",
+        source_point_id: v.id,
+        source_point_layer: v.layer,
+        inferred_military_movement: inferred,
+        source_url: String(v.metadata?.source_url ?? "").trim() || null,
+      },
+    });
+  }
+
+  return dedupeTroopMovementPoints(points).slice(0, 6500);
 }
 
 async function fetchUsniFleetTrackerSignals(rangeHours: number): Promise<{
@@ -3859,7 +4036,7 @@ async function fetchUsniFleetTrackerSignals(rangeHours: number): Promise<{
       });
     }
 
-    const deduped = dedupeVesselPoints(points).slice(0, 2200);
+    const deduped = dedupeVesselPoints(points).slice(0, 4500);
     return {
       points: deduped,
       health: {
@@ -3892,8 +4069,18 @@ async function fetchVesselSignals(): Promise<{
   points: IntelPoint[];
   health: ProviderHealth;
 }> {
-  const snapshotUrlRaw = process.env.AISSTREAM_SNAPSHOT_URL?.trim();
-  if (!snapshotUrlRaw) {
+  const snapshotUrlsRaw = process.env.AISSTREAM_SNAPSHOT_URLS?.trim();
+  const snapshotUrlRawSingle = process.env.AISSTREAM_SNAPSHOT_URL?.trim();
+  const snapshotUrlRaws = snapshotUrlsRaw
+    ? snapshotUrlsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : snapshotUrlRawSingle
+      ? [snapshotUrlRawSingle]
+      : [];
+
+  if (snapshotUrlRaws.length === 0) {
     return {
       points: [],
       health: {
@@ -3901,66 +4088,69 @@ async function fetchVesselSignals(): Promise<{
         ok: false,
         updatedAt: new Date().toISOString(),
         message:
-          "No AISSTREAM_SNAPSHOT_URL configured. Add relay snapshot endpoint for vessel positions.",
+          "No AISSTREAM_SNAPSHOT_URLS (or AISSTREAM_SNAPSHOT_URL) configured. Add relay snapshot endpoint(s) for vessel positions.",
       },
     };
   }
 
-  const snapshotUrl = /^https?:\/\//i.test(snapshotUrlRaw)
-    ? snapshotUrlRaw
-    : `https://${snapshotUrlRaw}`;
-  let parsedUrl: URL | null = null;
-  try {
-    parsedUrl = new URL(snapshotUrl);
-    if (parsedUrl.pathname === "/" || parsedUrl.pathname === "") {
-      parsedUrl.pathname = "/snapshot";
+  const allVessels: Array<{
+    id?: string;
+    lat?: number;
+    lon?: number;
+    name?: string;
+    flag?: string;
+    speed?: number;
+    updatedAt?: string;
+  }> = [];
+  let relayFetchOkCount = 0;
+  let relayFetchErrCount = 0;
+  let relayLatencyMs: number | undefined = undefined;
+
+  for (const snapshotUrlRaw of snapshotUrlRaws) {
+    const snapshotUrl = /^https?:\/\//i.test(snapshotUrlRaw)
+      ? snapshotUrlRaw
+      : `https://${snapshotUrlRaw}`;
+    let parsedUrl: URL | null = null;
+    try {
+      parsedUrl = new URL(snapshotUrl);
+      if (parsedUrl.pathname === "/" || parsedUrl.pathname === "") {
+        parsedUrl.pathname = "/snapshot";
+      }
+    } catch {
+      parsedUrl = null;
     }
-  } catch {
-    parsedUrl = null;
-  }
-  if (!parsedUrl) {
-    return {
-      points: [],
-      health: {
-        provider: "AISStream",
-        ok: false,
-        updatedAt: new Date().toISOString(),
-        message:
-          "AISSTREAM_SNAPSHOT_URL is invalid. Use a full URL, for example https://your-relay.up.railway.app/snapshot",
-      },
-    };
-  }
+    if (!parsedUrl) {
+      relayFetchErrCount += 1;
+      continue;
+    }
 
-  const res = await timedJsonFetch<{
-    vessels?: Array<{
-      id?: string;
-      lat?: number;
-      lon?: number;
-      name?: string;
-      flag?: string;
-      speed?: number;
-      updatedAt?: string;
-    }>;
-  }>(parsedUrl.toString(), undefined, 12000);
+    const res = await timedJsonFetch<{
+      vessels?: Array<{
+        id?: string;
+        lat?: number;
+        lon?: number;
+        name?: string;
+        flag?: string;
+        speed?: number;
+        updatedAt?: string;
+      }>;
+    }>(parsedUrl.toString(), undefined, 12000);
 
-  if (!res.ok || !res.data) {
-    return {
-      points: [],
-      health: {
-        provider: "AISStream",
-        ok: false,
-        updatedAt: new Date().toISOString(),
-        latencyMs: res.latencyMs,
-        message: res.message ?? "AIS relay failed",
-      },
-    };
+    if (!res.ok || !res.data) {
+      relayFetchErrCount += 1;
+      continue;
+    }
+
+    relayFetchOkCount += 1;
+    relayLatencyMs = res.latencyMs;
+    allVessels.push(...(res.data.vessels ?? []));
   }
 
-  const vessels = res.data.vessels ?? [];
+  const vessels = allVessels;
   const GOV_VESSEL_RE =
-    /\b(USS|USNS|USCGC|HMS|HMCS|HMAS|ROKS|INS|PLAN|NAVE|ARMADA|MARINA|NAVY|COAST\s*GUARD|GUARDIA|CGC|CG-|PATROL|CORVETTE|FRIGATE|DESTROYER|CRUISER|CARRIER|BATTLESHIP|AMPHIB|LCS|CUTTER|WARSHIP|SUBMARINE|FLEET|TASK\s*FORCE)\b/i;
+    /\b(USS|USNS|USCGC|HMS|HMCS|HMAS|ROKS|INS|PLAN|NAVE|ARMADA|MARINA|NAVY|COAST\s*GUARD|GUARDIA|CGC|CG-|PATROL|CORVETTE|FRIGATE|DESTROYER|CRUISER|CARRIER|BATTLESHIP|AMPHIB|WARSHIP|SUBMARINE|FLEET|TASK\s*FORCE|LHD|LPD|LST|LSV|LCAC|LHA|LPH|AOR|AOE|AKR|T-?AKR|T-?AO|MCM|LCC)\b/i;
   const GOV_FLAG_HINT_RE =
-    /\b(NAVY|COAST\s*GUARD|GOVERNMENT|MILITARY|STATE|DEFENCE|MINISTRY|ARMADA|MARINA)\b/i;
+    /\b(NAVY|COAST\s*GUARD|GOVERNMENT|MILITARY|STATE|DEFENCE|DEFENSE|MINISTRY|ARMADA|MARINA|SECURITY)\b/i;
   const points: IntelPoint[] = [];
   for (const v of vessels) {
     const lat = Number(v.lat);
@@ -3969,10 +4159,9 @@ async function fetchVesselSignals(): Promise<{
     const name = v.name?.trim() || "";
     const flag = v.flag?.trim() || "";
     const speed = Number(v.speed) || 0;
-    const inferredMilitaryMovement =
-      speed >= 22 &&
-      /\b(unknown|n\/a|none)\b/i.test(name || "unknown") &&
-      /\b(unknown|n\/a|none)\b/i.test(flag || "unknown");
+    const hasUnknownName = !name || /\b(unknown|n\/a|none)\b/i.test(name);
+    const hasUnknownFlag = !flag || /\b(unknown|n\/a|none)\b/i.test(flag);
+    const inferredMilitaryMovement = speed >= 15 && hasUnknownName && hasUnknownFlag;
     const isGovernmentVessel =
       GOV_VESSEL_RE.test(name) || GOV_FLAG_HINT_RE.test(flag) || inferredMilitaryMovement;
     if (!isGovernmentVessel) continue;
@@ -3997,13 +4186,13 @@ async function fetchVesselSignals(): Promise<{
   }
 
   return {
-    points: points.slice(0, 2800),
+    points: points.slice(0, 6500),
     health: {
       provider: "AISStream",
-      ok: true,
+      ok: points.length > 0,
       updatedAt: new Date().toISOString(),
-      latencyMs: res.latencyMs,
-      message: `Loaded ${points.length} government/military vessel positions`,
+      latencyMs: relayLatencyMs,
+      message: `Loaded ${points.length} government/military vessel positions (relays ok=${relayFetchOkCount}, err=${relayFetchErrCount})`,
     },
   };
 }
@@ -4692,6 +4881,7 @@ function filterToRequestedLayers(
     liveStrikes: requested.includes("liveStrikes") ? layers.liveStrikes : [],
     flights: requested.includes("flights") ? layers.flights : [],
     vessels: requested.includes("vessels") ? layers.vessels : [],
+    troopMovements: requested.includes("troopMovements") ? layers.troopMovements : [],
     carriers: requested.includes("carriers") ? layers.carriers : [],
     news: requested.includes("news") ? layers.news : [],
     escalationRisk: requested.includes("escalationRisk")
@@ -4941,12 +5131,16 @@ export async function GET(request: Request) {
         .slice(0, 15600);
       fusedNewsPoints = collapseRepeatedEvents(densityBackfill, "news");
     }
-    const dedupedFlights = dedupeFlightPoints(flightsRes.points).slice(0, 2200);
+    const dedupedFlights = dedupeFlightPoints(flightsRes.points).slice(0, 7000);
     const mergedVesselPoints = dedupeVesselPoints([
       ...usniVesselsRes.points,
       ...vesselsRes.points,
-    ]).slice(0, 3800);
+    ]).slice(0, 9000);
     const carrierGroups = extractCarrierGroups(mergedVesselPoints);
+    const troopMovementPoints = deriveTroopMovementPointsFromTransport(
+      dedupedFlights,
+      mergedVesselPoints
+    );
     const allowCuratedConflictFallback =
       dedupedLiveStrikes.length + mergedConflicts.length + fusedNewsPoints.length < 25;
     const activeConflictCountries = buildActiveConflictCountries(
@@ -4997,6 +5191,7 @@ export async function GET(request: Request) {
       liveStrikes: dedupedLiveStrikes,
       flights: dedupedFlights,
       vessels: mergedVesselPoints,
+      troopMovements: troopMovementPoints,
       carriers: carrierGroups,
       news: fusedNewsPoints,
       escalationRisk: escalationRiskPoints,
@@ -5034,7 +5229,7 @@ export async function GET(request: Request) {
           provider: "Adapter telemetry",
           ok: true,
           updatedAt: new Date().toISOString(),
-          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
+          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; troop_movements=${troopMovementPoints.length}; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
         },
         buildSourceAccessTelemetry(),
         buildConflictAdapterTelemetry({
