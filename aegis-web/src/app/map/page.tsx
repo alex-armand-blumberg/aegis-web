@@ -182,10 +182,12 @@ export default function MapPage() {
         const res = await fetch(`/api/map/region-hero-image?${imageQs}`);
         const data = (await res.json()) as { imageUrl?: string };
         if (active) {
-          const picked = res.ok ? data.imageUrl || null : null;
-          setRegionHeroImage(picked);
-          if (picked && /^https?:\/\//i.test(picked)) {
-            usedRegionImagesRef.current.add(picked);
+          const rawPicked = res.ok ? data.imageUrl || null : null;
+          if (rawPicked && /^https?:\/\//i.test(rawPicked)) {
+            usedRegionImagesRef.current.add(rawPicked);
+            setRegionHeroImage(`/api/map/image-proxy?url=${encodeURIComponent(rawPicked)}`);
+          } else {
+            setRegionHeroImage(null);
           }
         }
       } catch {
