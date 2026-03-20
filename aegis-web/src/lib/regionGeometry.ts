@@ -23,8 +23,8 @@ const REGION_GEOJSON: FeatureCollection = {
         coordinates: [
           [
             [20.0, -60.0],
-            [147.0, -60.0],
-            [147.0, 30.0],
+            [120.0, -60.0],
+            [120.0, 30.0],
             [95.0, 30.0],
             [77.0, 25.0],
             [55.0, 24.0],
@@ -32,6 +32,33 @@ const REGION_GEOJSON: FeatureCollection = {
             [32.0, 8.0],
             [20.0, -10.0],
             [20.0, -60.0],
+          ],
+        ],
+      },
+    },
+    {
+      type: "Feature",
+      properties: { regionKey: "pacific-ocean", name: "Pacific Ocean" },
+      geometry: {
+        type: "MultiPolygon",
+        coordinates: [
+          [
+            [
+              [120.0, -60.0],
+              [180.0, -60.0],
+              [180.0, 66.0],
+              [120.0, 66.0],
+              [120.0, -60.0],
+            ],
+          ],
+          [
+            [
+              [-180.0, -60.0],
+              [-70.0, -60.0],
+              [-70.0, 66.0],
+              [-180.0, 66.0],
+              [-180.0, -60.0],
+            ],
           ],
         ],
       },
@@ -69,7 +96,7 @@ const REGION_GEOJSON: FeatureCollection = {
       properties: { regionKey: "atlantic-ocean", name: "Atlantic Ocean" },
       geometry: {
         type: "Polygon",
-        coordinates: [[[-100.0, -60.0], [20.0, -60.0], [20.0, 75.0], [-100.0, 75.0], [-100.0, -60.0]]],
+        coordinates: [[[-70.0, -60.0], [20.0, -60.0], [20.0, 75.0], [-70.0, 75.0], [-70.0, -60.0]]],
       },
     },
     {
