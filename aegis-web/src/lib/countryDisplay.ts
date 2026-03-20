@@ -17,6 +17,39 @@ export function normalizeCountryKey(input: string | undefined | null): string {
 /** Internal bucket key for Israel–Palestine area labels (any alias). */
 const PALESTINE_MATCH_BUCKET = "__judea_samaria_palestine__";
 
+/**
+ * Normalized-key aliases so GeoJSON names (e.g. United States) match map data
+ * (e.g. USA, Russian Federation, UK).
+ */
+const CANONICAL_COUNTRY_ALIASES: Record<string, string> = {
+  usa: "united states",
+  "u.s.": "united states",
+  "u.s.a.": "united states",
+  "u.s": "united states",
+  "united states of america": "united states",
+  uk: "united kingdom",
+  britain: "united kingdom",
+  "great britain": "united kingdom",
+  england: "united kingdom",
+  scotland: "united kingdom",
+  wales: "united kingdom",
+  "russian federation": "russia",
+  "iran islamic republic of": "iran",
+  "syrian arab republic": "syria",
+  "democratic republic of congo": "democratic republic of the congo",
+  drc: "democratic republic of the congo",
+  "dr congo": "democratic republic of the congo",
+  "viet nam": "vietnam",
+  "korea republic of": "south korea",
+  "korea democratic peoples republic of": "north korea",
+  turkiye: "turkey",
+  burma: "myanmar",
+  uae: "united arab emirates",
+  "u.a.e.": "united arab emirates",
+  palestine: "judea & samaria / palestine",
+  "state of palestine": "judea & samaria / palestine",
+};
+
 function toMatchBucket(normalized: string): string {
   if (!normalized) return "";
   if (
@@ -38,12 +71,21 @@ function toMatchBucket(normalized: string): string {
 
 /** Map a raw country string to a stable comparison bucket key. */
 export function countryMatchKey(input: string | undefined | null): string {
-  return toMatchBucket(normalizeCountryKey(input));
+  const n = normalizeCountryKey(input);
+  if (!n) return "";
+  const bucket = toMatchBucket(n);
+  if (bucket === PALESTINE_MATCH_BUCKET) return PALESTINE_MATCH_BUCKET;
+  return CANONICAL_COUNTRY_ALIASES[n] ?? bucket;
 }
 
 /** True if two country strings refer to the same place (aliases + Palestine cluster). */
 export function countriesMatch(a: string | undefined | null, b: string | undefined | null): boolean {
   return countryMatchKey(a) === countryMatchKey(b);
+}
+
+/** Exported for APIs that need a single canonical key for a country label. */
+export function canonicalCountryMatchKey(input: string | undefined | null): string {
+  return countryMatchKey(input);
 }
 
 /**

@@ -386,7 +386,7 @@ export default function ConflictMap({
           getRadius: (d) => {
             const base =
               layerKey === "hotspots"
-                ? 42000
+                ? 15000
                 : layerKey === "liveStrikes"
                   ? 25000
                   : layerKey === "news"
@@ -413,10 +413,10 @@ export default function ConflictMap({
           filled: true,
           pickable: true,
           radiusMinPixels:
-            layerKey === "hotspots" ? 5 : layerKey === "news" ? 2 : 3,
+            layerKey === "hotspots" ? 3 : layerKey === "news" ? 2 : 3,
           radiusMaxPixels:
             layerKey === "hotspots"
-              ? 24
+              ? 14
               : layerKey === "news"
                 ? 10
                 : layerKey === "liveStrikes"
@@ -437,10 +437,10 @@ export default function ConflictMap({
           getPosition: (d) => [d.lon, d.lat],
           getText: (d) => (d.country ? formatCountryMapLabelShort(d.country) : "HOTSPOT"),
           getColor: [255, 255, 255, 220],
-          getSize: 12,
+          getSize: 11,
           sizeUnits: "pixels",
-          sizeMinPixels: 10,
-          sizeMaxPixels: 14,
+          sizeMinPixels: 9,
+          sizeMaxPixels: 13,
           getPixelOffset: [0, -15],
           getTextAnchor: "middle",
           getAlignmentBaseline: "bottom",
