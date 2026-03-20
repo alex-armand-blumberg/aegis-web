@@ -235,7 +235,7 @@ export default function ConflictMap({
         pickable: true,
         filled: true,
         stroked: false,
-        getFillColor: [0, 0, 0, 0],
+        getFillColor: [0, 0, 0, 1],
         onClick: ({ object }) => {
           const rawName = getFeatureCountryName(object).trim();
           if (!rawName) return;
@@ -260,7 +260,7 @@ export default function ConflictMap({
         pickable: true,
         filled: true,
         stroked: false,
-        getFillColor: [0, 0, 0, 0],
+        getFillColor: [0, 0, 0, 1],
         onClick: ({ object }) => {
           const feature = object as {
             properties?: { regionKey?: string; name?: string };

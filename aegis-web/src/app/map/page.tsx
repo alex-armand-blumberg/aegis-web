@@ -496,6 +496,32 @@ export default function MapPage() {
   const toggleLayer = (layer: IntelLayerKey) => {
     setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
   };
+
+  const regionPanelData: RegionIntelResponse | null = useMemo(() => {
+    if (regionIntel) return regionIntel;
+    if (!selectedRegion) return null;
+    return {
+      selection: selectedRegion,
+      range,
+      updatedAt: new Date().toISOString(),
+      escalationIndex: 0,
+      conflictIndex: 0,
+      status: "stable",
+      signals: {
+        liveStrikes: 0,
+        conflicts: 0,
+        militaryFlights: 0,
+        navalVessels: 0,
+        carrierSignals: 0,
+        criticalNews: 0,
+        infrastructure: 0,
+      },
+      timeline: [],
+      topNews: [],
+      dataPoints: [],
+    };
+  }, [regionIntel, selectedRegion, range]);
+
   return (
     <div className="map-page min-h-screen text-[#e2e8f0]">
       <nav>
@@ -708,9 +734,9 @@ export default function MapPage() {
               />
             )}
 
-            {selectedRegion && regionIntel && (
+            {selectedRegion && regionPanelData && (
               <RegionIntelPanel
-                data={regionIntel}
+                data={regionPanelData}
                 imageUrl={regionHeroImage}
                 imageLoading={regionHeroLoading}
                 aiSummary={regionAiSummary}
