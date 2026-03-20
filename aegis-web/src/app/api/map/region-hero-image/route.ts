@@ -26,12 +26,32 @@ function isFlagLikeUrl(url: string): boolean {
   );
 }
 
+function isLikelyGraphicMapUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  return (
+    u.includes("map") ||
+    u.includes("maps") ||
+    u.includes("border") ||
+    u.includes("infographic") ||
+    u.includes("graphic") ||
+    u.includes("diagram") ||
+    u.includes("vector") ||
+    u.includes("icon") ||
+    u.includes("chart") ||
+    u.includes("illustration") ||
+    u.includes("render")
+  );
+}
+
 function buildRegionImageQuery(name: string, kind: string): string {
   const suffix =
     kind === "ocean"
-      ? "maritime security conflict photo"
-      : "geopolitical conflict photo";
-  return `${name} ${suffix}`.replace(/\s+/g, " ").trim().slice(0, 220);
+      ? "maritime security conflict photojournalism"
+      : "geopolitical conflict event photojournalism";
+  return `${name} ${suffix} -map -border -infographic -diagram -graphic -flag`
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 260);
 }
 
 export async function GET(request: Request) {
@@ -56,7 +76,7 @@ export async function GET(request: Request) {
 
   const query = buildRegionImageQuery(name, kind);
   const candidates = (await fetchSerperImageUrls(query, apiKey)).filter(
-    (url) => !isFlagLikeUrl(url)
+    (url) => !isFlagLikeUrl(url) && !isLikelyGraphicMapUrl(url)
   );
   const picked = pickFirstNonExcludedImageUrl({ candidates, exclude });
   if (!picked) {

@@ -99,6 +99,7 @@ export default function MapPage() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const recenterRef = useRef<(() => void) | null>(null);
   const aiSummaryCacheRef = useRef<Record<string, string>>({});
+  const usedRegionImagesRef = useRef<Set<string>>(new Set());
 
   const requestedLayerList = useMemo(
     () => ALL_LAYERS.filter((k) => activeLayers[k]).join(","),
@@ -174,10 +175,19 @@ export default function MapPage() {
     };
     const loadImage = async () => {
       setRegionHeroLoading(true);
+      setRegionHeroImage(null);
       try {
-        const res = await fetch(`/api/map/region-hero-image?${qs}`);
+        const exclude = Array.from(usedRegionImagesRef.current).slice(-40).join(",");
+        const imageQs = exclude ? `${qs}&exclude=${encodeURIComponent(exclude)}` : qs;
+        const res = await fetch(`/api/map/region-hero-image?${imageQs}`);
         const data = (await res.json()) as { imageUrl?: string };
-        if (active) setRegionHeroImage(res.ok ? data.imageUrl || null : null);
+        if (active) {
+          const picked = res.ok ? data.imageUrl || null : null;
+          setRegionHeroImage(picked);
+          if (picked && /^https?:\/\//i.test(picked)) {
+            usedRegionImagesRef.current.add(picked);
+          }
+        }
       } catch {
         if (active) setRegionHeroImage(null);
       } finally {
