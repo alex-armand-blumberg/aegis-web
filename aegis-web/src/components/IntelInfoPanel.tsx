@@ -212,10 +212,8 @@ export default function IntelInfoPanel({
 
     // Only try "event-hero-image" when:
     // - we don't already have a direct image from the point
-    // - we have a usable sourceUrl to anchor the event
     // - the article-image lookup has completed and returned null
     if (fromPointImage) return;
-    if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return;
     if (!articleImageLookupDone) return;
     if (resolvedArticleImage) return;
 
@@ -235,7 +233,10 @@ export default function IntelInfoPanel({
       const eventType = readMetaString(point.metadata, ["event_type", "eventType"]) ?? "";
       const originalHeadline =
         readMetaString(point.metadata, ["original_headline"]) ?? readMetaString(point.metadata, ["headline"]);
-      const titleForSearch = (originalHeadline ?? point.title).slice(0, 120);
+      const titleForSearch =
+        point.layer === "hotspots"
+          ? `${point.country ?? ""} conflict escalation`
+          : (originalHeadline ?? point.title).slice(0, 120);
       const params = new URLSearchParams({
         title: titleForSearch,
         country: point.country ?? "",
@@ -290,9 +291,7 @@ export default function IntelInfoPanel({
     fromPointImage ||
     resolvedArticleImage ||
     resolvedEventImage ||
-    articleImageLoading || eventHeroImageLoading
-    ? ""
-    : heroPlaceholderForPoint(point);
+    heroPlaceholderForPoint(point);
 
   // Record successful online hero images so subsequent searches avoid repeats.
   useEffect(() => {
