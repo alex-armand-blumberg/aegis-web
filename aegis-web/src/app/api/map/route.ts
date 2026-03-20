@@ -5,9 +5,6 @@ import { countryFromIcao24Hex } from "@/lib/icao24HexCountry";
 import { countryFromMmsi } from "@/lib/mmsiMidCountry";
 import { countryFromNavalOrCommercialName } from "@/lib/vesselNameCountry";
 import { aisShipTypeCodeToLabel } from "@/lib/aisShipType";
-import {
-  getNaturalEarthCountryCentersMap,
-} from "@/lib/naturalEarthCountryCenters";
 import type {
   ActiveConflictCountry,
   EscalationRiskCountry,
@@ -4839,22 +4836,35 @@ async function fetchStrategicInfrastructure(): Promise<{
 }
 
 function buildHotspots(
-  layers: Record<IntelLayerKey, IntelPoint[]>,
-  countryCenters: Map<string, { lat: number; lon: number }>
+  layers: Record<IntelLayerKey, IntelPoint[]>
 ): IntelPoint[] {
   const scoreByCountry = new Map<
     string,
-    { score: number; sampleLat: number; sampleLon: number; latestTs: string }
+    {
+      weightSum: number;
+      latWeightedSum: number;
+      lonWeightedSum: number;
+      sampleLat: number;
+      sampleLon: number;
+      score: number;
+      latestTs: string;
+    }
   >();
 
   const push = (p: IntelPoint, weight: number) => {
     if (!p.country) return;
     const current = scoreByCountry.get(p.country) ?? {
-      score: 0,
+      weightSum: 0,
+      latWeightedSum: 0,
+      lonWeightedSum: 0,
       sampleLat: p.lat,
       sampleLon: p.lon,
+      score: 0,
       latestTs: p.timestamp,
     };
+    current.weightSum += weight;
+    current.latWeightedSum += p.lat * weight;
+    current.lonWeightedSum += p.lon * weight;
     current.score += weight;
     if (p.timestamp > current.latestTs) {
       current.latestTs = p.timestamp;
@@ -4881,16 +4891,8 @@ function buildHotspots(
       layer: "hotspots",
       title: `${formatCountryDisplayName(country)} hotspot`,
       subtitle: "Composite cross-layer activity score",
-      lat: (() => {
-        const bbox = COUNTRY_BBOX[country];
-        if (bbox) return bbox[4];
-        return countryCenters.get(normalizeCountryKey(country))?.lat ?? s.sampleLat;
-      })(),
-      lon: (() => {
-        const bbox = COUNTRY_BBOX[country];
-        if (bbox) return bbox[5];
-        return countryCenters.get(normalizeCountryKey(country))?.lon ?? s.sampleLon;
-      })(),
+      lat: s.weightSum > 0 ? s.latWeightedSum / s.weightSum : s.sampleLat,
+      lon: s.weightSum > 0 ? s.lonWeightedSum / s.weightSum : s.sampleLon,
       country: formatCountryDisplayName(country),
       severity: mapSeverity(Math.min(1, s.score / 50)),
       source: "AEGIS fusion",
@@ -5672,8 +5674,7 @@ export async function GET(request: Request) {
       ).slice(0, 2200),
     };
 
-    const countryCenters = await getNaturalEarthCountryCentersMap();
-    baseLayers.hotspots = buildHotspots(baseLayers, countryCenters);
+    baseLayers.hotspots = buildHotspots(baseLayers);
     const frontline = await buildFrontlineOverlays();
 
     const response: MapApiResponse = {

@@ -287,11 +287,7 @@ export default function IntelInfoPanel({
     articleImageLookupDone,
   ]);
 
-  const imageUrl =
-    fromPointImage ||
-    resolvedArticleImage ||
-    resolvedEventImage ||
-    heroPlaceholderForPoint(point);
+  const imageUrl = fromPointImage || resolvedArticleImage || resolvedEventImage || null;
 
   // Record successful online hero images so subsequent searches avoid repeats.
   useEffect(() => {
