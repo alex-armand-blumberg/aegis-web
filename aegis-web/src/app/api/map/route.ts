@@ -4,6 +4,7 @@ import { formatCountryDisplayName } from "@/lib/countryDisplay";
 import { countryFromIcao24Hex } from "@/lib/icao24HexCountry";
 import { countryFromMmsi } from "@/lib/mmsiMidCountry";
 import { countryFromNavalOrCommercialName } from "@/lib/vesselNameCountry";
+import { aisShipTypeCodeToLabel } from "@/lib/aisShipType";
 import type {
   ActiveConflictCountry,
   EscalationRiskCountry,
@@ -1078,17 +1079,36 @@ function inferVesselPurposeFromName(name: string): string {
   if (/\b(DESTROYER|FRIGATE|CORVETTE|CRUISER|DDG|CG-|FFG)\b/.test(t)) {
     return "Surface combatant";
   }
+
+  // Commercial / merchant hints (relay often lacks static AIS ship type).
+  if (/\b(LNG|LNGC)\b/.test(t)) return "Gas carrier operations (LNG)";
+  if (/\b(LPG|LPGC)\b/.test(t)) return "Gas carrier operations (LPG)";
+  if (/\b(TANKER|CRUDE|PRODUCT|VLCC|ULCC|AFRAMAX|AFRA\s*MAX)\b/.test(t)) {
+    return "Oil/refined product transport";
+  }
+  if (/\b(BULK|CAPE\s*SIZE|PANAMAX|SUPRAMAX|HANDYSIZE)\b/.test(t)) {
+    return "Bulk cargo operations";
+  }
+  if (/\b(CONTAINER|CONTAINERS|FEEDER|\bTEU\b|BOX)\b/.test(t)) return "Container shipping";
+  if (/\b(RO-?RO|RORO|ROLL[-\s]?ON|ROLL[-\s]?OFF)\b/.test(t)) return "Ro-Ro / vehicle operations";
+  if (/\b(FISHING|FISH|TRAWL|SEINER)\b/.test(t)) return "Fishing operations";
+  if (/\b(REEFER|REFRIG)\b/.test(t)) return "Refrigerated cargo (reefer)";
+  if (/\b(OFFSHORE|PSV|AHTS|OSV|SUPPLY)\b/.test(t)) return "Offshore support / service";
+  if (/\b(TUG|TUGBOAT)\b/.test(t)) return "Tug / harbor support";
+  if (/\b(BARGE)\b/.test(t)) return "Barge / workboat operations";
+  if (/\b(SEISMIC)\b/.test(t)) return "Seismic survey operations";
+
   return "Vessel activity";
 }
 
 /** Hull / platform class inferred from vessel name (AIS type often unavailable). */
 function inferVesselClassFromName(name: string): string {
   const t = name.toUpperCase();
-  if (/\b(CVN|CV-|AIRCRAFT CARRIER|CARRIER)\b/.test(t)) return "Aircraft carrier";
+  if (/\b(CVN|CV-)\b/.test(t) || /\bAIRCRAFT\s*CARRIER\b/.test(t)) return "Aircraft carrier";
   if (/\b(LHD|LHA|LPD|LPH|LST|LSV|LCAC|AMPHIB|ASSAULT|LANDING)\b/.test(t)) {
     return "Amphibious assault / landing ship";
   }
-  if (/\b(AOR|AOE|AKR|T-?AKR|T-?AO|MCM|LCC)\b/.test(t) || /\bUSNS\b/.test(t)) {
+  if (/\b(AOR|AOE|AKR|T-?AKR|T-?AO|MCM|LCC|LOGISTICS|SUPPLY|REPLENISH)\b/.test(t) || /\bUSNS\b/.test(t)) {
     return "Auxiliary / logistics / support";
   }
   if (/\b(DESTROYER|DDG|DD-)\b/.test(t)) return "Destroyer";
@@ -1096,10 +1116,29 @@ function inferVesselClassFromName(name: string): string {
   if (/\b(CRUISER|CG-|CGN)\b/.test(t)) return "Cruiser";
   if (/\b(SUBMARINE|SSN|SSBN|SSGN|SS-)\b/.test(t)) return "Submarine";
   if (/\b(PATROL|OPV|PC-|CGC|CUTTER)\b/.test(t)) return "Patrol / offshore / cutter";
-  if (/\b(USS|HMS|HMCS|HMAS|ROKS|INS|PLAN)\b/.test(t)) {
+
+  // Merchant / commercial vessel buckets (relay often lacks static AIS ship type).
+  if (/\b(LNG|LNGC)\b/.test(t)) return "LNG carrier";
+  if (/\b(LPG|LPGC)\b/.test(t)) return "LPG carrier";
+  if (/\b(TANKER|CRUDE|PRODUCT|VLCC|ULCC|AFRAMAX|AFRA\s*MAX)\b/.test(t)) return "Tanker";
+  if (/\b(BULK|CAPE\s*SIZE|PANAMAX|SUPRAMAX|HANDYSIZE)\b/.test(t)) return "Bulk carrier";
+  if (/\b(CONTAINER|CONTAINERS|FEEDER|\bTEU\b|BOX)\b/.test(t)) return "Container ship";
+  if (/\b(RO-?RO|RORO|CAR\s*CARRIER|ROLL[-\s]?ON|ROLL[-\s]?OFF)\b/.test(t)) {
+    return "Ro-Ro / car carrier";
+  }
+  if (/\b(FISHING|FISH|TRAWL|SEINER)\b/.test(t)) return "Fishing vessel";
+  if (/\b(REEFER|REFRIG)\b/.test(t)) return "Refrigerated cargo (reefer)";
+  if (/\b(OFFSHORE|PSV|AHTS|OSV)\b/.test(t)) return "Offshore support";
+  if (/\b(TUG|TUGBOAT)\b/.test(t)) return "Tug";
+  if (/\b(BARGE)\b/.test(t)) return "Barge / workboat";
+  if (/\b(SEISMIC)\b/.test(t)) return "Seismic survey vessel";
+
+  // Naval prefixes (fallback when name includes a service code but not a class token).
+  if (/\b(USS|USNS|HMS|HMCS|HMAS|ROKS|INS|PLAN|NAVE|MARINA|ARMADA)\b/.test(t)) {
     return "Naval combatant (class from name)";
   }
-  return "Merchant / unknown class";
+
+  return "Merchant / type not reported (AIS)";
 }
 
 /** Map relay `flag` strings to a country when possible (relays vary in format). */
@@ -4391,6 +4430,11 @@ async function fetchVesselSignals(): Promise<{
     flag?: string;
     speed?: number;
     updatedAt?: string;
+    ship_type?: number | string;
+    ais_type?: number | string;
+    ais_ship_type?: number | string;
+    type?: number | string;
+    shiptype?: number | string;
   }> = [];
   let relayFetchOkCount = 0;
   let relayFetchErrCount = 0;
@@ -4423,6 +4467,11 @@ async function fetchVesselSignals(): Promise<{
         flag?: string;
         speed?: number;
         updatedAt?: string;
+        ship_type?: number | string;
+        ais_type?: number | string;
+        ais_ship_type?: number | string;
+        type?: number | string;
+        shiptype?: number | string;
       }>;
     }>(parsedUrl.toString(), undefined, 12000);
 
@@ -4464,8 +4513,31 @@ async function fetchVesselSignals(): Promise<{
     const isInterestingVessel = true;
     if (!isInterestingVessel) continue;
 
-    const purpose = inferVesselPurposeFromName(name);
-    const vesselClass = inferVesselClassFromName(name);
+    const aisShipTypeRaw =
+      v.ship_type ?? v.ais_type ?? v.ais_ship_type ?? v.type ?? v.shiptype ?? null;
+    const aisShipTypeCode =
+      aisShipTypeRaw === null || aisShipTypeRaw === undefined
+        ? null
+        : (() => {
+            const n =
+              typeof aisShipTypeRaw === "number"
+                ? aisShipTypeRaw
+                : Number(String(aisShipTypeRaw).trim());
+            if (!Number.isFinite(n)) return null;
+            const code = Math.floor(n);
+            return code >= 0 && code <= 99 ? code : null;
+          })();
+    const aisLabel = aisShipTypeCodeToLabel(aisShipTypeCode);
+
+    const inferredPurpose = inferVesselPurposeFromName(name);
+    const inferredVesselClass = inferVesselClassFromName(name);
+    // Prefer AIS type when it's available (commercial traffic is often name-only on relays).
+    // Still allow naval keywords to override.
+    const vesselClass =
+      govByName || govByFlag
+        ? inferredVesselClass
+        : aisLabel ?? inferredVesselClass;
+    const purpose = inferredPurpose;
     const flagCountry = mapAISFlagToCountry(flag);
     const mmsiCountry = countryFromMmsi(String(v.id ?? "").trim());
     const nameCountry = countryFromNavalOrCommercialName(name);

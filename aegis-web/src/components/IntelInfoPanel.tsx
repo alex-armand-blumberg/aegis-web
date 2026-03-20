@@ -74,6 +74,36 @@ function readMetaString(
 
 const articleImageCache = new Map<string, string | null>();
 
+const eventHeroImageCache = new Map<string, string | null>();
+
+const USED_HERO_IMAGES_SESSION_KEY = "aegis-hero-used-images";
+const USED_HERO_IMAGES_MAX = 40;
+
+function readUsedHeroImagesFromSession(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.sessionStorage.getItem(USED_HERO_IMAGES_SESSION_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x) => typeof x === "string" && x.startsWith("http"));
+  } catch {
+    return [];
+  }
+}
+
+function pushUsedHeroImageToSession(url: string) {
+  if (typeof window === "undefined") return;
+  if (!url.startsWith("http")) return;
+  try {
+    const current = readUsedHeroImagesFromSession();
+    const next = [...current.filter((u) => u !== url), url].slice(-USED_HERO_IMAGES_MAX);
+    window.sessionStorage.setItem(USED_HERO_IMAGES_SESSION_KEY, JSON.stringify(next));
+  } catch {
+    // Best-effort only.
+  }
+}
+
 function heroPlaceholderForPoint(point: IntelPoint): string {
   switch (point.layer) {
     case "news":
@@ -102,6 +132,10 @@ export default function IntelInfoPanel({
 
   const [resolvedArticleImage, setResolvedArticleImage] = useState<string | null>(null);
   const [articleImageLoading, setArticleImageLoading] = useState(false);
+  const [articleImageLookupDone, setArticleImageLookupDone] = useState(false);
+
+  const [resolvedEventImage, setResolvedEventImage] = useState<string | null>(null);
+  const [eventHeroImageLoading, setEventHeroImageLoading] = useState(false);
 
   const cacheKey = useMemo(
     () => `${point.id}:${sourceUrl}`,
@@ -109,16 +143,26 @@ export default function IntelInfoPanel({
   );
 
   useEffect(() => {
+    setArticleImageLookupDone(false);
     setResolvedArticleImage(null);
     setArticleImageLoading(false);
+    setResolvedEventImage(null);
+    setEventHeroImageLoading(false);
 
-    if (fromPointImage) return;
+    if (fromPointImage) {
+      setArticleImageLookupDone(true);
+      return;
+    }
 
-    if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return;
+    if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) {
+      setArticleImageLookupDone(true);
+      return;
+    }
 
     const cached = articleImageCache.get(sourceUrl);
     if (cached !== undefined) {
       setResolvedArticleImage(cached);
+      setArticleImageLookupDone(true);
       return;
     }
 
@@ -138,6 +182,7 @@ export default function IntelInfoPanel({
           if (!cancelled) {
             setResolvedArticleImage(url);
             setArticleImageLoading(false);
+            setArticleImageLookupDone(true);
           }
         })
         .catch(() => {
@@ -145,6 +190,7 @@ export default function IntelInfoPanel({
           if (!cancelled) {
             setResolvedArticleImage(null);
             setArticleImageLoading(false);
+            setArticleImageLookupDone(true);
           }
         });
     }, 280);
@@ -155,10 +201,104 @@ export default function IntelInfoPanel({
     };
   }, [cacheKey, fromPointImage, sourceUrl]);
 
+  const eventCacheKey = useMemo(
+    () => `${point.layer}|${point.id}`.slice(0, 220),
+    [point.layer, point.id]
+  );
+
+  useEffect(() => {
+    setResolvedEventImage(null);
+    setEventHeroImageLoading(false);
+
+    // Only try "event-hero-image" when:
+    // - we don't already have a direct image from the point
+    // - we have a usable sourceUrl to anchor the event
+    // - the article-image lookup has completed and returned null
+    if (fromPointImage) return;
+    if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return;
+    if (!articleImageLookupDone) return;
+    if (resolvedArticleImage) return;
+
+    const used = readUsedHeroImagesFromSession();
+    const exclude = used.slice(-30);
+    const excludeSet = new Set(exclude);
+
+    const cached = eventHeroImageCache.get(eventCacheKey);
+    if (cached !== undefined) {
+      if (cached && !excludeSet.has(cached)) setResolvedEventImage(cached);
+      return;
+    }
+
+    let cancelled = false;
+    const debounce = window.setTimeout(async () => {
+      setEventHeroImageLoading(true);
+      const eventType = readMetaString(point.metadata, ["event_type", "eventType"]) ?? "";
+      const params = new URLSearchParams({
+        title: point.title.slice(0, 120),
+        country: point.country ?? "",
+        layer: point.layer,
+        eventType,
+        exclude: exclude.join(","),
+      });
+      try {
+        const res = await fetch(`/api/map/event-hero-image?${params.toString()}`);
+        if (!res.ok) {
+          eventHeroImageCache.set(eventCacheKey, null);
+          if (!cancelled) setEventHeroImageLoading(false);
+          return;
+        }
+        const data = (await res.json()) as { imageUrl?: string };
+        const url = typeof data.imageUrl === "string" ? data.imageUrl.trim() : "";
+        if (!url) {
+          eventHeroImageCache.set(eventCacheKey, null);
+          if (!cancelled) setEventHeroImageLoading(false);
+          return;
+        }
+
+        eventHeroImageCache.set(eventCacheKey, url);
+        pushUsedHeroImageToSession(url);
+        if (!cancelled) {
+          setResolvedEventImage(url);
+          setEventHeroImageLoading(false);
+        }
+      } catch {
+        eventHeroImageCache.set(eventCacheKey, null);
+        if (!cancelled) setEventHeroImageLoading(false);
+      }
+    }, 320);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(debounce);
+    };
+  }, [
+    eventCacheKey,
+    fromPointImage,
+    point.layer,
+    point.title,
+    point.country,
+    point.metadata,
+    resolvedArticleImage,
+    sourceUrl,
+    articleImageLookupDone,
+  ]);
+
   const imageUrl =
     fromPointImage ||
     resolvedArticleImage ||
-    (articleImageLoading ? "" : heroPlaceholderForPoint(point));
+    resolvedEventImage ||
+    articleImageLoading || eventHeroImageLoading
+    ? ""
+    : heroPlaceholderForPoint(point);
+
+  // Record successful online hero images so subsequent searches avoid repeats.
+  useEffect(() => {
+    if (!imageUrl) return;
+    if (imageUrl.startsWith("/")) return; // local placeholders/assets
+    if (!imageUrl.startsWith("http")) return;
+    pushUsedHeroImageToSession(imageUrl);
+  }, [imageUrl]);
+
   const aiBulletLines = (aiSummary ?? "")
     .split("\n")
     .map((line) => line.trim())
@@ -215,7 +355,7 @@ export default function IntelInfoPanel({
         x
       </button>
       <div className="intel-side-header">
-        {articleImageLoading && !fromPointImage ? (
+        {(articleImageLoading || eventHeroImageLoading) && !fromPointImage ? (
           <div className="intel-side-image intel-side-image-loading" aria-hidden />
         ) : null}
         {imageUrl ? (
