@@ -23,6 +23,50 @@ function severityColor(severity: IntelPoint["severity"]): string {
   }
 }
 
+/** Human-readable labels for common metadata keys (API still uses snake_case). */
+const METADATA_LABELS: Record<string, string> = {
+  origin_country: "Origin country",
+  aircraft_platform: "Aircraft type",
+  vessel_class: "Vessel type",
+  vessel_category: "Vessel category",
+  purpose: "Mission / role",
+  aircraft_role: "Mission / role",
+  troop_unit_hint: "Unit / formation (hint)",
+  unit_or_branch: "Unit / branch",
+  branch_or_unit: "Unit / branch",
+  ais_flag: "AIS flag (raw)",
+  flag_country: "Flag country",
+  speed_knots: "Speed (kn)",
+  speed_kts: "Speed (kn)",
+  velocity_ms: "Speed (m/s)",
+  altitude_m: "Altitude (m)",
+  heading_deg: "Heading (°)",
+  vertical_rate_ms: "Vertical rate (m/s)",
+  squawk: "Squawk",
+  icao24: "ICAO24",
+  hex: "Mode S hex",
+  callsign: "Callsign",
+  mmsi: "MMSI / id",
+  inferred_military_movement: "Military-like movement",
+  on_ground: "On ground",
+};
+
+function formatMetadataLabel(key: string): string {
+  return METADATA_LABELS[key] ?? key.replaceAll("_", " ");
+}
+
+function readMetaString(
+  meta: IntelPoint["metadata"],
+  keys: string[]
+): string | undefined {
+  if (!meta) return undefined;
+  for (const k of keys) {
+    const v = meta[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
 export default function IntelInfoPanel({
   point,
   providerHealth,
@@ -39,6 +83,47 @@ export default function IntelInfoPanel({
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => line.replace(/^[-*•]\s*/, ""));
+
+  const displayCountry =
+    point.country ||
+    readMetaString(point.metadata, ["country", "origin_country", "flag_country"]);
+  const aircraftOrHeloType = readMetaString(point.metadata, [
+    "aircraft_platform",
+    "aircraft_type",
+  ]);
+  const vesselType = readMetaString(point.metadata, [
+    "vessel_class",
+    "vessel_category",
+  ]);
+  const troopUnitHint = readMetaString(point.metadata, [
+    "troop_unit_hint",
+    "unit_or_branch",
+    "branch_or_unit",
+  ]);
+  const platformSummary =
+    point.layer === "flights"
+      ? aircraftOrHeloType
+      : point.layer === "vessels" || point.layer === "carriers"
+        ? vesselType
+        : point.layer === "infrastructure" || point.layer === "troopMovements"
+          ? troopUnitHint
+          : undefined;
+
+  const metadataEntries = point.metadata ? Object.entries(point.metadata) : [];
+  const hiddenMetadataKeys = new Set([
+    "country",
+    "origin_country",
+    "flag_country",
+    "aircraft_type",
+    "aircraft_platform",
+    "aircraft_type",
+    "vessel_class",
+    "vessel_category",
+    "troop_unit_hint",
+    "unit_or_branch",
+    "branch_or_unit",
+  ]);
+
   return (
     <aside className="intel-side-panel">
       <button type="button" className="intel-side-close" onClick={onClose}>
@@ -58,6 +143,22 @@ export default function IntelInfoPanel({
       </div>
 
       <div className="intel-side-grid">
+        <div className="intel-side-item">
+          <span>Country</span>
+          <strong>{displayCountry ?? "Unknown / not resolved"}</strong>
+        </div>
+        {platformSummary ? (
+          <div className="intel-side-item">
+            <span>
+              {point.layer === "flights"
+                ? "Aircraft type"
+                : point.layer === "vessels" || point.layer === "carriers"
+                  ? "Vessel type"
+                  : "Unit / branch"}
+            </span>
+            <strong>{platformSummary}</strong>
+          </div>
+        ) : null}
         <div className="intel-side-item">
           <span>Severity</span>
           <strong style={{ color: severityColor(point.severity) }}>
@@ -82,15 +183,17 @@ export default function IntelInfoPanel({
         </div>
       </div>
 
-      {point.metadata && (
+      {metadataEntries.length > 0 && (
         <div className="intel-side-metadata">
           <div className="intel-side-subtitle">Signal data</div>
-          {Object.entries(point.metadata).map(([k, v]) => (
-            <div key={k} className="intel-side-item">
-              <span>{k.replaceAll("_", " ")}</span>
-              <strong>{String(v)}</strong>
-            </div>
-          ))}
+          {metadataEntries
+            .filter(([k]) => !hiddenMetadataKeys.has(k))
+            .map(([k, v]) => (
+              <div key={k} className="intel-side-item">
+                <span>{formatMetadataLabel(k)}</span>
+                <strong>{String(v)}</strong>
+              </div>
+            ))}
         </div>
       )}
 

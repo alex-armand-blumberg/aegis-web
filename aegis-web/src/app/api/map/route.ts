@@ -624,6 +624,23 @@ function inferAircraftRole(callsign: string): string {
   return "Military flight";
 }
 
+/** Fixed-wing vs helicopter vs tilt-rotor for click-through detail. */
+function inferAircraftPlatformCategory(callsign: string): string {
+  const c = callsign.toUpperCase();
+  if (/\b(MV-|CV-|V-?22|OSPREY)\b/.test(c)) return "Tilt-rotor aircraft";
+  if (
+    /\b(MH-|UH-|AH-|SH-|CH-|HH-|TH-|VH-|ZH-|OH-|HAWK|CHINOOK|APACHE|SEAHAWK|BLACKHAWK|HELICOPTER|HELO|ROTOR|PAVE|HUEY|HIND|MERLIN|SEAKING|SEAHAWK|VIKING|HUSKY)\b/.test(
+      c
+    )
+  ) {
+    return "Helicopter / rotorcraft";
+  }
+  if (/\b(AWACS|E-?3|E-?2|FORTE|RQ|MQ|UAV|DRONE|UAV|GLOBAL\s*HAWK)\b/.test(c)) {
+    return "ISR / special mission (fixed-wing)";
+  }
+  return "Fixed-wing aircraft";
+}
+
 function isLikelyMilitaryAdsbLolRow(
   callsign: string,
   velocity: number,
@@ -683,20 +700,23 @@ function extractOpenSkyMilitaryPoints(
     const norm = Math.min(1, velocity / 320);
     const speedKts = Number((velocity * 1.943844).toFixed(1));
     const role = inferAircraftRole(callsign);
+    const platform = inferAircraftPlatformCategory(callsign);
 
     points.push({
       id: `flight-${icao24 || `${callsign}-${lat}-${lon}`}`,
       layer: "flights",
       title: callsign || "Military flight",
-      subtitle: `${country || "Unknown origin"} • ${role}`,
+      subtitle: `${country || "Unknown origin"} • ${platform} • ${role}`,
       lat,
       lon,
+      country: country || undefined,
       severity: mapSeverity(norm),
       source: "OpenSky",
       timestamp: new Date(timestampSeconds * 1000).toISOString(),
       magnitude: velocity,
       confidence: 0.65,
       metadata: {
+        country: country || null,
         velocity_ms: velocity,
         speed_kts: speedKts,
         altitude_m: altitude,
@@ -708,6 +728,8 @@ function extractOpenSkyMilitaryPoints(
         origin_country: country || null,
         on_ground: onGround,
         aircraft_role: role,
+        aircraft_platform: platform,
+        aircraft_type: platform,
         purpose: role,
       },
     });
@@ -807,12 +829,13 @@ async function fetchOpenSkyFlights(): Promise<{
     const altitude = Number(flight.alt_baro) || 0;
     const speedKts = Number((velocity * 1.943844).toFixed(1));
     const role = inferAircraftRole(callsign || "");
+    const platform = inferAircraftPlatformCategory(callsign || "");
     const country = inferCountryFromLatLon(lat, lon);
     points.push({
       id: `flight-fallback-${flight.hex ?? `${lat}-${lon}`}`,
       layer: "flights",
       title: callsign || "Military flight",
-      subtitle: country ? `${role} • ${country} • adsb.lol v2/mil` : `${role} • adsb.lol v2/mil`,
+      subtitle: country ? `${platform} • ${role} • ${country} • adsb.lol v2/mil` : `${platform} • ${role} • adsb.lol v2/mil`,
       lat,
       lon,
       country,
@@ -822,6 +845,7 @@ async function fetchOpenSkyFlights(): Promise<{
       magnitude: velocity,
       confidence: 0.55,
       metadata: {
+        country: country || null,
         velocity_ms: velocity,
         speed_kts: speedKts,
         altitude_m: altitude,
@@ -829,6 +853,8 @@ async function fetchOpenSkyFlights(): Promise<{
         callsign: callsign || null,
         hex: String(flight.hex ?? "").trim() || null,
         aircraft_role: role,
+        aircraft_platform: platform,
+        aircraft_type: platform,
         purpose: role,
       },
     });
@@ -874,13 +900,14 @@ async function fetchOpenSkyFlights(): Promise<{
       if (!isLikelyMilitaryAdsbLolRow(callsign, velocity, altitude)) continue;
       const speedKts = Number((velocity * 1.943844).toFixed(1));
       const role = inferAircraftRole(callsign);
+      const platform = inferAircraftPlatformCategory(callsign);
       const country = inferCountryFromLatLon(lat, lon);
 
       points.push({
         id: `flight-grid-${c.label}-${flight.hex ?? `${lat}-${lon}`}`,
         layer: "flights",
         title: callsign,
-        subtitle: country ? `${role} • ${country} • adsb.lol grid` : `${role} • adsb.lol grid`,
+        subtitle: country ? `${platform} • ${role} • ${country} • adsb.lol grid` : `${platform} • ${role} • adsb.lol grid`,
         lat,
         lon,
         country,
@@ -890,6 +917,7 @@ async function fetchOpenSkyFlights(): Promise<{
         magnitude: velocity,
         confidence: 0.45,
         metadata: {
+          country: country || null,
           velocity_ms: velocity,
           speed_kts: speedKts,
           altitude_m: altitude,
@@ -897,6 +925,8 @@ async function fetchOpenSkyFlights(): Promise<{
           callsign: callsign || null,
           hex: String(flight.hex ?? "").trim() || null,
           aircraft_role: role,
+          aircraft_platform: platform,
+          aircraft_type: platform,
           purpose: role,
         },
       });
@@ -973,6 +1003,108 @@ function inferVesselPurposeFromName(name: string): string {
     return "Surface combatant";
   }
   return "Vessel activity";
+}
+
+/** Hull / platform class inferred from vessel name (AIS type often unavailable). */
+function inferVesselClassFromName(name: string): string {
+  const t = name.toUpperCase();
+  if (/\b(CVN|CV-|AIRCRAFT CARRIER|CARRIER)\b/.test(t)) return "Aircraft carrier";
+  if (/\b(LHD|LHA|LPD|LPH|LST|LSV|LCAC|AMPHIB|ASSAULT|LANDING)\b/.test(t)) {
+    return "Amphibious assault / landing ship";
+  }
+  if (/\b(AOR|AOE|AKR|T-?AKR|T-?AO|MCM|LCC)\b/.test(t) || /\bUSNS\b/.test(t)) {
+    return "Auxiliary / logistics / support";
+  }
+  if (/\b(DESTROYER|DDG|DD-)\b/.test(t)) return "Destroyer";
+  if (/\b(FRIGATE|FFG|FF-|CORVETTE)\b/.test(t)) return "Frigate / corvette";
+  if (/\b(CRUISER|CG-|CGN)\b/.test(t)) return "Cruiser";
+  if (/\b(SUBMARINE|SSN|SSBN|SSGN|SS-)\b/.test(t)) return "Submarine";
+  if (/\b(PATROL|OPV|PC-|CGC|CUTTER)\b/.test(t)) return "Patrol / offshore / cutter";
+  if (/\b(USS|HMS|HMCS|HMAS|ROKS|INS|PLAN)\b/.test(t)) {
+    return "Naval combatant (class from name)";
+  }
+  return "Merchant / unknown class";
+}
+
+/** Map relay `flag` strings to a country when possible (relays vary in format). */
+function mapAISFlagToCountry(flag: string): string | undefined {
+  const raw = flag.trim();
+  if (!raw) return undefined;
+  const u = raw.toUpperCase().replace(/\s+/g, " ");
+  const direct: Record<string, string> = {
+    US: "United States",
+    USA: "United States",
+    "UNITED STATES": "United States",
+    UK: "United Kingdom",
+    GB: "United Kingdom",
+    "UNITED KINGDOM": "United Kingdom",
+    CA: "Canada",
+    AU: "Australia",
+    NZ: "New Zealand",
+    JP: "Japan",
+    KR: "South Korea",
+    ROK: "South Korea",
+    CN: "China",
+    RU: "Russia",
+    RF: "Russia",
+    IN: "India",
+    FR: "France",
+    DE: "Germany",
+    IT: "Italy",
+    ES: "Spain",
+    NL: "Netherlands",
+    NO: "Norway",
+    SE: "Sweden",
+    DK: "Denmark",
+    FI: "Finland",
+    GR: "Greece",
+    TR: "Turkey",
+    IL: "Israel",
+    EG: "Egypt",
+    SA: "Saudi Arabia",
+    AE: "United Arab Emirates",
+    QA: "Qatar",
+    BH: "Bahrain",
+    KW: "Kuwait",
+    OM: "Oman",
+    BR: "Brazil",
+    AR: "Argentina",
+    CL: "Chile",
+    MX: "Mexico",
+    SG: "Singapore",
+    MY: "Malaysia",
+    ID: "Indonesia",
+    PH: "Philippines",
+    VN: "Vietnam",
+    TH: "Thailand",
+    PK: "Pakistan",
+    BD: "Bangladesh",
+    IR: "Iran",
+    IQ: "Iraq",
+    UA: "Ukraine",
+    PL: "Poland",
+    RO: "Romania",
+    BG: "Bulgaria",
+    NG: "Nigeria",
+    ZA: "South Africa",
+  };
+  if (direct[u]) return direct[u];
+  if (u.length === 2 && direct[u]) return direct[u];
+  for (const name of COUNTRY_NAMES) {
+    if (name.toUpperCase() === u) return name;
+  }
+  return undefined;
+}
+
+function extractTroopUnitHint(text: string): string | null {
+  const t = text.toLowerCase();
+  if (/\bnational guard\b/.test(t)) return "National Guard (mentioned)";
+  if (/\bmarine(s)?\b/.test(t) && /\bu\.?s\.?\b/.test(t)) return "U.S. Marine Corps (mentioned)";
+  if (/\bair force\b|\busaf\b/.test(t)) return "U.S. Air Force (mentioned)";
+  if (/\bnaval\b|\bu\.?s\.?\s*navy\b|\bnavy\b/.test(t)) return "U.S. Navy (mentioned)";
+  if (/\barmy\b/.test(t) && /\bu\.?s\.?\b/.test(t)) return "U.S. Army (mentioned)";
+  if (/\bcoast guard\b/.test(t)) return "U.S. Coast Guard (mentioned)";
+  return null;
 }
 
 function extractRssTag(block: string, tag: string): string | null {
@@ -2193,6 +2325,7 @@ async function fetchLawfareDomesticDeployments(rangeHours: number): Promise<{
             .split(" ")
             .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
             .join(" ");
+          const troopHint = extractTroopUnitHint(`${title} ${description}`) ?? "State-level signal (no specific unit parsed)";
           points.push({
             id: `lawfare-rss-${state.replace(/\s+/g, "-")}-${i}`,
             layer: "infrastructure",
@@ -2208,6 +2341,8 @@ async function fetchLawfareDomesticDeployments(rangeHours: number): Promise<{
             confidence: 0.52,
             metadata: {
               event_type: "us_troop_deployment",
+              troop_unit_hint: troopHint,
+              unit_or_branch: troopHint,
               source_url: extractRssTag(blocks[i], "link") || url,
               state: stateName,
               original_headline: title || `Domestic deployment mention: ${stateName}`,
@@ -2251,6 +2386,7 @@ async function fetchLawfareDomesticDeployments(rangeHours: number): Promise<{
         .split(" ")
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
         .join(" ");
+      const troopHint = extractTroopUnitHint(text) ?? "State-level signal (no specific unit parsed)";
       points.push({
         id: `lawfare-deploy-${state.replace(/\s+/g, "-")}`,
         layer: "infrastructure",
@@ -2266,6 +2402,8 @@ async function fetchLawfareDomesticDeployments(rangeHours: number): Promise<{
         confidence: 0.58,
         metadata: {
           event_type: "us_troop_deployment",
+          troop_unit_hint: troopHint,
+          unit_or_branch: troopHint,
           source_url: url,
           state: stateName,
           original_headline: `Domestic deployment mention: ${stateName}`,
@@ -4229,12 +4367,15 @@ async function fetchVesselSignals(): Promise<{
     if (!isInterestingVessel) continue;
 
     const purpose = inferVesselPurposeFromName(name);
-    const country = inferCountryFromLatLon(lat, lon);
+    const vesselClass = inferVesselClassFromName(name);
+    const flagCountry = mapAISFlagToCountry(flag);
+    const geoCountry = inferCountryFromLatLon(lat, lon);
+    const country = flagCountry ?? geoCountry;
     points.push({
       id: `vessel-${v.id ?? `${lat}-${lon}`}`,
       layer: "vessels",
       title: name || "Government vessel",
-      subtitle: `${purpose}${country ? ` • ${country}` : ""}${
+      subtitle: `${vesselClass}${purpose ? ` • ${purpose}` : ""}${country ? ` • ${country}` : ""}${
         govByName || govByFlag ? " • military-like pattern" : ""
       } • AIS snapshot`,
       lat,
@@ -4246,9 +4387,14 @@ async function fetchVesselSignals(): Promise<{
       magnitude: speed,
       confidence: govByName || govByFlag ? 0.7 : inferredMilitaryMovement ? 0.55 : 0.42,
       metadata: {
+        country: country || null,
+        vessel_class: vesselClass,
+        vessel_category: purpose,
+        purpose,
+        ais_flag: flag || null,
+        flag_country: flagCountry || null,
         speed_knots: speed,
         inferred_military_movement: inferredMilitaryMovement,
-        purpose,
         mmsi: String(v.id ?? "").trim() || null,
       },
     });
@@ -4351,6 +4497,8 @@ function extractCarrierGroups(vesselPoints: IntelPoint[]): IntelPoint[] {
       magnitude: Math.min(24, groupSize * 3),
       confidence: nearbyEscorts.length > 0 ? 0.8 : 0.62,
       metadata: {
+        vessel_class: "Aircraft carrier (CVN / group)",
+        carrier_group: "Carrier strike group",
         escorts_nearby: nearbyEscorts.length,
         grouped_units: groupSize,
       },
@@ -4392,6 +4540,8 @@ function extractCarrierGroups(vesselPoints: IntelPoint[]): IntelPoint[] {
         magnitude: Math.min(24, group.length * 2),
         confidence: 0.46,
         metadata: {
+          vessel_class: "Naval task group (surface)",
+          carrier_group: "Inferred task group",
           grouped_units: group.length,
           inference_mode: "task-group-cluster",
         },
@@ -4453,11 +4603,12 @@ async function fetchStrategicInfrastructure(): Promise<{
       const lat = Number(b.lat);
       const lon = Number(b.lon);
       if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
+      const arm = b.arm?.trim() || "";
       points.push({
         id: `base-${b.id ?? `${lat}-${lon}`}`,
         layer: "infrastructure",
         title: b.name?.trim() || "Military base",
-        subtitle: b.arm?.trim() || "Military installation",
+        subtitle: arm || "Military installation",
         lat,
         lon,
         country: b.country?.trim() || undefined,
@@ -4469,6 +4620,8 @@ async function fetchStrategicInfrastructure(): Promise<{
         metadata: {
           site_type: b.type?.trim() || "base",
           status: b.status?.trim() || "unknown",
+          branch_or_unit: arm || "Unknown branch / tenant",
+          unit_or_branch: arm || "Unknown branch / tenant",
         },
       });
     }
