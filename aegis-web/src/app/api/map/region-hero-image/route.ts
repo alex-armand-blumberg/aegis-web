@@ -43,15 +43,35 @@ function isLikelyGraphicMapUrl(url: string): boolean {
   );
 }
 
+function isLikelyBlackAndWhiteOrHistoricalUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  return (
+    u.includes("black-and-white") ||
+    u.includes("blackandwhite") ||
+    u.includes("black_white") ||
+    u.includes("grayscale") ||
+    u.includes("greyscale") ||
+    u.includes("monochrome") ||
+    u.includes("/bw/") ||
+    u.includes("-bw-") ||
+    u.includes("_bw_") ||
+    u.includes("vintage") ||
+    u.includes("archival") ||
+    u.includes("archive-photo") ||
+    u.includes("historic") ||
+    u.includes("historical")
+  );
+}
+
 function buildRegionImageQuery(name: string, kind: string): string {
   const suffix =
     kind === "ocean"
       ? "maritime security conflict photojournalism"
       : "geopolitical conflict event photojournalism";
-  return `${name} ${suffix} -map -border -infographic -diagram -graphic -flag`
+  return `${name} ${suffix} color current 2024 2025 2026 -map -border -infographic -diagram -graphic -flag -black-and-white -monochrome -historic -historical -archive -vintage`
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 260);
+    .slice(0, 320);
 }
 
 async function isRenderableImageUrl(url: string): Promise<boolean> {
@@ -107,7 +127,13 @@ async function fetchCommonsImageUrl(query: string, exclude: Set<string>): Promis
       const url = page.imageinfo?.[0]?.url ? String(page.imageinfo[0].url) : "";
       if (!url) continue;
       if (exclude.has(url)) continue;
-      if (isFlagLikeUrl(url) || isLikelyGraphicMapUrl(url)) continue;
+      if (
+        isFlagLikeUrl(url) ||
+        isLikelyGraphicMapUrl(url) ||
+        isLikelyBlackAndWhiteOrHistoricalUrl(url)
+      ) {
+        continue;
+      }
       if (await isRenderableImageUrl(url)) return url;
     }
     return null;
@@ -138,7 +164,10 @@ export async function GET(request: Request) {
 
   const query = buildRegionImageQuery(name, kind);
   const candidates = (await fetchSerperImageUrls(query, apiKey)).filter(
-    (url) => !isFlagLikeUrl(url) && !isLikelyGraphicMapUrl(url)
+    (url) =>
+      !isFlagLikeUrl(url) &&
+      !isLikelyGraphicMapUrl(url) &&
+      !isLikelyBlackAndWhiteOrHistoricalUrl(url)
   );
   const ranked = candidates.filter((url) => !exclude.has(url));
   let picked = pickFirstNonExcludedImageUrl({ candidates: ranked, exclude });
