@@ -46,7 +46,7 @@ export default function Home() {
       {/* Hero — no glow behind title (transparent), extra spacing, scroll-snap */}
       <section id="hero" className="snap-section relative z-10 flex min-h-screen flex-col items-center justify-center px-12 pb-20 pt-[120px] text-center">
         <p className="hero-tag relative z-10 mb-[22px] font-barlow-condensed text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--red)] opacity-0 animate-[fadeUp_0.6s_0.1s_forwards" style={{ animationFillMode: "forwards" }}>
-          ■ Palantir Valley Forge Grant Demo
+          ■ Palantir demo
         </p>
         <h1 className="hero-title relative z-10 font-bebas text-[clamp(86px,16vw,180px)] leading-[0.9] tracking-[0.04em] text-white opacity-0 animate-[fadeUp_0.7s_0.2s_forwards]" style={{ animationFillMode: "forwards" }}>
           AegisHQ.

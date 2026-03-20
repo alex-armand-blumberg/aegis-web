@@ -82,7 +82,7 @@ export default function Home() {
           src="/hero-bg.mp4"
           containerClassName="hero-video-bg"
         />
-        <div className="hero-tag">Palantir Valley Forge Grant Demo</div>
+        <div className="hero-tag">Palantir demo</div>
         <h1>AegisHQ</h1>
         <p className="hero-sub">
           Advanced Early-Warning &amp; Geostrategic Intelligence System
