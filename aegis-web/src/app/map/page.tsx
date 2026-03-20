@@ -11,6 +11,7 @@ import type {
   MapApiResponse,
 } from "@/lib/intel/types";
 import { layerColorCss } from "@/lib/intel/colors";
+import { formatCountryDisplayName } from "@/lib/countryDisplay";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
 import CountryIntelPanel from "@/components/CountryIntelPanel";
 
@@ -39,8 +40,8 @@ function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
   return {
     conflicts: true,
     liveStrikes: true,
-    flights: true,
-    vessels: true,
+    flights: false,
+    vessels: false,
     troopMovements: false,
     carriers: true,
     news: true,
@@ -64,14 +65,6 @@ function severityWeight(sev: IntelPoint["severity"]): number {
   if (sev === "high") return 3;
   if (sev === "medium") return 2;
   return 1;
-}
-
-function toTitleCase(value: string): string {
-  return value
-    .split(" ")
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(" ");
 }
 
 export default function MapPage() {
@@ -327,7 +320,7 @@ export default function MapPage() {
       .sort((a, b) => b.riskScore - a.riskScore)
       .slice(0, 8)
       .map((h) => ({
-        country: toTitleCase(h.country),
+        country: formatCountryDisplayName(h.country),
         score100: Math.max(0, Math.min(100, Math.round(h.riskScore * 5.5))),
         severity: h.severity,
         trend: h.trend,

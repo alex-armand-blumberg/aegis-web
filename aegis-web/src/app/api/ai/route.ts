@@ -149,6 +149,81 @@ function extractQueryFromPrompt(prompt: string): string {
   return trimmed.slice(0, 220);
 }
 
+/** Optional Tavily / Serper — adds real web snippets before Groq synthesis. */
+async function fetchTavilyWebSearch(query: string): Promise<string[]> {
+  const key = process.env.TAVILY_API_KEY?.trim();
+  if (!key) return [];
+  try {
+    const res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: key,
+        query: query.slice(0, 400),
+        search_depth: "basic",
+        max_results: 8,
+        include_answer: false,
+      }),
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as {
+      results?: Array<{ title?: string; url?: string; content?: string }>;
+    };
+    const out: string[] = [];
+    for (const r of json.results ?? []) {
+      const line = [r.title, r.url, r.content?.replace(/\s+/g, " ").slice(0, 380)].filter(Boolean).join(" — ");
+      if (line) out.push(line);
+    }
+    return out.slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchSerperWebSearch(query: string): Promise<string[]> {
+  const key = process.env.SERPER_API_KEY?.trim();
+  if (!key) return [];
+  try {
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": key },
+      body: JSON.stringify({ q: query.slice(0, 400), num: 8 }),
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as {
+      organic?: Array<{ title?: string; link?: string; snippet?: string }>;
+    };
+    const out: string[] = [];
+    for (const r of json.organic ?? []) {
+      const line = [r.title, r.link, r.snippet].filter(Boolean).join(" — ");
+      if (line) out.push(line);
+    }
+    return out.slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchWebSearchSnippets(query: string): Promise<string[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const tavily = await fetchTavilyWebSearch(q);
+  if (tavily.length > 0) return tavily;
+  return fetchSerperWebSearch(q);
+}
+
+function buildWebSearchQuery(prompt: string, mode: Mode): string {
+  const base = extractQueryFromPrompt(prompt);
+  if (mode === "map_insight") {
+    const headline = extractPromptField(prompt, "Headline");
+    const loc = extractPromptField(prompt, "Location country");
+    return [headline, loc, base].filter(Boolean).join(" ").trim().slice(0, 400);
+  }
+  return `${base} geopolitics conflict military`.replace(/\s+/g, " ").trim().slice(0, 400);
+}
+
 async function fetchOnlineContextForPrompt(prompt: string): Promise<string[]> {
   const query = extractQueryFromPrompt(prompt);
   if (!query) return [];
@@ -338,6 +413,19 @@ export async function POST(req: NextRequest) {
       if (related.length > 0) {
         enrichedPrompt = `${prompt}\n\nExternal online corroboration headlines:\n${related
           .map((h, i) => `${i + 1}. ${h}`)
+          .join("\n")}`;
+      }
+    }
+
+    const hasWebSearchKey = Boolean(
+      process.env.TAVILY_API_KEY?.trim() || process.env.SERPER_API_KEY?.trim()
+    );
+    if (hasWebSearchKey) {
+      const webQuery = buildWebSearchQuery(prompt, mode);
+      const webSnippets = await fetchWebSearchSnippets(webQuery);
+      if (webSnippets.length > 0) {
+        enrichedPrompt = `${enrichedPrompt}\n\nWeb search results (ground answers in these facts; do not invent sources):\n${webSnippets
+          .map((s, i) => `${i + 1}. ${s}`)
           .join("\n")}`;
       }
     }

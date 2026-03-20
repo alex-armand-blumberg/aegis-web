@@ -23,6 +23,13 @@
    ```
    (Without this, Escalation Index and Map still work; only AI insight buttons will fail.)
 
+   **Optional — web-backed AI answers:** add one of these so `/api/ai` can pull live web snippets before Groq synthesizes the reply (Tavily is tried first, then Serper if Tavily is unset or returns nothing):
+   ```
+   TAVILY_API_KEY=your_tavily_key
+   # or
+   SERPER_API_KEY=your_serper_key
+   ```
+
 4. **Start the dev server:**
    ```bash
    npm run dev
@@ -61,6 +68,7 @@
    - Name: `GROQ_API_KEY`  
    - Value: your Groq API key  
    (Optional; only needed for AI features.)
+   - Optional: `TAVILY_API_KEY` or `SERPER_API_KEY` for web search context in AI answers.
 6. Click **Deploy**.  
    Wait for the build to finish. You’ll get a URL like `aegis-web-xxx.vercel.app`.
 

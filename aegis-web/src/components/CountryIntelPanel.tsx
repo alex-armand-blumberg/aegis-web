@@ -1,6 +1,7 @@
 "use client";
 
 import type { CountryIntelResponse } from "@/lib/intel/types";
+import { formatCountryDisplayName } from "@/lib/countryDisplay";
 
 type CountryIntelPanelProps = {
   data: CountryIntelResponse;
@@ -21,7 +22,7 @@ export default function CountryIntelPanel({ data, onClose }: CountryIntelPanelPr
       </button>
       <div className="intel-side-header">
         <div className="intel-side-kicker">COUNTRY INTELLIGENCE</div>
-        <h3>{data.country}</h3>
+        <h3>{formatCountryDisplayName(data.country)}</h3>
         <p>{data.range.toUpperCase()} operational picture</p>
       </div>
 

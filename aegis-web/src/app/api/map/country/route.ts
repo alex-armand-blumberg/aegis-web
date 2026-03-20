@@ -1,26 +1,6 @@
 import { NextResponse } from "next/server";
 import type { CountryIntelResponse, MapApiResponse } from "@/lib/intel/types";
-
-function rangeToHours(range: string): number {
-  switch ((range || "").toLowerCase()) {
-    case "1h":
-      return 1;
-    case "6h":
-      return 6;
-    case "24h":
-      return 24;
-    case "7d":
-      return 24 * 7;
-    case "30d":
-      return 24 * 30;
-    default:
-      return 24 * 7;
-  }
-}
-
-function normCountry(v?: string): string {
-  return (v || "").replace(/\s+/g, " ").trim().toLowerCase();
-}
+import { countriesMatch, formatCountryDisplayName } from "@/lib/countryDisplay";
 
 function dayLabel(ts: number): string {
   const d = new Date(ts);
@@ -49,8 +29,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "failed to fetch map feeds" }, { status: 502 });
     }
 
-    const target = normCountry(country);
-    const inCountry = (pCountry?: string) => normCountry(pCountry) === target;
+    const displayCountry = formatCountryDisplayName(country);
+    const inCountry = (pCountry?: string) => countriesMatch(country, pCountry);
 
     const conflicts = mapData.layers.conflicts.filter((p) => inCountry(p.country));
     const liveStrikes = mapData.layers.liveStrikes.filter((p) => inCountry(p.country));
@@ -124,7 +104,7 @@ export async function GET(request: Request) {
       }));
 
     const response: CountryIntelResponse = {
-      country,
+      country: displayCountry || country,
       range,
       updatedAt: new Date().toISOString(),
       instabilityIndex,

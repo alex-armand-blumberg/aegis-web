@@ -15,6 +15,7 @@ import type {
   IntelPoint,
 } from "@/lib/intel/types";
 import { LAYER_COLORS } from "@/lib/intel/colors";
+import { formatCountryMapLabelShort } from "@/lib/countryDisplay";
 
 export type ConflictMapProps = {
   layers: Record<IntelLayerKey, IntelPoint[]>;
@@ -62,8 +63,15 @@ const COUNTRY_NAME_ALIASES: Record<string, string> = {
   "korea republic of": "south korea",
   "korea democratic peoples republic of": "north korea",
   "turkiye": "turkey",
+  // GeoJSON often uses “Palestine”; API canonical name is the full label below.
+  palestine: "judea & samaria / palestine",
 };
-const COUNTRY_HIGHLIGHT_DENYLIST = new Set(["india", "democratic republic of the congo"]);
+const COUNTRY_HIGHLIGHT_DENYLIST = new Set([
+  "india",
+  "democratic republic of the congo",
+  "mexico",
+  "chad",
+]);
 
 function isCountryHighlightDenied(name: string): boolean {
   const normalized = normalizeCountryName(name);
@@ -348,7 +356,7 @@ export default function ConflictMap({
           id: "hotspot-labels",
           data: layers.hotspots,
           getPosition: (d) => [d.lon, d.lat],
-          getText: (d) => (d.country ? d.country.toUpperCase() : "HOTSPOT"),
+          getText: (d) => (d.country ? formatCountryMapLabelShort(d.country) : "HOTSPOT"),
           getColor: [255, 255, 255, 220],
           getSize: 12,
           sizeUnits: "pixels",

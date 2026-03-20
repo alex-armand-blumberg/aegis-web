@@ -49,6 +49,10 @@ const METADATA_LABELS: Record<string, string> = {
   mmsi: "MMSI / id",
   inferred_military_movement: "Military-like movement",
   on_ground: "On ground",
+  mmsi_country: "Country (from MMSI)",
+  name_inferred_country: "Country (from vessel name)",
+  aircraft_type_extra: "Aircraft type (ADS-B)",
+  registration: "Registration",
 };
 
 function formatMetadataLabel(key: string): string {

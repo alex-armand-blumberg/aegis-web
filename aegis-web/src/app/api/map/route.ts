@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { COUNTRY_BBOX } from "@/lib/countryBounds";
+import { formatCountryDisplayName } from "@/lib/countryDisplay";
+import { countryFromIcao24Hex } from "@/lib/icao24HexCountry";
+import { countryFromMmsi } from "@/lib/mmsiMidCountry";
+import { countryFromNavalOrCommercialName } from "@/lib/vesselNameCountry";
 import type {
   ActiveConflictCountry,
   EscalationRiskCountry,
@@ -684,7 +688,7 @@ function extractOpenSkyMilitaryPoints(
   const points: IntelPoint[] = [];
   for (const r of rows ?? []) {
     const callsign = String(r[1] ?? "").trim();
-    const country = String(r[2] ?? "").trim();
+    const originCountry = String(r[2] ?? "").trim();
     const lon = Number(r[5]);
     const lat = Number(r[6]);
     if (Number.isNaN(lat) || Number.isNaN(lon)) continue;
@@ -696,11 +700,12 @@ function extractOpenSkyMilitaryPoints(
     const altitude = Number(r[13]) || baroAltitude;
     const squawk = String(r[14] ?? "").trim();
     const icao24 = String(r[0] ?? "").trim();
-    if (!isLikelyMilitaryOpenSkyRow(callsign, country, onGround, velocity, altitude)) continue;
+    if (!isLikelyMilitaryOpenSkyRow(callsign, originCountry, onGround, velocity, altitude)) continue;
     const norm = Math.min(1, velocity / 320);
     const speedKts = Number((velocity * 1.943844).toFixed(1));
     const role = inferAircraftRole(callsign);
     const platform = inferAircraftPlatformCategory(callsign);
+    const country = resolveFlightCountry(lat, lon, icao24, originCountry);
 
     points.push({
       id: `flight-${icao24 || `${callsign}-${lat}-${lon}`}`,
@@ -725,7 +730,7 @@ function extractOpenSkyMilitaryPoints(
         squawk: squawk || null,
         icao24: icao24 || null,
         callsign: callsign || null,
-        origin_country: country || null,
+        origin_country: originCountry || null,
         on_ground: onGround,
         aircraft_role: role,
         aircraft_platform: platform,
@@ -776,9 +781,11 @@ async function fetchOpenSkyFlights(): Promise<{
   );
 
   if (res.ok && res.data) {
-    const points = extractOpenSkyMilitaryPoints(
-      res.data.states,
-      res.data.time ?? Math.floor(Date.now() / 1000)
+    const points = await enrichFlightPointsWithAdsbHexMeta(
+      extractOpenSkyMilitaryPoints(
+        res.data.states,
+        res.data.time ?? Math.floor(Date.now() / 1000)
+      )
     );
     return {
       points: points.slice(0, 4500),
@@ -830,7 +837,8 @@ async function fetchOpenSkyFlights(): Promise<{
     const speedKts = Number((velocity * 1.943844).toFixed(1));
     const role = inferAircraftRole(callsign || "");
     const platform = inferAircraftPlatformCategory(callsign || "");
-    const country = inferCountryFromLatLon(lat, lon);
+    const hexStr = String(flight.hex ?? "").trim();
+    const country = resolveFlightCountry(lat, lon, hexStr, "");
     points.push({
       id: `flight-fallback-${flight.hex ?? `${lat}-${lon}`}`,
       layer: "flights",
@@ -849,9 +857,9 @@ async function fetchOpenSkyFlights(): Promise<{
         velocity_ms: velocity,
         speed_kts: speedKts,
         altitude_m: altitude,
-        icao24: String(flight.hex ?? "").trim() || null,
+        icao24: hexStr || null,
         callsign: callsign || null,
-        hex: String(flight.hex ?? "").trim() || null,
+        hex: hexStr || null,
         aircraft_role: role,
         aircraft_platform: platform,
         aircraft_type: platform,
@@ -901,7 +909,8 @@ async function fetchOpenSkyFlights(): Promise<{
       const speedKts = Number((velocity * 1.943844).toFixed(1));
       const role = inferAircraftRole(callsign);
       const platform = inferAircraftPlatformCategory(callsign);
-      const country = inferCountryFromLatLon(lat, lon);
+      const hexStr = String(flight.hex ?? "").trim();
+      const country = resolveFlightCountry(lat, lon, hexStr, "");
 
       points.push({
         id: `flight-grid-${c.label}-${flight.hex ?? `${lat}-${lon}`}`,
@@ -921,9 +930,9 @@ async function fetchOpenSkyFlights(): Promise<{
           velocity_ms: velocity,
           speed_kts: speedKts,
           altitude_m: altitude,
-          icao24: String(flight.hex ?? "").trim() || null,
+          icao24: hexStr || null,
           callsign: callsign || null,
-          hex: String(flight.hex ?? "").trim() || null,
+          hex: hexStr || null,
           aircraft_role: role,
           aircraft_platform: platform,
           aircraft_type: platform,
@@ -933,8 +942,9 @@ async function fetchOpenSkyFlights(): Promise<{
     }
   }
 
+  const enriched = await enrichFlightPointsWithAdsbHexMeta(points);
   return {
-    points: points.slice(0, 9000),
+    points: enriched.slice(0, 9000),
     health: {
       provider: "OpenSky",
       ok: true,
@@ -950,7 +960,7 @@ const COUNTRY_ALIASES: Array<{ keyword: string; country: string }> = [
   { keyword: "russian", country: "Russia" },
   { keyword: "sudanese", country: "Sudan" },
   { keyword: "israeli", country: "Israel" },
-  { keyword: "palestinian", country: "Palestine" },
+  { keyword: "palestinian", country: "Judea & Samaria / Palestine" },
   { keyword: "syrian", country: "Syria" },
   { keyword: "yemeni", country: "Yemen" },
   { keyword: "iranian", country: "Iran" },
@@ -987,6 +997,72 @@ function inferCountryFromLatLon(lat: number, lon: number): string | undefined {
     if (lat >= latMin && lat <= latMax && lon >= lonMin && lon <= lonMax) return country;
   }
   return undefined;
+}
+
+/** Prefer ADS-B origin, then ICAO hex allocation, then lat/lon bbox. */
+function resolveFlightCountry(
+  lat: number,
+  lon: number,
+  hex: string | undefined,
+  originCountry?: string
+): string | undefined {
+  const o = originCountry?.trim();
+  if (o) return o;
+  const fromHex = countryFromIcao24Hex(hex);
+  if (fromHex) return fromHex;
+  return inferCountryFromLatLon(lat, lon);
+}
+
+async function enrichFlightPointsWithAdsbHexMeta(points: IntelPoint[]): Promise<IntelPoint[]> {
+  const cache = new Map<string, { type?: string; registration?: string }>();
+  const need = new Set<string>();
+  for (const p of points) {
+    const hex = String(p.metadata?.hex ?? p.metadata?.icao24 ?? "").trim().toLowerCase();
+    if (!hex || hex.length < 4) continue;
+    // Only call adsb.lol when we still lack a country (hex/MID inference + bbox failed).
+    if (p.country) continue;
+    need.add(hex);
+  }
+  const list = [...need].slice(0, 72);
+  const batchSize = 8;
+  for (let i = 0; i < list.length; i += batchSize) {
+    const chunk = list.slice(i, i + batchSize);
+    await Promise.all(
+      chunk.map(async (hex) => {
+        if (cache.has(hex)) return;
+        const res = await timedJsonFetch<{
+          ac?: Array<{ type?: string; category?: string; reg?: string; flight?: string }>;
+        }>(`https://api.adsb.lol/v2/hex/${hex}`, undefined, 5500);
+        const ac = res.data?.ac?.[0];
+        if (ac) {
+          cache.set(hex, {
+            type: ac.type ? String(ac.type) : undefined,
+            registration: ac.reg ? String(ac.reg) : undefined,
+          });
+        } else {
+          cache.set(hex, {});
+        }
+      })
+    );
+  }
+  return points.map((p) => {
+    const hex = String(p.metadata?.hex ?? p.metadata?.icao24 ?? "").trim().toLowerCase();
+    if (!hex) return p;
+    const extra = cache.get(hex);
+    if (!extra || (!extra.type && !extra.registration)) return p;
+    const country =
+      p.country ?? countryFromIcao24Hex(hex) ?? inferCountryFromLatLon(p.lat, p.lon);
+    return {
+      ...p,
+      country,
+      metadata: {
+        ...p.metadata,
+        country: country ?? p.metadata?.country ?? null,
+        aircraft_type_extra: extra.type ?? p.metadata?.aircraft_type_extra ?? null,
+        registration: extra.registration ?? p.metadata?.registration ?? null,
+      },
+    };
+  });
 }
 
 function inferVesselPurposeFromName(name: string): string {
@@ -1357,7 +1433,13 @@ const CURATED_CONFLICT_FALLBACK = [
 const ACTIVE_CONFLICT_HIGHLIGHT_ALLOWLIST = new Set(
   CURATED_CONFLICT_FALLBACK.map((c) => normalizeCountryLabel(c).toLowerCase())
 );
-const COUNTRY_HIGHLIGHT_DENYLIST = new Set(["india", "democratic republic of the congo"]);
+const COUNTRY_HIGHLIGHT_DENYLIST = new Set([
+  "india",
+  "democratic republic of the congo",
+  // Often noisy from generic “war/conflict” news or unrelated crime coverage — not primary war theaters for this map.
+  "mexico",
+  "chad",
+]);
 
 const HIGH_REPEAT_EXCLUDE_RE =
   /\b(live updates?|minute by minute|opinion|editorial|analysis|watch live|breaking live blog)\b/i;
@@ -1409,8 +1491,10 @@ const CONFLICT_COUNTRY_ALIASES: Record<string, string> = {
   drc: "democratic republic of the congo",
   "dr congo": "democratic republic of the congo",
   "russian federation": "russia",
-  "state of palestine": "palestine",
-  "occupied palestinian territory": "palestine",
+  palestine: "judea & samaria / palestine",
+  "state of palestine": "judea & samaria / palestine",
+  "occupied palestinian territory": "judea & samaria / palestine",
+  "judea & samaria / palestine": "judea & samaria / palestine",
   burma: "myanmar",
 };
 
@@ -1419,7 +1503,7 @@ const GDELT_SOURCECOUNTRY_MAP: Record<string, string> = {
   RU: "Russia",
   IR: "Iran",
   IL: "Israel",
-  PS: "Palestine",
+  PS: "Judea & Samaria / Palestine",
   SD: "Sudan",
   YE: "Yemen",
   SY: "Syria",
@@ -1448,8 +1532,8 @@ const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }>
   haifa: { lat: 32.794, lon: 34.9896, country: "Israel" },
   beersheba: { lat: 31.252, lon: 34.7915, country: "Israel" },
   "beer sheva": { lat: 31.252, lon: 34.7915, country: "Israel" },
-  gaza: { lat: 31.5018, lon: 34.4668, country: "Palestine" },
-  rafah: { lat: 31.2969, lon: 34.2436, country: "Palestine" },
+  gaza: { lat: 31.5018, lon: 34.4668, country: "Judea & Samaria / Palestine" },
+  rafah: { lat: 31.2969, lon: 34.2436, country: "Judea & Samaria / Palestine" },
   kyiv: { lat: 50.4501, lon: 30.5234, country: "Ukraine" },
   kiev: { lat: 50.4501, lon: 30.5234, country: "Ukraine" },
   kharkiv: { lat: 49.9935, lon: 36.2304, country: "Ukraine" },
@@ -4369,8 +4453,10 @@ async function fetchVesselSignals(): Promise<{
     const purpose = inferVesselPurposeFromName(name);
     const vesselClass = inferVesselClassFromName(name);
     const flagCountry = mapAISFlagToCountry(flag);
+    const mmsiCountry = countryFromMmsi(String(v.id ?? "").trim());
+    const nameCountry = countryFromNavalOrCommercialName(name);
     const geoCountry = inferCountryFromLatLon(lat, lon);
-    const country = flagCountry ?? geoCountry;
+    const country = flagCountry ?? mmsiCountry ?? nameCountry ?? geoCountry;
     points.push({
       id: `vessel-${v.id ?? `${lat}-${lon}`}`,
       layer: "vessels",
@@ -4393,6 +4479,8 @@ async function fetchVesselSignals(): Promise<{
         purpose,
         ais_flag: flag || null,
         flag_country: flagCountry || null,
+        mmsi_country: mmsiCountry || null,
+        name_inferred_country: nameCountry || null,
         speed_knots: speed,
         inferred_military_movement: inferredMilitaryMovement,
         mmsi: String(v.id ?? "").trim() || null,
@@ -4698,11 +4786,11 @@ function buildHotspots(layers: Record<IntelLayerKey, IntelPoint[]>): IntelPoint[
     .map(([country, s], i) => ({
       id: `hotspot-${country}-${i}`,
       layer: "hotspots",
-      title: `${country} hotspot`,
+      title: `${formatCountryDisplayName(country)} hotspot`,
       subtitle: "Composite cross-layer activity score",
       lat: s.lat,
       lon: s.lon,
-      country,
+      country: formatCountryDisplayName(country),
       severity: mapSeverity(Math.min(1, s.score / 50)),
       source: "AEGIS fusion",
       timestamp: s.latestTs,

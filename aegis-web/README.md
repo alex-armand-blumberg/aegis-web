@@ -24,6 +24,7 @@ Then open `http://localhost:3000`.
 Copy `.env.example` to `.env.local` and set:
 
 - `GROQ_API_KEY` — Groq API key for AI insight endpoints.
+- `TAVILY_API_KEY` or `SERPER_API_KEY` — optional; enables web search snippets before Groq answers (Tavily preferred if both set).
 - `ACLED_EMAIL` — ACLED account email (for research-tier API).
 - `ACLED_PASSWORD` — ACLED account password (for research-tier API).
 - `RESEND_API_KEY` — Resend API key for contact form (emails to alex.armandblumberg@gmail.com). Get at resend.com.
