@@ -597,7 +597,7 @@ export default function MapPage() {
               <div className="map-loading-pill">
                 <span className="map-loading-pill-label">
                   Syncing feeds…
-                  {syncElapsedSec > 0 ? ` ${syncElapsedSec}s` : ""}
+                  {` ${Math.max(0, syncElapsedSec)}s / ~1mn`}
                 </span>
                 <div
                   className="map-loading-pill-bar"
