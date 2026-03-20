@@ -75,6 +75,18 @@ function buildRegionImageQuery(name: string, kind: string): string {
     .slice(0, 320);
 }
 
+function buildFallbackQueries(name: string, kind: string, contextTerms: string[]): string[] {
+  const base = kind === "ocean" ? "maritime conflict" : "conflict military";
+  return [
+    `${name} ${base} ${contextTerms.join(" ")} Reuters AP AFP Getty current photo 2024 2025 2026 -map -diagram -graphic -flag -black-and-white`,
+    `${name} war conflict photojournalism military exercise Reuters AP current photo -map -graphic -flag -black-and-white`,
+    `${name} missile strike naval exercise peace talks current geopolitics photo -map -diagram -graphic -flag -black-and-white`,
+    `${name} soldiers warships air defense conflict news photo -map -graphic -flag -black-and-white`,
+  ]
+    .map((q) => q.replace(/\s+/g, " ").trim().slice(0, 320))
+    .filter(Boolean);
+}
+
 function normalizeToken(t: string): string {
   return t
     .toLowerCase()
@@ -233,30 +245,51 @@ export async function GET(request: Request) {
   }
 
   const contextTerms = buildContextEventTerms(intel);
-  const query = `${buildRegionImageQuery(name, kind)} ${
+  const primaryQuery = `${buildRegionImageQuery(name, kind)} ${
     contextTerms.length > 0 ? contextTerms.join(" ") : "military strikes naval exercise peace talks"
   } Reuters AP AFP Getty`;
-  const candidates = (await fetchSerperImageUrls(query, apiKey)).filter(
-    (url) =>
-      !isFlagLikeUrl(url) &&
-      !isLikelyGraphicMapUrl(url) &&
-      !isLikelyBlackAndWhiteOrHistoricalUrl(url)
-  );
-  const ranked = candidates.filter((url) => !exclude.has(url));
-  let picked = pickFirstNonExcludedImageUrl({ candidates: ranked, exclude });
-  if (picked && !(await isRenderableImageUrl(picked))) {
+  const allQueries = [primaryQuery, ...buildFallbackQueries(name, kind, contextTerms)];
+  let picked: string | null = null;
+
+  for (const query of allQueries) {
+    const candidates = (await fetchSerperImageUrls(query, apiKey)).filter(
+      (url) =>
+        !isFlagLikeUrl(url) &&
+        !isLikelyGraphicMapUrl(url) &&
+        !isLikelyBlackAndWhiteOrHistoricalUrl(url)
+    );
+    const ranked = candidates.filter((url) => !exclude.has(url));
+    picked = pickFirstNonExcludedImageUrl({ candidates: ranked, exclude });
+    if (picked && (await isRenderableImageUrl(picked))) {
+      break;
+    }
     picked = null;
-  }
-  if (!picked) {
-    for (const candidate of ranked.slice(0, 8)) {
+    for (const candidate of ranked.slice(0, 10)) {
       if (await isRenderableImageUrl(candidate)) {
         picked = candidate;
         break;
       }
     }
+    if (picked) break;
   }
+
   if (!picked) {
-    picked = await fetchCommonsImageUrl(query, exclude);
+    picked = await fetchCommonsImageUrl(primaryQuery, exclude);
+  }
+  // Last-resort: always return some current conflict photo instead of none.
+  if (!picked) {
+    const globalFallbackQuery =
+      "current war conflict military exercise Reuters AP AFP Getty photo 2024 2025 2026 -map -graphic -flag -black-and-white";
+    const fallbackCandidates = await fetchSerperImageUrls(globalFallbackQuery, apiKey);
+    for (const candidate of fallbackCandidates) {
+      if (exclude.has(candidate)) continue;
+      if (isFlagLikeUrl(candidate) || isLikelyGraphicMapUrl(candidate)) continue;
+      if (isLikelyBlackAndWhiteOrHistoricalUrl(candidate)) continue;
+      if (await isRenderableImageUrl(candidate)) {
+        picked = candidate;
+        break;
+      }
+    }
   }
   if (!picked) return NextResponse.json({ error: "No image found" }, { status: 404 });
   cache.set(cacheKey, { imageUrl: picked, expiresAt: Date.now() + CACHE_TTL_MS });
