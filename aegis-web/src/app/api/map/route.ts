@@ -28,6 +28,21 @@ const ACLED_FIELDS =
   "country,admin1,event_month,battles,explosions_remote_violence,protests,riots,strategic_developments,violence_against_civilians,violent_actors,fatalities,centroid_longitude,centroid_latitude,ObjectId";
 
 const COUNTRY_NAMES = Object.keys(COUNTRY_BBOX);
+const COUNTRY_BBOX_BY_NORMALIZED = new Map(
+  Object.entries(COUNTRY_BBOX).map(([name, bbox]) => [normalizeCountryKey(name), bbox])
+);
+const HOTSPOT_CENTER_ALIAS_TO_NORMALIZED: Record<string, string> = {
+  usa: "united states of america",
+  "u.s.a.": "united states of america",
+  "u.s.": "united states of america",
+  "united states": "united states of america",
+  "russian federation": "russia",
+  drc: "democratic republic of the congo",
+  "dr congo": "democratic republic of the congo",
+  "democratic republic of congo": "democratic republic of the congo",
+  "republic of the congo": "congo",
+  "czech republic": "czechia",
+};
 const ISW_UKRAINE_FRONTLINE_GEOJSON_URL =
   "https://services-eu1.arcgis.com/fppoCYaq7HfVFbIV/ArcGIS/rest/services/UKR_Frontline_27072025/FeatureServer/0/query?where=1%3D1&outFields=Date,Source&f=geojson";
 
@@ -4840,6 +4855,38 @@ function buildHotspots(
   layers: Record<IntelLayerKey, IntelPoint[]>,
   countryCenters: Map<string, { lat: number; lon: number }>
 ): IntelPoint[] {
+  const resolveHotspotCenter = (
+    displayCountry: string,
+    sampleLat: number,
+    sampleLon: number
+  ): { lat: number; lon: number } => {
+    const normalized = normalizeCountryKey(displayCountry);
+    const canonical = canonicalConflictCountry(displayCountry);
+    const canonicalNormalized = normalizeCountryKey(canonical);
+    const aliasNormalized =
+      HOTSPOT_CENTER_ALIAS_TO_NORMALIZED[normalized] ??
+      HOTSPOT_CENTER_ALIAS_TO_NORMALIZED[canonicalNormalized];
+
+    const candidates = [
+      normalized,
+      canonicalNormalized,
+      aliasNormalized,
+      normalizeCountryKey(formatCountryDisplayName(canonical)),
+    ].filter(Boolean) as string[];
+
+    for (const key of candidates) {
+      const bbox = COUNTRY_BBOX_BY_NORMALIZED.get(key);
+      if (bbox) return { lat: bbox[4], lon: bbox[5] };
+    }
+    for (const key of candidates) {
+      const center = countryCenters.get(key);
+      if (center) return center;
+    }
+
+    // Strict safety fallback only when we cannot resolve any country center.
+    return { lat: sampleLat, lon: sampleLon };
+  };
+
   const scoreByCountry = new Map<
     string,
     {
@@ -4887,34 +4934,23 @@ function buildHotspots(
   return Array.from(scoreByCountry.entries())
     .sort((a, b) => b[1].score - a[1].score)
     .slice(0, 35)
-    .map(([key, s], i) => ({
-      id: `hotspot-${key}-${i}`,
-      layer: "hotspots",
-      title: `${s.displayCountry} hotspot`,
-      subtitle: "Composite cross-layer activity score",
-      lat: (() => {
-        const bbox = COUNTRY_BBOX[s.displayCountry];
-        if (bbox) return bbox[4];
-        return (
-          countryCenters.get(normalizeCountryKey(s.displayCountry))?.lat ??
-          s.sampleLat
-        );
-      })(),
-      lon: (() => {
-        const bbox = COUNTRY_BBOX[s.displayCountry];
-        if (bbox) return bbox[5];
-        return (
-          countryCenters.get(normalizeCountryKey(s.displayCountry))?.lon ??
-          s.sampleLon
-        );
-      })(),
-      country: s.displayCountry,
-      severity: mapSeverity(Math.min(1, s.score / 50)),
-      source: "AEGIS fusion",
-      timestamp: s.latestTs,
-      magnitude: Number(s.score.toFixed(2)),
-      confidence: 0.72,
-    }));
+    .map(([key, s], i) => {
+      const center = resolveHotspotCenter(s.displayCountry, s.sampleLat, s.sampleLon);
+      return {
+        id: `hotspot-${key}-${i}`,
+        layer: "hotspots",
+        title: `${s.displayCountry} hotspot`,
+        subtitle: "Composite cross-layer activity score",
+        lat: center.lat,
+        lon: center.lon,
+        country: s.displayCountry,
+        severity: mapSeverity(Math.min(1, s.score / 50)),
+        source: "AEGIS fusion",
+        timestamp: s.latestTs,
+        magnitude: Number(s.score.toFixed(2)),
+        confidence: 0.72,
+      };
+    });
 }
 
 function fallbackUkraineFrontlineFeatureCollection(): Record<string, unknown> {

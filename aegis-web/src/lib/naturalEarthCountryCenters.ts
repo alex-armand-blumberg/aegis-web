@@ -44,14 +44,13 @@ function computeBoundsFromGeometry(geometry: any): {
 
   // Natural Earth uses GeoJSON coordinates: [lon, lat]
   const walk = (c: unknown) => {
-    if (Array.isArray(c) && c.length >= 2) {
+    if (!Array.isArray(c)) return;
+    if (c.length >= 2 && isNumber(c[0]) && isNumber(c[1])) {
       const [lon, lat] = c;
       updateBoundsFromCoord(lon, lat, bounds);
       return;
     }
-    if (Array.isArray(c)) {
-      for (const inner of c) walk(inner);
-    }
+    for (const inner of c) walk(inner);
   };
 
   if (type === "Polygon" || type === "MultiPolygon") {
