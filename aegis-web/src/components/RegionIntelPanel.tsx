@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { RegionIntelResponse, RegionMarketQuote } from "@/lib/intel/types";
 import GaugeChart from "@/components/GaugeChart";
 
@@ -24,6 +25,12 @@ export default function RegionIntelPanel({
   marketsLoading,
   onClose,
 }: RegionIntelPanelProps) {
+  const [imageBroken, setImageBroken] = useState(false);
+
+  useEffect(() => {
+    setImageBroken(false);
+  }, [imageUrl]);
+
   return (
     <aside className="intel-side-panel">
       <button type="button" className="intel-side-close" onClick={onClose}>
@@ -32,9 +39,14 @@ export default function RegionIntelPanel({
 
       {imageLoading && !imageUrl ? (
         <div className="intel-side-image-loading" />
-      ) : imageUrl ? (
+      ) : imageUrl && !imageBroken ? (
         <div className="intel-side-image-wrap">
-          <img src={imageUrl} alt={`${data.selection.name} context`} className="intel-side-image" />
+          <img
+            src={imageUrl}
+            alt=""
+            className="intel-side-image"
+            onError={() => setImageBroken(true)}
+          />
         </div>
       ) : null}
 
