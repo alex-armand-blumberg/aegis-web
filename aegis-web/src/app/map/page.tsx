@@ -86,6 +86,7 @@ export default function MapPage() {
   const [assistantAnswer, setAssistantAnswer] = useState("");
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState<string | null>(null);
+  const [syncElapsedSec, setSyncElapsedSec] = useState(0);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const recenterRef = useRef<(() => void) | null>(null);
@@ -119,6 +120,18 @@ export default function MapPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!loading) {
+      setSyncElapsedSec(0);
+      return;
+    }
+    const t0 = Date.now();
+    const id = window.setInterval(() => {
+      setSyncElapsedSec(Math.floor((Date.now() - t0) / 1000));
+    }, 400);
+    return () => window.clearInterval(id);
+  }, [loading]);
 
   useEffect(() => {
     if (!selectedCountry) {
@@ -533,7 +546,9 @@ export default function MapPage() {
             ))}
           </div>
           <div className="map-status-caption">
-            Requested conflict source adapters run automatically; use layer toggles above only for visualization filtering.
+            Requested conflict source adapters run automatically; use layer toggles above only for visualization
+            filtering. <strong>Vessels</strong> are maritime AIS (ships), not aircraft—enable <strong>flights</strong>{" "}
+            for ADS-B military aircraft tracks.
           </div>
 
           <div className="map-status-bar">
@@ -580,7 +595,15 @@ export default function MapPage() {
 
             {loading && (
               <div className="map-loading-pill">
-                Syncing feeds...
+                <span className="map-loading-pill-label">
+                  Syncing feeds…
+                  {syncElapsedSec > 0 ? ` ${syncElapsedSec}s` : ""}
+                </span>
+                <div
+                  className="map-loading-pill-bar"
+                  role="progressbar"
+                  aria-valuetext="Syncing map feeds"
+                />
               </div>
             )}
 

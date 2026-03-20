@@ -1201,6 +1201,20 @@ function extractRssImageUrl(block: string): string | null {
   const desc = extractRssTag(block, "description") ?? "";
   const imgMatch = desc.match(/<img[^>]*src="([^"]+)"/i);
   if (imgMatch?.[1]) return imgMatch[1].trim();
+  const contentEncodedCdata = block.match(
+    /<content:encoded[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/content:encoded>/i
+  );
+  const contentEncodedPlain = block.match(
+    /<content:encoded[^>]*>([\s\S]*?)<\/content:encoded>/i
+  );
+  const encodedBlock =
+    contentEncodedCdata?.[1]?.trim() || contentEncodedPlain?.[1]?.trim() || "";
+  if (encodedBlock) {
+    const ceImg = encodedBlock.match(/<img[^>]*src="([^"]+)"/i);
+    if (ceImg?.[1]) return ceImg[1].trim();
+    const ceMedia = encodedBlock.match(/<media:content[^>]*url="([^"]+)"/i);
+    if (ceMedia?.[1]) return ceMedia[1].trim();
+  }
   return null;
 }
 
@@ -5169,6 +5183,67 @@ async function buildFrontlineOverlays(): Promise<{
         },
       },
     },
+    {
+      id: "korea-dmz-line",
+      name: "Korean Peninsula DMZ (illustrative)",
+      theater: "Korea",
+      updatedAt: nowIso,
+      confidence: 55,
+      source:
+        "Approximate Korean DMZ corridor (~38°N), west–east; illustrative only—not a surveyed boundary.",
+      geojson: {
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: densifyLineCoords(
+            [
+              [124.72, 37.9],
+              [125.35, 37.96],
+              [126.05, 38.0],
+              [126.75, 38.04],
+              [127.35, 38.08],
+              [127.95, 38.12],
+              [128.55, 38.2],
+              [129.05, 38.28],
+              [129.42, 38.38],
+            ],
+            8
+          ),
+        },
+        properties: {
+          theater: "Korea",
+          overlay_type: "dmz_corridor",
+        },
+      },
+    },
+    {
+      id: "south-china-sea-maritime-escalation",
+      name: "South China Sea maritime risk tint",
+      theater: "Indo-Pacific",
+      updatedAt: nowIso,
+      confidence: 40,
+      source:
+        "Coarse bounding hull over the central South China Sea—visual escalation cue only, not a legal maritime boundary or claim.",
+      geojson: {
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [105.0, 3.0],
+              [125.0, 3.0],
+              [125.0, 23.0],
+              [105.0, 23.0],
+              [105.0, 3.0],
+            ],
+          ],
+        },
+        properties: {
+          theater: "South China Sea",
+          overlay_type: "maritime_escalation",
+        },
+      },
+    },
   ];
 
   return {
@@ -5177,7 +5252,7 @@ async function buildFrontlineOverlays(): Promise<{
       provider: "Land-war frontier overlays",
       ok: overlays.length > 0,
       updatedAt: nowIso,
-      message: `Loaded ${overlays.length} frontier layers [ukraine=${ukraine.sourceState}; afpak=afpak_border; sudan=line_synthesis]`,
+      message: `Loaded ${overlays.length} frontier layers [ukraine=${ukraine.sourceState}; afpak=afpak_border; sudan=line_synthesis; korea=dmz_corridor; scs=maritime_escalation]`,
     },
   };
 }

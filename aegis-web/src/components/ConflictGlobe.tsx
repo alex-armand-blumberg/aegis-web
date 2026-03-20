@@ -52,6 +52,33 @@ function extractFrontlinePaths(overlays: FrontlineOverlay[]): PathPoint[][] {
   return paths;
 }
 
+type GlobePolygonRow = {
+  name: string;
+  geometry: { type: string; coordinates: unknown };
+};
+
+function extractFrontlinePolygons(overlays: FrontlineOverlay[]): GlobePolygonRow[] {
+  const rows: GlobePolygonRow[] = [];
+  for (const o of overlays) {
+    const g = o.geojson;
+    const features: { type: string; geometry?: { type: string; coordinates?: unknown } }[] = [];
+    if (isGeoJsonFeature(g)) features.push(g);
+    else if (isGeoJsonFeatureCollection(g))
+      for (const f of g.features ?? []) if (isGeoJsonFeature(f)) features.push(f);
+    for (const f of features) {
+      const geom = f.geometry;
+      if (!geom || !geom.coordinates) continue;
+      if (geom.type === "Polygon" || geom.type === "MultiPolygon") {
+        rows.push({
+          name: o.name,
+          geometry: { type: geom.type, coordinates: geom.coordinates },
+        });
+      }
+    }
+  }
+  return rows;
+}
+
 type ConflictGlobeProps = {
   layers: Record<IntelLayerKey, IntelPoint[]>;
   activeLayers: Record<IntelLayerKey, boolean>;
@@ -107,6 +134,11 @@ export default function ConflictGlobe({
     return pathArrays.map((points) => ({ points }));
   }, [frontlineOverlays]);
 
+  const polygonsData = useMemo(
+    () => extractFrontlinePolygons(frontlineOverlays),
+    [frontlineOverlays]
+  );
+
   const pointsData = useMemo<GlobePoint[]>(() => {
     const out: GlobePoint[] = [];
     for (const key of Object.keys(activeLayers) as IntelLayerKey[]) {
@@ -156,6 +188,16 @@ export default function ConflictGlobe({
         pathPointLng={(p) => (p as PathPoint)[1]}
         pathColor={() => "rgba(253, 186, 116, 0.85)"}
         pathStroke={1.2}
+        polygonsData={polygonsData}
+        polygonGeoJsonGeometry="geometry"
+        polygonAltitude={0.014}
+        polygonCapColor={() => "rgba(220, 38, 38, 0.38)"}
+        polygonSideColor={() => "rgba(220, 38, 38, 0.18)"}
+        polygonStrokeColor={() => "rgba(248, 113, 113, 0.5)"}
+        polygonsTransitionDuration={0}
+        polygonLabel={(d) =>
+          `<div style='background:rgba(2,8,20,0.92);padding:6px 8px;border-radius:4px;font-size:11px;color:#fecaca;'>${(d as GlobePolygonRow).name}</div>`
+        }
         pointsData={pointsData}
         pointLat="lat"
         pointLng="lon"

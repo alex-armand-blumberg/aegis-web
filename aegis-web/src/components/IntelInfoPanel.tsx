@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import type { IntelPoint, ProviderHealth } from "@/lib/intel/types";
 
 type IntelInfoPanelProps = {
@@ -71,6 +72,21 @@ function readMetaString(
   return undefined;
 }
 
+const articleImageCache = new Map<string, string | null>();
+
+function heroPlaceholderForPoint(point: IntelPoint): string {
+  switch (point.layer) {
+    case "news":
+      return "/satellite-earth.png";
+    case "liveStrikes":
+      return "/limitations-bg.png";
+    case "conflicts":
+      return "/earth-bg.png";
+    default:
+      return "/icon.png";
+  }
+}
+
 export default function IntelInfoPanel({
   point,
   providerHealth,
@@ -79,9 +95,70 @@ export default function IntelInfoPanel({
   onClose,
 }: IntelInfoPanelProps) {
   const health = providerHealth.find((p) => point.source.includes(p.provider));
-  const imageUrl =
+  const fromPointImage =
     point.imageUrl ||
-    (typeof point.metadata?.image_url === "string" ? point.metadata.image_url : "");
+    (typeof point.metadata?.image_url === "string" ? point.metadata.image_url.trim() : "");
+  const sourceUrl = readMetaString(point.metadata, ["source_url", "article_url", "link"]) ?? "";
+
+  const [resolvedArticleImage, setResolvedArticleImage] = useState<string | null>(null);
+  const [articleImageLoading, setArticleImageLoading] = useState(false);
+
+  const cacheKey = useMemo(
+    () => `${point.id}:${sourceUrl}`,
+    [point.id, sourceUrl]
+  );
+
+  useEffect(() => {
+    setResolvedArticleImage(null);
+    setArticleImageLoading(false);
+
+    if (fromPointImage) return;
+
+    if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return;
+
+    const cached = articleImageCache.get(sourceUrl);
+    if (cached !== undefined) {
+      setResolvedArticleImage(cached);
+      return;
+    }
+
+    let cancelled = false;
+    const debounce = window.setTimeout(() => {
+      setArticleImageLoading(true);
+      const params = new URLSearchParams({ url: sourceUrl });
+      fetch(`/api/map/article-image?${params.toString()}`)
+        .then(async (res) => {
+          if (!res.ok) return null;
+          const data = (await res.json()) as { imageUrl?: string };
+          const u = typeof data.imageUrl === "string" ? data.imageUrl.trim() : "";
+          return u || null;
+        })
+        .then((url) => {
+          articleImageCache.set(sourceUrl, url);
+          if (!cancelled) {
+            setResolvedArticleImage(url);
+            setArticleImageLoading(false);
+          }
+        })
+        .catch(() => {
+          articleImageCache.set(sourceUrl, null);
+          if (!cancelled) {
+            setResolvedArticleImage(null);
+            setArticleImageLoading(false);
+          }
+        });
+    }, 280);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(debounce);
+    };
+  }, [cacheKey, fromPointImage, sourceUrl]);
+
+  const imageUrl =
+    fromPointImage ||
+    resolvedArticleImage ||
+    (articleImageLoading ? "" : heroPlaceholderForPoint(point));
   const aiBulletLines = (aiSummary ?? "")
     .split("\n")
     .map((line) => line.trim())
@@ -115,6 +192,10 @@ export default function IntelInfoPanel({
 
   const metadataEntries = point.metadata ? Object.entries(point.metadata) : [];
   const hiddenMetadataKeys = new Set([
+    "source_url",
+    "article_url",
+    "link",
+    "image_url",
     "country",
     "origin_country",
     "flag_country",
@@ -134,6 +215,9 @@ export default function IntelInfoPanel({
         x
       </button>
       <div className="intel-side-header">
+        {articleImageLoading && !fromPointImage ? (
+          <div className="intel-side-image intel-side-image-loading" aria-hidden />
+        ) : null}
         {imageUrl ? (
           <img
             src={imageUrl}

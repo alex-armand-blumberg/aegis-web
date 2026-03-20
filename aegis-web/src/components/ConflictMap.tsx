@@ -268,29 +268,57 @@ export default function ConflictMap({
         }
       }
 
-      const frontlineFeatureCollection: FeatureCollection<
-        Geometry,
-        GeoJsonProperties
-      > = {
-        type: "FeatureCollection",
-        features,
-      };
-      built.push(
-        new GeoJsonLayer({
-          id: "land-war-frontline-overlays",
-          data: frontlineFeatureCollection,
-          pickable: false,
-          stroked: true,
-          // Frontline/control overlays are line geometries (not filled polygons).
-          // Rendering them as filled caused visual artifacts that looked like blobs/circles.
-          filled: false,
-          lineWidthUnits: "pixels",
-          getLineWidth: 2,
-          lineWidthMinPixels: 2,
-          lineWidthMaxPixels: 2,
-          getLineColor: [253, 186, 116, 220],
-        })
-      );
+      const lineFeatures = features.filter((f) => {
+        const t = f.geometry?.type;
+        return t === "LineString" || t === "MultiLineString";
+      });
+      const polygonFeatures = features.filter((f) => {
+        const t = f.geometry?.type;
+        return t === "Polygon" || t === "MultiPolygon";
+      });
+
+      if (polygonFeatures.length > 0) {
+        const maritimePolygons: FeatureCollection<Geometry, GeoJsonProperties> = {
+          type: "FeatureCollection",
+          features: polygonFeatures,
+        };
+        built.push(
+          new GeoJsonLayer({
+            id: "land-war-maritime-escalation-fill",
+            data: maritimePolygons,
+            pickable: false,
+            stroked: true,
+            filled: true,
+            lineWidthUnits: "pixels",
+            getLineWidth: 1,
+            lineWidthMinPixels: 1,
+            lineWidthMaxPixels: 2,
+            getLineColor: [248, 113, 113, 180],
+            getFillColor: [220, 38, 38, 95],
+          })
+        );
+      }
+
+      if (lineFeatures.length > 0) {
+        const lineCollection: FeatureCollection<Geometry, GeoJsonProperties> = {
+          type: "FeatureCollection",
+          features: lineFeatures,
+        };
+        built.push(
+          new GeoJsonLayer({
+            id: "land-war-frontline-overlays",
+            data: lineCollection,
+            pickable: false,
+            stroked: true,
+            filled: false,
+            lineWidthUnits: "pixels",
+            getLineWidth: 2,
+            lineWidthMinPixels: 2,
+            lineWidthMaxPixels: 2,
+            getLineColor: [253, 186, 116, 220],
+          })
+        );
+      }
     }
 
     built.push(
