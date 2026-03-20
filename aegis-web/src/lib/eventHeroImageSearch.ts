@@ -20,11 +20,10 @@ function isBlockedHostname(hostname: string): boolean {
 
 function isLikelyNonHeroIcon(url: string): boolean {
   const u = url.toLowerCase();
-  if (u.includes("favicon") || u.includes("logo") || u.includes("avatar") || u.includes("icon"))
+  // Avoid common "UI icon" style images; be careful with broad substring matches.
+  if (u.includes("favicon") || u.includes("logo") || u.includes("avatar"))
     return true;
   if (u.includes("1x1") || u.includes("pixel") || u.includes("spacer")) return true;
-  // Common tiny thumbs
-  if (u.includes("/thumbnail") || u.includes("tbn=")) return true;
   return false;
 }
 
@@ -94,16 +93,15 @@ export async function fetchSerperImageUrls(query: string, apiKey: string): Promi
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch("https://google.serper.dev/search", {
+    const res = await fetch("https://google.serper.dev/images", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-API-KEY": apiKey,
+        "x-api-key": apiKey,
       },
       body: JSON.stringify({
         q: query.slice(0, 400),
         num: 8,
-        type: "images",
       }),
       signal: controller.signal,
       cache: "no-store",
@@ -112,8 +110,26 @@ export async function fetchSerperImageUrls(query: string, apiKey: string): Promi
     if (!res.ok) return [];
     const json = (await res.json()) as unknown;
 
-    // Serper's response shape can vary; extract http(s) URLs and then filter.
-    const urls = extractImageUrlsFromAnyJson(json);
+    // Serper "images" response contains `images[]` with `imageUrl`.
+    const candidates: string[] = [];
+    if (json && typeof json === "object") {
+      const maybeImages = (json as { images?: unknown }).images;
+      if (Array.isArray(maybeImages)) {
+        for (const item of maybeImages) {
+          if (!item || typeof item !== "object") continue;
+          const it = item as { imageUrl?: unknown; thumbnailUrl?: unknown };
+          const imageUrl =
+            typeof it.imageUrl === "string" ? it.imageUrl.trim() : "";
+          const thumbUrl =
+            typeof it.thumbnailUrl === "string" ? it.thumbnailUrl.trim() : "";
+          if (imageUrl) candidates.push(imageUrl);
+          else if (thumbUrl) candidates.push(thumbUrl);
+        }
+      }
+    }
+
+    // Fallback: attempt to extract any http(s) URLs from the response.
+    const urls = candidates.length > 0 ? candidates : extractImageUrlsFromAnyJson(json);
     const filtered = urls
       .map((u) => coerceHttpUrl(u) ?? "")
       .filter(Boolean)

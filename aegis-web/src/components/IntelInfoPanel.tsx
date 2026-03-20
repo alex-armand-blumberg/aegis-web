@@ -233,8 +233,11 @@ export default function IntelInfoPanel({
     const debounce = window.setTimeout(async () => {
       setEventHeroImageLoading(true);
       const eventType = readMetaString(point.metadata, ["event_type", "eventType"]) ?? "";
+      const originalHeadline =
+        readMetaString(point.metadata, ["original_headline"]) ?? readMetaString(point.metadata, ["headline"]);
+      const titleForSearch = (originalHeadline ?? point.title).slice(0, 120);
       const params = new URLSearchParams({
-        title: point.title.slice(0, 120),
+        title: titleForSearch,
         country: point.country ?? "",
         layer: point.layer,
         eventType,
