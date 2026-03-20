@@ -222,21 +222,33 @@ export default function ConflictMap({
               activeConflictCountries.map((c) => `${c.country}:${c.score}`).join("|"),
             ],
           },
-          onClick: ({ object }) => {
-            const rawName = getFeatureCountryName(object).trim();
-            if (rawName) {
-              onCountrySelect?.(rawName);
-              onRegionSelect?.({
-                kind: "country",
-                key: normalizeCountryName(rawName),
-                name: rawName,
-                country: rawName,
-              });
-            }
-          },
         })
       );
     }
+
+    // Always-on transparent country picking layer so country clicks work even when
+    // conflict heat is not active/available.
+    built.push(
+      new GeoJsonLayer({
+        id: "country-picking-only",
+        data: COUNTRY_GEOJSON_URL,
+        pickable: true,
+        filled: true,
+        stroked: false,
+        getFillColor: [0, 0, 0, 0],
+        onClick: ({ object }) => {
+          const rawName = getFeatureCountryName(object).trim();
+          if (!rawName) return;
+          onCountrySelect?.(rawName);
+          onRegionSelect?.({
+            kind: "country",
+            key: normalizeCountryName(rawName),
+            name: rawName,
+            country: rawName,
+          });
+        },
+      })
+    );
 
     built.push(
       new GeoJsonLayer({
@@ -247,10 +259,8 @@ export default function ConflictMap({
         } as FeatureCollection<Geometry, GeoJsonProperties>,
         pickable: true,
         filled: true,
-        stroked: true,
-        lineWidthMinPixels: 1,
-        getLineColor: [56, 189, 248, 70],
-        getFillColor: [56, 189, 248, 18],
+        stroked: false,
+        getFillColor: [0, 0, 0, 0],
         onClick: ({ object }) => {
           const feature = object as {
             properties?: { regionKey?: string; name?: string };
