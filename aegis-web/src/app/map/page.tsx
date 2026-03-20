@@ -5,15 +5,17 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   EscalationRiskCountry,
-  CountryIntelResponse,
   IntelLayerKey,
   IntelPoint,
   MapApiResponse,
+  RegionIntelResponse,
+  RegionMarketQuote,
+  RegionSelection,
 } from "@/lib/intel/types";
 import { layerColorCss } from "@/lib/intel/colors";
 import { formatCountryDisplayName } from "@/lib/countryDisplay";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
-import CountryIntelPanel from "@/components/CountryIntelPanel";
+import RegionIntelPanel from "@/components/RegionIntelPanel";
 
 const ConflictMap = dynamic(() => import("@/components/ConflictMap"), {
   ssr: false,
@@ -73,8 +75,14 @@ export default function MapPage() {
   const [activeLayers, setActiveLayers] = useState(buildInitialLayerState);
   const [apiData, setApiData] = useState<MapApiResponse | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<IntelPoint | null>(null);
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-  const [countryIntel, setCountryIntel] = useState<CountryIntelResponse | null>(null);
+  const [selectedRegion, setSelectedRegion] = useState<RegionSelection | null>(null);
+  const [regionIntel, setRegionIntel] = useState<RegionIntelResponse | null>(null);
+  const [regionHeroImage, setRegionHeroImage] = useState<string | null>(null);
+  const [regionHeroLoading, setRegionHeroLoading] = useState(false);
+  const [regionAiSummary, setRegionAiSummary] = useState("");
+  const [regionAiLoading, setRegionAiLoading] = useState(false);
+  const [regionMarkets, setRegionMarkets] = useState<RegionMarketQuote[]>([]);
+  const [regionMarketsLoading, setRegionMarketsLoading] = useState(false);
   const [pointAiSummary, setPointAiSummary] = useState<string>("");
   const [pointAiLoading, setPointAiLoading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -134,30 +142,81 @@ export default function MapPage() {
   }, [loading]);
 
   useEffect(() => {
-    if (!selectedCountry) {
-      setCountryIntel(null);
+    if (!selectedRegion) {
+      setRegionIntel(null);
+      setRegionHeroImage(null);
+      setRegionAiSummary("");
+      setRegionMarkets([]);
+      setRegionHeroLoading(false);
+      setRegionAiLoading(false);
+      setRegionMarketsLoading(false);
       return;
     }
+
     let active = true;
-    const run = async () => {
+    const params = new URLSearchParams({
+      kind: selectedRegion.kind,
+      key: selectedRegion.key,
+      name: selectedRegion.name,
+      range,
+    });
+    const qs = params.toString();
+
+    const loadCore = async () => {
       try {
-        const params = new URLSearchParams({
-          country: selectedCountry,
-          range,
-        });
-        const res = await fetch(`/api/map/country?${params.toString()}`);
-        const data = (await res.json()) as CountryIntelResponse & { error?: string };
-        if (!res.ok) throw new Error(data.error || "Failed country intelligence");
-        if (active) setCountryIntel(data);
+        const res = await fetch(`/api/map/region?${qs}`);
+        const data = (await res.json()) as RegionIntelResponse & { error?: string };
+        if (!res.ok) throw new Error(data.error || "Failed region intelligence");
+        if (active) setRegionIntel(data);
       } catch {
-        if (active) setCountryIntel(null);
+        if (active) setRegionIntel(null);
       }
     };
-    run();
+    const loadImage = async () => {
+      setRegionHeroLoading(true);
+      try {
+        const res = await fetch(`/api/map/region-hero-image?${qs}`);
+        const data = (await res.json()) as { imageUrl?: string };
+        if (active) setRegionHeroImage(res.ok ? data.imageUrl || null : null);
+      } catch {
+        if (active) setRegionHeroImage(null);
+      } finally {
+        if (active) setRegionHeroLoading(false);
+      }
+    };
+    const loadSummary = async () => {
+      setRegionAiLoading(true);
+      try {
+        const res = await fetch(`/api/map/region-ai-summary?${qs}`);
+        const data = (await res.json()) as { summary?: string };
+        if (active) setRegionAiSummary(res.ok ? data.summary || "" : "");
+      } catch {
+        if (active) setRegionAiSummary("");
+      } finally {
+        if (active) setRegionAiLoading(false);
+      }
+    };
+    const loadMarkets = async () => {
+      setRegionMarketsLoading(true);
+      try {
+        const res = await fetch(`/api/map/region-markets?${qs}`);
+        const data = (await res.json()) as { markets?: RegionMarketQuote[] };
+        if (active) setRegionMarkets(res.ok ? data.markets || [] : []);
+      } catch {
+        if (active) setRegionMarkets([]);
+      } finally {
+        if (active) setRegionMarketsLoading(false);
+      }
+    };
+
+    void loadCore();
+    void loadImage();
+    void loadSummary();
+    void loadMarkets();
     return () => {
       active = false;
     };
-  }, [range, selectedCountry]);
+  }, [range, selectedRegion]);
 
   useEffect(() => {
     if (!selectedPoint) {
@@ -621,7 +680,16 @@ export default function MapPage() {
                 onPointSelect={setSelectedPoint}
                 onCountrySelect={(country) => {
                   setSelectedPoint(null);
-                  setSelectedCountry(country);
+                  setSelectedRegion({
+                    kind: "country",
+                    key: country.toLowerCase(),
+                    name: country,
+                    country,
+                  });
+                }}
+                onRegionSelect={(selection) => {
+                  setSelectedPoint(null);
+                  setSelectedRegion(selection);
                 }}
                 activeConflictCountries={activeConflictCountries}
                 escalationRiskCountries={escalationRiskCountries}
@@ -640,12 +708,18 @@ export default function MapPage() {
               />
             )}
 
-            {selectedCountry && countryIntel && (
-              <CountryIntelPanel
-                data={countryIntel}
+            {selectedRegion && regionIntel && (
+              <RegionIntelPanel
+                data={regionIntel}
+                imageUrl={regionHeroImage}
+                imageLoading={regionHeroLoading}
+                aiSummary={regionAiSummary}
+                aiLoading={regionAiLoading}
+                markets={regionMarkets}
+                marketsLoading={regionMarketsLoading}
                 onClose={() => {
-                  setSelectedCountry(null);
-                  setCountryIntel(null);
+                  setSelectedRegion(null);
+                  setRegionIntel(null);
                 }}
               />
             )}

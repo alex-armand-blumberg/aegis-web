@@ -1,0 +1,65 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "regionKey": "indian-ocean", "name": "Indian Ocean" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [20.0, -60.0], [147.0, -60.0], [147.0, 30.0], [95.0, 30.0], [77.0, 25.0], [55.0, 24.0], [43.0, 13.0], [32.0, 8.0], [20.0, -10.0], [20.0, -60.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "regionKey": "south-china-sea", "name": "South China Sea" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [99.0, 0.5], [121.5, 0.5], [121.5, 23.5], [117.0, 24.5], [111.5, 23.8], [108.0, 22.8], [105.0, 19.0], [102.0, 12.0], [99.0, 0.5]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "regionKey": "strait-of-hormuz", "name": "Strait of Hormuz" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [55.0, 25.0], [57.7, 25.0], [57.7, 27.2], [55.0, 27.2], [55.0, 25.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "regionKey": "atlantic-ocean", "name": "Atlantic Ocean" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-100.0, -60.0], [20.0, -60.0], [20.0, 75.0], [-100.0, 75.0], [-100.0, -60.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "regionKey": "arctic-ocean", "name": "Arctic Ocean" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-180.0, 66.0], [180.0, 66.0], [180.0, 90.0], [-180.0, 90.0], [-180.0, 66.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "regionKey": "antarctica", "name": "Antarctica" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-180.0, -90.0], [180.0, -90.0], [180.0, -60.0], [-180.0, -60.0], [-180.0, -90.0]
+        ]]
+      }
+    }
+  ]
+}

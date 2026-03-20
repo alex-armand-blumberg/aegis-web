@@ -1,0 +1,147 @@
+import { NextResponse } from "next/server";
+import type { RegionMarketQuote } from "@/lib/intel/types";
+
+const KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2";
+const POLY_GAMMA = "https://gamma-api.polymarket.com";
+
+function regionMarketSearchTerms(name: string): string[] {
+  const n = name.toLowerCase();
+  if (n.includes("south china sea")) return ["china", "taiwan", "philippines", "navy"];
+  if (n.includes("hormuz")) return ["iran", "oil", "shipping", "middle east"];
+  if (n.includes("indian ocean")) return ["iran", "shipping", "india", "red sea"];
+  if (n.includes("arctic")) return ["arctic", "oil", "russia", "nato"];
+  if (n.includes("antarctica")) return ["antarctica", "resources", "treaty", "climate"];
+  if (n.includes("atlantic")) return ["nato", "shipping", "russia", "carrier"];
+  return n.split(/\s+/).filter(Boolean);
+}
+
+function scoreTextMatch(text: string, terms: string[]): number {
+  const t = text.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (t.includes(term)) score += 1;
+  }
+  return score;
+}
+
+function toPct(v: number): number {
+  if (!Number.isFinite(v)) return 50;
+  if (v <= 1) return Math.max(1, Math.min(99, Math.round(v * 100)));
+  return Math.max(1, Math.min(99, Math.round(v)));
+}
+
+function parseKalshiYesPct(row: Record<string, unknown>): number | null {
+  const candidates = [
+    row.yes_ask,
+    row.yes_bid,
+    row.yes_ask_dollars,
+    row.yes_bid_dollars,
+    row.last_price,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "number") return toPct(c <= 1 ? c * 100 : c);
+    if (typeof c === "string" && c.trim()) {
+      const n = Number(c);
+      if (!Number.isNaN(n)) return toPct(n <= 1 ? n * 100 : n);
+    }
+  }
+  return null;
+}
+
+function parsePolymarketYesPct(row: Record<string, unknown>): number | null {
+  const prob = row.probability;
+  if (typeof prob === "number") return toPct(prob);
+  const yesPrice = row.lastTradePrice;
+  if (typeof yesPrice === "number") return toPct(yesPrice);
+  const outcomes = row.outcomes;
+  const outcomePrices = row.outcomePrices;
+  if (Array.isArray(outcomes) && Array.isArray(outcomePrices)) {
+    const yesIdx = outcomes.findIndex((o) => String(o).toLowerCase() === "yes");
+    if (yesIdx >= 0) {
+      const raw = outcomePrices[yesIdx];
+      const n = Number(raw);
+      if (!Number.isNaN(n)) return toPct(n <= 1 ? n * 100 : n);
+    }
+  }
+  return null;
+}
+
+async function fetchKalshiQuotes(name: string): Promise<RegionMarketQuote[]> {
+  try {
+    const terms = regionMarketSearchTerms(name);
+    const res = await fetch(`${KALSHI_BASE}/markets?status=open&limit=200`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { markets?: Array<Record<string, unknown>> };
+    const rows = json.markets ?? [];
+    const ranked = rows
+      .map((row) => {
+        const title = String(
+          row.title ?? row.subtitle ?? row.market_title ?? row.ticker ?? ""
+        ).trim();
+        const score = scoreTextMatch(title, terms);
+        const yesPct = parseKalshiYesPct(row);
+        return { row, title, score, yesPct };
+      })
+      .filter((x) => x.title && x.score > 0 && x.yesPct !== null)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+    return ranked.map((x) => {
+      const ticker = String(x.row.ticker ?? "").trim();
+      return {
+        provider: "Kalshi",
+        title: x.title,
+        yesChancePct: x.yesPct ?? 50,
+        noChancePct: 100 - (x.yesPct ?? 50),
+        updatedAt: new Date().toISOString(),
+        url: ticker ? `https://kalshi.com/markets/${ticker}` : undefined,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function fetchPolymarketQuotes(name: string): Promise<RegionMarketQuote[]> {
+  try {
+    const terms = regionMarketSearchTerms(name);
+    const res = await fetch(`${POLY_GAMMA}/markets?active=true&closed=false&limit=300`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const rows = (await res.json()) as Array<Record<string, unknown>>;
+    const ranked = rows
+      .map((row) => {
+        const title = String(row.question ?? row.title ?? "").trim();
+        const score = scoreTextMatch(title, terms);
+        const yesPct = parsePolymarketYesPct(row);
+        return { row, title, score, yesPct };
+      })
+      .filter((x) => x.title && x.score > 0 && x.yesPct !== null)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+    return ranked.map((x) => ({
+      provider: "Polymarket",
+      title: x.title,
+      yesChancePct: x.yesPct ?? 50,
+      noChancePct: 100 - (x.yesPct ?? 50),
+      updatedAt: new Date().toISOString(),
+      url: String(x.row.url ?? x.row.slug ?? "").startsWith("http")
+        ? String(x.row.url)
+        : undefined,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const name = (searchParams.get("name") ?? "").trim();
+  if (!name) {
+    return NextResponse.json({ error: "Missing name" }, { status: 400 });
+  }
+  const [kalshi, poly] = await Promise.all([fetchKalshiQuotes(name), fetchPolymarketQuotes(name)]);
+  return NextResponse.json({ markets: [...kalshi, ...poly].slice(0, 6) });
+}

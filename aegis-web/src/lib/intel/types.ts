@@ -116,3 +116,55 @@ export type CountryIntelResponse = {
     nearestCriticalKm?: number;
   };
 };
+
+export type RegionSelectionKind = "country" | "ocean";
+
+export type RegionSelection = {
+  kind: RegionSelectionKind;
+  key: string;
+  name: string;
+  country?: string;
+};
+
+export type RegionMarketQuote = {
+  provider: "Polymarket" | "Kalshi";
+  title: string;
+  url?: string;
+  yesChancePct: number;
+  noChancePct: number;
+  updatedAt: string;
+};
+
+export type RegionIntelResponse = {
+  selection: RegionSelection;
+  range: string;
+  updatedAt: string;
+  escalationIndex: number;
+  conflictIndex: number;
+  status: "stable" | "elevated" | "critical";
+  signals: {
+    liveStrikes: number;
+    conflicts: number;
+    militaryFlights: number;
+    navalVessels: number;
+    carrierSignals: number;
+    criticalNews: number;
+    infrastructure: number;
+  };
+  timeline: Array<{
+    day: string;
+    liveStrikes: number;
+    conflicts: number;
+    military: number;
+    news: number;
+    infrastructure: number;
+  }>;
+  topNews: Array<{
+    title: string;
+    severity: IntelSeverity;
+    source: string;
+    timestamp: string;
+    url?: string;
+  }>;
+  dataPoints: Array<IntelPoint>;
+};

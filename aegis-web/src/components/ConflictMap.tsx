@@ -16,6 +16,8 @@ import type {
 } from "@/lib/intel/types";
 import { LAYER_COLORS } from "@/lib/intel/colors";
 import { formatCountryMapLabelShort } from "@/lib/countryDisplay";
+import { getOceanRegionFeatures } from "@/lib/regionGeometry";
+import type { RegionSelection } from "@/lib/intel/types";
 
 export type ConflictMapProps = {
   layers: Record<IntelLayerKey, IntelPoint[]>;
@@ -28,6 +30,7 @@ export type ConflictMapProps = {
   onError?: (message: string) => void;
   onPointSelect?: (point: IntelPoint) => void;
   onCountrySelect?: (country: string) => void;
+  onRegionSelect?: (selection: RegionSelection) => void;
 };
 
 const DEFAULT_VIEW_STATE = {
@@ -146,6 +149,7 @@ export default function ConflictMap({
   onError,
   onPointSelect,
   onCountrySelect,
+  onRegionSelect,
 }: ConflictMapProps) {
   const [viewState, setViewState] = useState(DEFAULT_VIEW_STATE);
 
@@ -174,6 +178,7 @@ export default function ConflictMap({
   }, [activeLayers, layers]);
 
   const deckLayers = useMemo(() => {
+    const oceanRegions = getOceanRegionFeatures();
     const countryScore = new globalThis.Map<string, number>();
     for (const c of activeConflictCountries) {
       if (isCountryHighlightDenied(c.country)) continue;
@@ -219,11 +224,48 @@ export default function ConflictMap({
           },
           onClick: ({ object }) => {
             const rawName = getFeatureCountryName(object).trim();
-            if (rawName) onCountrySelect?.(rawName);
+            if (rawName) {
+              onCountrySelect?.(rawName);
+              onRegionSelect?.({
+                kind: "country",
+                key: normalizeCountryName(rawName),
+                name: rawName,
+                country: rawName,
+              });
+            }
           },
         })
       );
     }
+
+    built.push(
+      new GeoJsonLayer({
+        id: "oceanic-region-picking",
+        data: {
+          type: "FeatureCollection",
+          features: oceanRegions,
+        } as FeatureCollection<Geometry, GeoJsonProperties>,
+        pickable: true,
+        filled: true,
+        stroked: true,
+        lineWidthMinPixels: 1,
+        getLineColor: [56, 189, 248, 70],
+        getFillColor: [56, 189, 248, 18],
+        onClick: ({ object }) => {
+          const feature = object as {
+            properties?: { regionKey?: string; name?: string };
+          } | null;
+          const regionKey = feature?.properties?.regionKey?.trim();
+          const name = feature?.properties?.name?.trim();
+          if (!regionKey || !name) return;
+          onRegionSelect?.({
+            kind: "ocean",
+            key: regionKey,
+            name,
+          });
+        },
+      })
+    );
 
     if (activeLayers.escalationRisk && escalationRiskCountries.length > 0) {
       built.push(
@@ -407,6 +449,7 @@ export default function ConflictMap({
     frontlineOverlays,
     layers,
     onCountrySelect,
+    onRegionSelect,
     onPointSelect,
   ]);
 
