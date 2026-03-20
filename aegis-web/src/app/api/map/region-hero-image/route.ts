@@ -3,6 +3,7 @@ import {
   fetchSerperImageUrls,
   pickFirstNonExcludedImageUrl,
 } from "@/lib/eventHeroImageSearch";
+import type { RegionIntelResponse } from "@/lib/intel/types";
 
 const CACHE_TTL_MS = 60_000;
 const cache = new Map<string, { imageUrl: string | null; expiresAt: number }>();
@@ -74,6 +75,56 @@ function buildRegionImageQuery(name: string, kind: string): string {
     .slice(0, 320);
 }
 
+function normalizeToken(t: string): string {
+  return t
+    .toLowerCase()
+    .replace(/[^a-z0-9\- ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildContextEventTerms(intel: RegionIntelResponse | null): string[] {
+  if (!intel) return [];
+  const stop = new Set([
+    "the",
+    "and",
+    "with",
+    "from",
+    "into",
+    "over",
+    "near",
+    "current",
+    "country",
+    "region",
+    "context",
+    "event",
+    "report",
+    "news",
+    "intel",
+  ]);
+  const ranked = intel.dataPoints
+    .filter((p) =>
+      p.layer === "liveStrikes" ||
+      p.layer === "conflicts" ||
+      p.layer === "vessels" ||
+      p.layer === "carriers" ||
+      p.layer === "flights"
+    )
+    .slice(0, 20);
+  const counts = new Map<string, number>();
+  for (const p of ranked) {
+    const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`;
+    for (const raw of normalizeToken(text).split(" ")) {
+      if (!raw || raw.length < 4 || stop.has(raw)) continue;
+      counts.set(raw, (counts.get(raw) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([token]) => token);
+}
+
 async function isRenderableImageUrl(url: string): Promise<boolean> {
   try {
     const controller = new AbortController();
@@ -143,9 +194,11 @@ async function fetchCommonsImageUrl(query: string, exclude: Set<string>): Promis
 }
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
+  const { searchParams, origin } = new URL(request.url);
   const name = (searchParams.get("name") ?? "").trim();
   const kind = (searchParams.get("kind") ?? "country").trim().toLowerCase();
+  const key = (searchParams.get("key") ?? "").trim();
+  const range = (searchParams.get("range") ?? "7d").trim();
   if (!name) return NextResponse.json({ error: "Missing name" }, { status: 400 });
 
   const apiKey = process.env.SERPER_API_KEY?.trim();
@@ -162,7 +215,27 @@ export async function GET(request: Request) {
     }
   }
 
-  const query = buildRegionImageQuery(name, kind);
+  let intel: RegionIntelResponse | null = null;
+  if (key) {
+    try {
+      const intelRes = await fetch(
+        `${origin}/api/map/region?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(
+          key
+        )}&name=${encodeURIComponent(name)}&range=${encodeURIComponent(range)}`,
+        { cache: "no-store" }
+      );
+      if (intelRes.ok) {
+        intel = (await intelRes.json()) as RegionIntelResponse;
+      }
+    } catch {
+      intel = null;
+    }
+  }
+
+  const contextTerms = buildContextEventTerms(intel);
+  const query = `${buildRegionImageQuery(name, kind)} ${
+    contextTerms.length > 0 ? contextTerms.join(" ") : "military strikes naval exercise peace talks"
+  } Reuters AP AFP Getty`;
   const candidates = (await fetchSerperImageUrls(query, apiKey)).filter(
     (url) =>
       !isFlagLikeUrl(url) &&
