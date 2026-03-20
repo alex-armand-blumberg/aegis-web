@@ -226,30 +226,6 @@ export default function ConflictMap({
       );
     }
 
-    // Always-on transparent country picking layer so country clicks work even when
-    // conflict heat is not active/available.
-    built.push(
-      new GeoJsonLayer({
-        id: "country-picking-only",
-        data: COUNTRY_GEOJSON_URL,
-        pickable: true,
-        filled: true,
-        stroked: false,
-        getFillColor: [0, 0, 0, 1],
-        onClick: ({ object }) => {
-          const rawName = getFeatureCountryName(object).trim();
-          if (!rawName) return;
-          onCountrySelect?.(rawName);
-          onRegionSelect?.({
-            kind: "country",
-            key: normalizeCountryName(rawName),
-            name: rawName,
-            country: rawName,
-          });
-        },
-      })
-    );
-
     built.push(
       new GeoJsonLayer({
         id: "oceanic-region-picking",
@@ -272,6 +248,29 @@ export default function ConflictMap({
             kind: "ocean",
             key: regionKey,
             name,
+          });
+        },
+      })
+    );
+
+    // Keep this layer after ocean picking so country clicks win on land.
+    built.push(
+      new GeoJsonLayer({
+        id: "country-picking-only",
+        data: COUNTRY_GEOJSON_URL,
+        pickable: true,
+        filled: true,
+        stroked: false,
+        getFillColor: [0, 0, 0, 1],
+        onClick: ({ object }) => {
+          const rawName = getFeatureCountryName(object).trim();
+          if (!rawName) return;
+          onCountrySelect?.(rawName);
+          onRegionSelect?.({
+            kind: "country",
+            key: normalizeCountryName(rawName),
+            name: rawName,
+            country: rawName,
           });
         },
       })
