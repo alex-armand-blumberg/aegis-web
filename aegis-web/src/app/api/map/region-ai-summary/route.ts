@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
 import type { RegionIntelResponse } from "@/lib/intel/types";
 
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams, origin } = new URL(request.url);
@@ -12,14 +26,19 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Missing key or name" }, { status: 400 });
     }
 
-    const intelRes = await fetch(
+    const intelRes = await fetchWithTimeout(
       `${origin}/api/map/region?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(
         key
       )}&name=${encodeURIComponent(name)}&range=${encodeURIComponent(range)}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
+      9_000
     );
     if (!intelRes.ok) {
-      return NextResponse.json({ error: "Failed region intel context" }, { status: 502 });
+      const details = (await intelRes.text().catch(() => "")).slice(0, 300);
+      return NextResponse.json(
+        { error: details || "Failed region intel context" },
+        { status: 502 }
+      );
     }
     const intel = (await intelRes.json()) as RegionIntelResponse;
 
@@ -42,16 +61,20 @@ export async function GET(request: Request) {
       "Use broad current context even beyond mapped points when needed.",
     ].join("\n");
 
-    const aiRes = await fetch(`${origin}/api/ai`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "sentinel_qa",
-        maxTokens: 620,
-        prompt,
-      }),
-      cache: "no-store",
-    });
+    const aiRes = await fetchWithTimeout(
+      `${origin}/api/ai`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "sentinel_qa",
+          maxTokens: 620,
+          prompt,
+        }),
+        cache: "no-store",
+      },
+      18_000
+    );
     const aiJson = (await aiRes.json()) as { content?: string; error?: string };
     if (!aiRes.ok) {
       return NextResponse.json(

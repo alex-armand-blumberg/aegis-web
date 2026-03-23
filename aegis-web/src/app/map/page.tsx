@@ -80,6 +80,7 @@ export default function MapPage() {
   const [regionHeroImage, setRegionHeroImage] = useState<string | null>(null);
   const [regionHeroLoading, setRegionHeroLoading] = useState(false);
   const [regionAiSummary, setRegionAiSummary] = useState("");
+  const [regionAiError, setRegionAiError] = useState<string | null>(null);
   const [regionAiLoading, setRegionAiLoading] = useState(false);
   const [regionMarkets, setRegionMarkets] = useState<RegionMarketQuote[]>([]);
   const [regionMarketsLoading, setRegionMarketsLoading] = useState(false);
@@ -147,6 +148,7 @@ export default function MapPage() {
       setRegionIntel(null);
       setRegionHeroImage(null);
       setRegionAiSummary("");
+      setRegionAiError(null);
       setRegionMarkets([]);
       setRegionHeroLoading(false);
       setRegionAiLoading(false);
@@ -198,12 +200,22 @@ export default function MapPage() {
     };
     const loadSummary = async () => {
       setRegionAiLoading(true);
+      setRegionAiError(null);
       try {
         const res = await fetch(`/api/map/region-ai-summary?${qs}`);
-        const data = (await res.json()) as { summary?: string };
-        if (active) setRegionAiSummary(res.ok ? data.summary || "" : "");
+        const data = (await res.json()) as { summary?: string; error?: string };
+        if (!active) return;
+        if (res.ok) {
+          setRegionAiSummary(data.summary || "");
+          setRegionAiError(null);
+          return;
+        }
+        setRegionAiSummary("");
+        setRegionAiError(data.error || "Summary request failed");
       } catch {
-        if (active) setRegionAiSummary("");
+        if (!active) return;
+        setRegionAiSummary("");
+        setRegionAiError("Summary request failed");
       } finally {
         if (active) setRegionAiLoading(false);
       }
@@ -752,6 +764,7 @@ export default function MapPage() {
                 imageUrl={regionHeroImage}
                 imageLoading={regionHeroLoading}
                 aiSummary={regionAiSummary}
+                aiError={regionAiError}
                 aiLoading={regionAiLoading}
                 markets={regionMarkets}
                 marketsLoading={regionMarketsLoading}

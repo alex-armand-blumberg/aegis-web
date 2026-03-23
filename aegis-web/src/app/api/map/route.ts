@@ -1302,6 +1302,14 @@ const DIRECT_IMPACT_RE =
 
 function classifyEvent(text: string): EventDescriptor {
   const t = text.toLowerCase();
+  const hasMissileOrRocketCue =
+    /\b(missile|missiles|rocket|rockets|ballistic|cruise|barrage|salvo|launched|launches|fired)\b/i.test(
+      t
+    );
+  const hasAirCue =
+    /\b(airstrike|air strike|air raid|sortie|fighter jet|combat air patrol|air defense)\b/i.test(
+      t
+    );
   if (CONTEXT_ONLY_RE.test(t) && !DIRECT_IMPACT_RE.test(t)) {
     return {
       eventType: "analysis_only",
@@ -1324,7 +1332,7 @@ function classifyEvent(text: string): EventDescriptor {
       label: "Missile hit",
       keyword: "missile",
       regex:
-        /\b((missile|rocket).{0,45}(hit|strike|struck|impact|target|pounded)|(hit|struck|targeted).{0,45}(missile|rocket))\b/i,
+        /\b((missile|rocket|ballistic|cruise).{0,55}(hit|strike|struck|impact|target|pounded|launched|fired|barrage|salvo)|(hit|struck|targeted|launched|fired).{0,55}(missile|rocket|ballistic|cruise))\b/i,
       direct: true,
     },
     {
@@ -1373,13 +1381,17 @@ function classifyEvent(text: string): EventDescriptor {
       type: "ground_battle",
       label: "Ground battle",
       keyword: "battle",
-      regex: /\b(battle|skirmish|clashes|offensive|raid|infiltration|special operation)\b/i,
+      regex:
+        /\b(ground battle|border clash|border clashes|clash(?:es)?|skirmish(?:es)?|raid(?:ed)?|incursion|infiltration|firefight|troop assault|special operation|offensive)\b/i,
       direct: true,
     },
   ];
 
   for (const c of checks) {
     if (!c.regex.test(t)) continue;
+    if (c.type === "ground_battle" && (hasMissileOrRocketCue || hasAirCue)) {
+      continue;
+    }
     return {
       eventType: c.type,
       shortLabel: c.label,

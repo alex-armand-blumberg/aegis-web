@@ -9,6 +9,7 @@ type RegionIntelPanelProps = {
   imageUrl: string | null;
   imageLoading: boolean;
   aiSummary: string;
+  aiError?: string | null;
   aiLoading: boolean;
   markets: RegionMarketQuote[];
   marketsLoading: boolean;
@@ -20,6 +21,7 @@ export default function RegionIntelPanel({
   imageUrl,
   imageLoading,
   aiSummary,
+  aiError,
   aiLoading,
   markets,
   marketsLoading,
@@ -78,7 +80,7 @@ export default function RegionIntelPanel({
           <div className="intel-side-item"><span>Generating...</span></div>
         ) : (
           <pre className="map-ai-answer" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-            {aiSummary || "- Summary unavailable."}
+            {aiSummary || `- Summary unavailable: ${aiError || "AI service unavailable."}`}
           </pre>
         )}
       </div>

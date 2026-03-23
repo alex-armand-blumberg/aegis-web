@@ -5,7 +5,12 @@ import type {
   RegionIntelResponse,
   RegionSelection,
 } from "@/lib/intel/types";
-import { countriesMatch, formatCountryDisplayName } from "@/lib/countryDisplay";
+import {
+  canonicalCountryMatchKey,
+  countriesMatch,
+  formatCountryDisplayName,
+} from "@/lib/countryDisplay";
+import { getCountryBounds } from "@/lib/countryBounds";
 import { getOceanRegionByKey, pointInRegion } from "@/lib/regionGeometry";
 
 function dayLabel(ts: number): string {
@@ -21,6 +26,60 @@ function severityWeight(s: string): number {
 
 function clampIndex(v: number): number {
   return Math.max(0, Math.min(100, Math.round(v)));
+}
+
+function pointInBounds(p: IntelPoint, bounds: [[number, number], [number, number]]): boolean {
+  const [[minLat, minLon], [maxLat, maxLon]] = bounds;
+  return p.lat >= minLat && p.lat <= maxLat && p.lon >= minLon && p.lon <= maxLon;
+}
+
+function extractPointCountryCandidates(p: IntelPoint): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v !== "string") return;
+    const t = v.trim();
+    if (!t) return;
+    out.push(t);
+  };
+  push(p.country);
+  const md = p.metadata;
+  if (md) {
+    push(md.country);
+    push(md.country_name);
+    push(md.location_country);
+    push(md.nation);
+  }
+  return out;
+}
+
+function buildCountryScopeMatcher(selectionCountry: string): (p: IntelPoint) => boolean {
+  const canonicalSelection = canonicalCountryMatchKey(selectionCountry);
+  const bounds = getCountryBounds(selectionCountry);
+  return (p: IntelPoint) => {
+    const candidates = extractPointCountryCandidates(p);
+    if (
+      candidates.some((c) => {
+        const key = canonicalCountryMatchKey(c);
+        return key && key === canonicalSelection;
+      })
+    ) {
+      return true;
+    }
+    // Some feeds omit country labels; use a geographic fallback to avoid dropping valid points.
+    if (bounds && pointInBounds(p, bounds)) {
+      return true;
+    }
+    return countriesMatch(selectionCountry, p.country);
+  };
+}
+
+function scaledIndex(raw: number, volume: number, kind: "escalation" | "conflict"): number {
+  if (raw <= 0 || volume <= 0) return 0;
+  const baseDenominator = kind === "escalation" ? 16 : 14;
+  const dynamicDenominator = baseDenominator + Math.sqrt(volume) * (kind === "escalation" ? 2.3 : 1.9);
+  const normalized = Math.max(0, raw / dynamicDenominator);
+  const curved = 100 * (1 - Math.exp(-normalized));
+  return clampIndex(curved);
 }
 
 export async function GET(request: Request) {
@@ -67,7 +126,7 @@ export async function GET(request: Request) {
         name: displayName || name || key,
         country: displayName || name || key,
       };
-      inScope = (p) => countriesMatch(selection.country, p.country);
+      inScope = buildCountryScopeMatcher(selection.country ?? selection.name);
     }
 
     const conflicts = mapData.layers.conflicts.filter(inScope);
@@ -78,20 +137,28 @@ export async function GET(request: Request) {
     const news = mapData.layers.news.filter(inScope);
     const infrastructure = mapData.layers.infrastructure.filter(inScope);
 
-    const escalationIndex = clampIndex(
+    const escalationRaw =
       liveStrikes.reduce((s, p) => s + severityWeight(p.severity) * 2.2, 0) +
-        conflicts.reduce((s, p) => s + severityWeight(p.severity) * 1.6, 0) +
-        flights.length * 1.2 +
-        vessels.length * 1.1 +
-        carriers.length * 2.4 +
-        news.filter((n) => n.severity === "critical").length * 1.5 +
-        infrastructure.length * 0.6
-    );
-    const conflictIndex = clampIndex(
+      conflicts.reduce((s, p) => s + severityWeight(p.severity) * 1.6, 0) +
+      flights.length * 1.2 +
+      vessels.length * 1.1 +
+      carriers.length * 2.4 +
+      news.filter((n) => n.severity === "critical").length * 1.5 +
+      infrastructure.length * 0.6;
+    const conflictRaw =
       liveStrikes.reduce((s, p) => s + severityWeight(p.severity) * 2.5, 0) +
-        conflicts.reduce((s, p) => s + severityWeight(p.severity) * 1.9, 0) +
-        news.length * 0.35
-    );
+      conflicts.reduce((s, p) => s + severityWeight(p.severity) * 1.9, 0) +
+      news.length * 0.35;
+    const scopedVolume =
+      liveStrikes.length +
+      conflicts.length +
+      flights.length +
+      vessels.length +
+      carriers.length +
+      news.length +
+      infrastructure.length;
+    const escalationIndex = scaledIndex(escalationRaw, scopedVolume, "escalation");
+    const conflictIndex = scaledIndex(conflictRaw, scopedVolume, "conflict");
     const status: RegionIntelResponse["status"] =
       escalationIndex >= 70 || conflictIndex >= 70
         ? "critical"
