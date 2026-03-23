@@ -257,7 +257,7 @@ function buildLocalRegionIntel(
     explosionsSignal * 0.9 +
     civilianSignal * 1.0;
 
-  const actorProjectionRaw = actorKineticVolume * 4.2 + carriers * 1.2 + flights * 0.15;
+  const actorProjectionRaw = actorKineticVolume * 5.6 + carriers * 1.6 + flights * 0.22;
   const outboundProjectionRaw =
     outboundActorKineticVolume * 4.8 +
     outboundActorSupportVolume * (outboundActorKineticVolume > 0 ? 0.35 : 0.08);
@@ -265,7 +265,7 @@ function buildLocalRegionIntel(
 
   const escalationRaw =
     impactIntensityRaw +
-    actorProjectionRaw * 0.8 +
+    actorProjectionRaw * 1.1 +
     outboundProjectionRaw * 0.9 +
     criticalNews * 1.0 +
     mobilityComposite * (0.04 + 0.2 * evidenceFactor);
@@ -302,6 +302,15 @@ function buildLocalRegionIntel(
     escalationIndex = Math.min(escalationIndex, 55);
     conflictIndex = Math.min(conflictIndex, 42);
   }
+  if (impactBand < 3) {
+    if (outboundActorKineticVolume >= 3 || outboundActorSupportVolume >= 12) {
+      escalationIndex = Math.max(escalationIndex, 62);
+      conflictIndex = Math.max(conflictIndex, 36);
+    } else if (outboundActorKineticVolume >= 1 || outboundActorSupportVolume >= 5) {
+      escalationIndex = Math.max(escalationIndex, 48);
+      conflictIndex = Math.max(conflictIndex, 26);
+    }
+  }
   if (impactBand < 3 && (actorKineticVolume >= 3 || outboundActorKineticVolume >= 2)) {
     escalationIndex = Math.max(escalationIndex, outboundActorKineticVolume >= 4 ? 48 : 38);
     conflictIndex = Math.max(conflictIndex, outboundActorKineticVolume >= 3 ? 26 : 18);
@@ -309,7 +318,7 @@ function buildLocalRegionIntel(
 
   // Passive-state suppression: if there is almost no homeland impact and no outbound kinetic
   // pressure, keep both gauges in low bands.
-  if (impactBand < 2.5 && outboundActorKineticVolume === 0 && actorKineticVolume < 2) {
+  if (impactBand < 2.5 && outboundActorKineticVolume === 0 && outboundActorSupportVolume === 0 && actorKineticVolume < 2) {
     escalationIndex = Math.min(escalationIndex, 12);
     conflictIndex = Math.min(conflictIndex, 8);
   }
