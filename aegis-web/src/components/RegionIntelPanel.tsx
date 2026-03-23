@@ -53,6 +53,23 @@ export default function RegionIntelPanel({
       ) : null}
 
       <div className="intel-side-header">
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 8px",
+            marginBottom: 8,
+            borderRadius: 999,
+            border: "1px solid rgba(255, 159, 67, 0.45)",
+            background: "rgba(255, 159, 67, 0.14)",
+            fontSize: 11,
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+          }}
+        >
+          Beta - Work in Progress
+        </div>
         <div className="intel-side-kicker">REGION INTELLIGENCE</div>
         <h3>{data.selection.name}</h3>
         <p>{data.range.toUpperCase()} operational picture</p>

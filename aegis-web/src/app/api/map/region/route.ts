@@ -148,28 +148,52 @@ export async function GET(request: Request) {
     const news = mapData.layers.news.filter(inScope);
     const infrastructure = mapData.layers.infrastructure.filter(inScope);
 
+    const dataPoints = [
+      ...liveStrikes,
+      ...conflicts,
+      ...flights,
+      ...vessels,
+      ...carriers,
+      ...infrastructure,
+      ...news,
+    ]
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .slice(0, 220);
+
+    const layerCounts = dataPoints.reduce<Record<string, number>>((acc, p) => {
+      acc[p.layer] = (acc[p.layer] ?? 0) + 1;
+      return acc;
+    }, {});
+    const severityMass = dataPoints.reduce((sum, p) => sum + severityWeight(p.severity), 0);
+    const scopedVolume = dataPoints.length;
+    const liveStrikesCount = layerCounts.liveStrikes ?? 0;
+    const conflictsCount = layerCounts.conflicts ?? 0;
+    const flightsCount = layerCounts.flights ?? 0;
+    const vesselsCount = layerCounts.vessels ?? 0;
+    const carriersCount = layerCounts.carriers ?? 0;
+    const infraCount = layerCounts.infrastructure ?? 0;
+    const newsCount = layerCounts.news ?? 0;
+    const criticalNewsCount = news.filter((n) => n.severity === "critical").length;
+
     const escalationRaw =
-      liveStrikes.reduce((s, p) => s + severityWeight(p.severity) * 2.2, 0) +
-      conflicts.reduce((s, p) => s + severityWeight(p.severity) * 1.6, 0) +
-      flights.length * 1.2 +
-      vessels.length * 1.1 +
-      carriers.length * 2.4 +
-      news.filter((n) => n.severity === "critical").length * 1.5 +
-      infrastructure.length * 0.6;
+      liveStrikesCount * 3.4 +
+      conflictsCount * 2.6 +
+      flightsCount * 1.5 +
+      vesselsCount * 1.3 +
+      carriersCount * 2.4 +
+      criticalNewsCount * 1.2 +
+      infraCount * 0.8 +
+      severityMass * 0.42;
     const conflictRaw =
-      liveStrikes.reduce((s, p) => s + severityWeight(p.severity) * 2.5, 0) +
-      conflicts.reduce((s, p) => s + severityWeight(p.severity) * 1.9, 0) +
-      news.length * 0.35;
-    const scopedVolume =
-      liveStrikes.length +
-      conflicts.length +
-      flights.length +
-      vessels.length +
-      carriers.length +
-      news.length +
-      infrastructure.length;
-    const escalationIndex = scaledIndex(escalationRaw, scopedVolume, "escalation");
-    const conflictIndex = scaledIndex(conflictRaw, scopedVolume, "conflict");
+      liveStrikesCount * 3.8 +
+      conflictsCount * 2.9 +
+      criticalNewsCount * 1.35 +
+      infraCount * 0.45 +
+      severityMass * 0.28;
+    let escalationIndex = scaledIndex(escalationRaw, Math.max(1, scopedVolume), "escalation");
+    let conflictIndex = scaledIndex(conflictRaw, Math.max(1, scopedVolume), "conflict");
+    if (scopedVolume > 0 && escalationIndex === 0) escalationIndex = Math.min(18, 4 + Math.round(Math.sqrt(scopedVolume)));
+    if (scopedVolume > 0 && conflictIndex === 0) conflictIndex = Math.min(14, 3 + Math.round(Math.sqrt(scopedVolume * 0.7)));
     const status: RegionIntelResponse["status"] =
       escalationIndex >= 70 || conflictIndex >= 70
         ? "critical"
@@ -232,18 +256,6 @@ export async function GET(request: Request) {
         url: String(p.metadata?.source_url ?? p.metadata?.article_url ?? p.metadata?.link ?? ""),
       }));
 
-    const dataPoints = [
-      ...liveStrikes,
-      ...conflicts,
-      ...flights,
-      ...vessels,
-      ...carriers,
-      ...infrastructure,
-      ...news,
-    ]
-      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 220);
-
     const response: RegionIntelResponse = {
       selection,
       range,
@@ -252,13 +264,13 @@ export async function GET(request: Request) {
       conflictIndex,
       status,
       signals: {
-        liveStrikes: liveStrikes.length,
-        conflicts: conflicts.length,
-        militaryFlights: flights.length,
-        navalVessels: vessels.length,
-        carrierSignals: carriers.length,
-        criticalNews: news.filter((n) => n.severity === "critical").length,
-        infrastructure: infrastructure.length,
+        liveStrikes: liveStrikesCount,
+        conflicts: conflictsCount,
+        militaryFlights: flightsCount,
+        navalVessels: vesselsCount,
+        carrierSignals: carriersCount,
+        criticalNews: criticalNewsCount,
+        infrastructure: infraCount,
       },
       timeline,
       topNews,

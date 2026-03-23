@@ -15,6 +15,20 @@ async function fetchWithTimeout(
   }
 }
 
+function buildFallbackSummary(intel: RegionIntelResponse): string {
+  const latest = intel.dataPoints
+    .slice(0, 5)
+    .map((p) => `- ${p.layer.toUpperCase()}: ${p.title}`)
+    .join("\n");
+  return [
+    `- Work in progress fallback: AI summary timed out, showing direct map-based snapshot for ${intel.selection.name}.`,
+    `- Escalation index ${intel.escalationIndex}/100, conflict index ${intel.conflictIndex}/100 over ${intel.range}.`,
+    `- Active signals: strikes ${intel.signals.liveStrikes}, conflicts ${intel.signals.conflicts}, flights ${intel.signals.militaryFlights}, vessels ${intel.signals.navalVessels}, carriers ${intel.signals.carrierSignals}.`,
+    `- Infrastructure indicators in scope: ${intel.signals.infrastructure}.`,
+    latest || "- No recent mapped points available.",
+  ].join("\n");
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams, origin } = new URL(request.url);
@@ -69,34 +83,32 @@ export async function GET(request: Request) {
       "Use broad current context even beyond mapped points when needed.",
     ].join("\n");
 
-    const aiRes = await fetchWithTimeout(
-      `${origin}/api/ai`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...forwardHeaders },
-        body: JSON.stringify({
-          mode: "sentinel_qa",
-          maxTokens: 620,
-          prompt,
-        }),
-        cache: "no-store",
-      },
-      18_000
-    );
-    const aiContentType = (aiRes.headers.get("content-type") || "").toLowerCase();
-    if (!aiRes.ok || !aiContentType.includes("application/json")) {
-      const details = (await aiRes.text().catch(() => "")).slice(0, 300);
-      return NextResponse.json(
-        { error: details || "AI summary failed" },
-        { status: 502 }
+    try {
+      const aiRes = await fetchWithTimeout(
+        `${origin}/api/ai`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...forwardHeaders },
+          body: JSON.stringify({
+            mode: "sentinel_qa",
+            maxTokens: 620,
+            prompt,
+          }),
+          cache: "no-store",
+        },
+        35_000
       );
+      const aiContentType = (aiRes.headers.get("content-type") || "").toLowerCase();
+      if (!aiRes.ok || !aiContentType.includes("application/json")) {
+        return NextResponse.json({ summary: buildFallbackSummary(intel) }, { status: 200 });
+      }
+      const aiJson = (await aiRes.json()) as { content?: string; error?: string };
+      return NextResponse.json({
+        summary: aiJson.content?.trim() || buildFallbackSummary(intel),
+      });
+    } catch {
+      return NextResponse.json({ summary: buildFallbackSummary(intel) }, { status: 200 });
     }
-    const aiJson = (await aiRes.json()) as { content?: string; error?: string };
-    return NextResponse.json({
-      summary:
-        aiJson.content?.trim() ||
-        "- Geopolitical summary is temporarily unavailable. Refresh to retry.",
-    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "region ai summary failed" },
