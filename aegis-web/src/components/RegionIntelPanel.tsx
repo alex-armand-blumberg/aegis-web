@@ -37,6 +37,18 @@ export default function RegionIntelPanel({
   onClose,
 }: RegionIntelPanelProps) {
   const [imageBroken, setImageBroken] = useState(false);
+  const conflictSubtypeCounts = data.dataPoints.reduce(
+    (acc, p) => {
+      if (p.layer === "conflictsBattles") acc.battles += 1;
+      if (p.layer === "conflictsExplosions") acc.explosions += 1;
+      if (p.layer === "conflictsCivilians") acc.civilians += 1;
+      if (p.layer === "conflictsStrategic") acc.strategic += 1;
+      if (p.layer === "conflictsProtests") acc.protests += 1;
+      if (p.layer === "conflictsRiots") acc.riots += 1;
+      return acc;
+    },
+    { battles: 0, explosions: 0, civilians: 0, strategic: 0, protests: 0, riots: 0 }
+  );
 
   useEffect(() => {
     setImageBroken(false);
@@ -94,6 +106,12 @@ export default function RegionIntelPanel({
         <div className="intel-side-subtitle">Active signals</div>
         <div className="intel-side-item"><span>Live strikes</span><strong>{data.signals.liveStrikes}</strong></div>
         <div className="intel-side-item"><span>Conflicts</span><strong>{data.signals.conflicts}</strong></div>
+        <div className="intel-side-item"><span>ACLED battles</span><strong>{conflictSubtypeCounts.battles}</strong></div>
+        <div className="intel-side-item"><span>ACLED explosions</span><strong>{conflictSubtypeCounts.explosions}</strong></div>
+        <div className="intel-side-item"><span>ACLED civilians</span><strong>{conflictSubtypeCounts.civilians}</strong></div>
+        <div className="intel-side-item"><span>ACLED strategic</span><strong>{conflictSubtypeCounts.strategic}</strong></div>
+        <div className="intel-side-item"><span>ACLED protests</span><strong>{conflictSubtypeCounts.protests}</strong></div>
+        <div className="intel-side-item"><span>ACLED riots</span><strong>{conflictSubtypeCounts.riots}</strong></div>
         <div className="intel-side-item"><span>Flights</span><strong>{data.signals.militaryFlights}</strong></div>
         <div className="intel-side-item"><span>Vessels</span><strong>{data.signals.navalVessels}</strong></div>
         <div className="intel-side-item"><span>Carriers</span><strong>{data.signals.carrierSignals}</strong></div>

@@ -13,6 +13,28 @@ import {
 import { getCountryBounds } from "@/lib/countryBounds";
 import { getOceanRegionByKey, pointInRegion } from "@/lib/regionGeometry";
 
+const CONFLICT_SUBTYPE_LAYERS = new Set([
+  "conflictsBattles",
+  "conflictsExplosions",
+  "conflictsCivilians",
+  "conflictsStrategic",
+  "conflictsProtests",
+  "conflictsRiots",
+]);
+
+function getAllConflictPoints(layers: MapApiResponse["layers"]): IntelPoint[] {
+  const out = [
+    ...layers.conflictsBattles,
+    ...layers.conflictsExplosions,
+    ...layers.conflictsCivilians,
+    ...layers.conflictsStrategic,
+    ...layers.conflictsProtests,
+    ...layers.conflictsRiots,
+  ];
+  if (out.length > 0) return out;
+  return layers.conflicts ?? [];
+}
+
 function dayLabel(ts: number): string {
   const d = new Date(ts);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(
@@ -86,6 +108,7 @@ function buildCountryScopeMatcher(selectionCountry: string): (p: IntelPoint) => 
     if (
       p.layer === "liveStrikes" ||
       p.layer === "conflicts" ||
+      CONFLICT_SUBTYPE_LAYERS.has(p.layer) ||
       p.layer === "carriers"
     ) {
       const actorCandidates = extractActorCountryCandidates(p);
@@ -119,7 +142,7 @@ function metaNumber(p: IntelPoint, key: string): number {
 }
 
 function isIndexEligibleConflictPoint(p: IntelPoint): boolean {
-  return p.layer === "conflicts" && p.source !== "ACLED ArcGIS";
+  return (p.layer === "conflicts" || CONFLICT_SUBTYPE_LAYERS.has(p.layer)) && p.source !== "ACLED ArcGIS";
 }
 
 function impactCountryMatchesSelection(p: IntelPoint, selectionCountry: string): boolean {
@@ -155,7 +178,7 @@ export async function GET(request: Request) {
     const mapRes = await fetch(
       `${origin}/api/map?range=${encodeURIComponent(
         range
-      )}&layers=conflicts,liveStrikes,flights,vessels,carriers,news,infrastructure`,
+      )}&layers=conflicts,conflictsBattles,conflictsExplosions,conflictsCivilians,conflictsStrategic,conflictsProtests,conflictsRiots,liveStrikes,flights,vessels,carriers,news,infrastructure`,
       { cache: "no-store", headers: forwardHeaders }
     );
     const mapContentType = (mapRes.headers.get("content-type") || "").toLowerCase();
@@ -192,7 +215,8 @@ export async function GET(request: Request) {
       inScope = buildCountryScopeMatcher(selection.country ?? selection.name);
     }
 
-    const conflicts = mapData.layers.conflicts.filter(inScope);
+    const allConflicts = getAllConflictPoints(mapData.layers);
+    const conflicts = allConflicts.filter(inScope);
     const liveStrikes = mapData.layers.liveStrikes.filter(inScope);
     const flights = mapData.layers.flights.filter(inScope);
     const vessels = mapData.layers.vessels.filter(inScope);
@@ -218,7 +242,7 @@ export async function GET(request: Request) {
     }, {});
     const scopedVolume = dataPoints.length;
     const liveStrikesCount = layerCounts.liveStrikes ?? 0;
-    const conflictsCount = layerCounts.conflicts ?? 0;
+    const conflictsCount = conflicts.length;
     const flightsCount = layerCounts.flights ?? 0;
     const vesselsCount = layerCounts.vessels ?? 0;
     const carriersCount = layerCounts.carriers ?? 0;
@@ -244,7 +268,7 @@ export async function GET(request: Request) {
         : [];
     const outboundActorConflicts =
       selection.kind === "country"
-        ? mapData.layers.conflicts
+        ? allConflicts
             .filter(isIndexEligibleConflictPoint)
             .filter(
               (p) =>

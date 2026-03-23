@@ -66,6 +66,12 @@ function rangeToHours(range: string): number {
 function parseLayers(raw: string | null): IntelLayerKey[] {
   const defaults: IntelLayerKey[] = [
     "conflicts",
+    "conflictsBattles",
+    "conflictsExplosions",
+    "conflictsCivilians",
+    "conflictsStrategic",
+    "conflictsProtests",
+    "conflictsRiots",
     "liveStrikes",
     "flights",
     "vessels",
@@ -469,6 +475,40 @@ async function fetchAcledConflicts(rangeHours: number): Promise<{
       message: `Loaded ${filteredPoints.length} points (${rangeLabel})`,
     },
   };
+}
+
+function splitAcledConflictPoints(points: IntelPoint[]): {
+  battles: IntelPoint[];
+  explosions: IntelPoint[];
+  civilians: IntelPoint[];
+  strategic: IntelPoint[];
+  protests: IntelPoint[];
+  riots: IntelPoint[];
+} {
+  const out = {
+    battles: [] as IntelPoint[],
+    explosions: [] as IntelPoint[],
+    civilians: [] as IntelPoint[],
+    strategic: [] as IntelPoint[],
+    protests: [] as IntelPoint[],
+    riots: [] as IntelPoint[],
+  };
+  for (const p of points) {
+    if (p.source !== "ACLED ArcGIS") continue;
+    const battles = Number(p.metadata?.battles ?? 0);
+    const explosions = Number(p.metadata?.explosions ?? 0);
+    const civilians = Number(p.metadata?.civilians ?? 0);
+    const strategic = Number(p.metadata?.strategic ?? 0);
+    const protests = Number(p.metadata?.protests ?? 0);
+    const riots = Number(p.metadata?.riots ?? 0);
+    if (battles > 0) out.battles.push({ ...p, id: `${p.id}-battles`, layer: "conflictsBattles", magnitude: Math.max(1, battles * 5.6) });
+    if (explosions > 0) out.explosions.push({ ...p, id: `${p.id}-explosions`, layer: "conflictsExplosions", magnitude: Math.max(1, explosions * 4.9) });
+    if (civilians > 0) out.civilians.push({ ...p, id: `${p.id}-civilians`, layer: "conflictsCivilians", magnitude: Math.max(1, civilians * 4.4) });
+    if (strategic > 0) out.strategic.push({ ...p, id: `${p.id}-strategic`, layer: "conflictsStrategic", magnitude: Math.max(1, strategic * 3.2) });
+    if (protests > 0) out.protests.push({ ...p, id: `${p.id}-protests`, layer: "conflictsProtests", magnitude: Math.max(1, protests * 1.2) });
+    if (riots > 0) out.riots.push({ ...p, id: `${p.id}-riots`, layer: "conflictsRiots", magnitude: Math.max(1, riots * 1.8) });
+  }
+  return out;
 }
 
 function buildUcdpVersionCandidates(): string[] {
@@ -5479,6 +5519,24 @@ function filterToRequestedLayers(
 ): Record<IntelLayerKey, IntelPoint[]> {
   return {
     conflicts: requested.includes("conflicts") ? layers.conflicts : [],
+    conflictsBattles: requested.includes("conflictsBattles")
+      ? layers.conflictsBattles
+      : [],
+    conflictsExplosions: requested.includes("conflictsExplosions")
+      ? layers.conflictsExplosions
+      : [],
+    conflictsCivilians: requested.includes("conflictsCivilians")
+      ? layers.conflictsCivilians
+      : [],
+    conflictsStrategic: requested.includes("conflictsStrategic")
+      ? layers.conflictsStrategic
+      : [],
+    conflictsProtests: requested.includes("conflictsProtests")
+      ? layers.conflictsProtests
+      : [],
+    conflictsRiots: requested.includes("conflictsRiots")
+      ? layers.conflictsRiots
+      : [],
     liveStrikes: requested.includes("liveStrikes") ? layers.liveStrikes : [],
     flights: requested.includes("flights") ? layers.flights : [],
     vessels: requested.includes("vessels") ? layers.vessels : [],
@@ -5741,17 +5799,36 @@ export async function GET(request: Request) {
     const alignedLiveStrikes = dedupedLiveStrikes.map(pinPointToDeclaredCountry);
     const alignedConflicts = mergedConflicts.map(pinPointToDeclaredCountry);
     const alignedNews = fusedNewsPoints.map(pinPointToDeclaredCountry);
+    const acledSubtype = splitAcledConflictPoints(alignedConflicts);
+    const nonAcledConflicts = alignedConflicts.filter((p) => p.source !== "ACLED ArcGIS");
+    const conflictSubtypeBattles = [
+      ...nonAcledConflicts.map((p, idx) => ({ ...p, id: `${p.id}-kinetic-${idx}`, layer: "conflictsBattles" as const })),
+      ...acledSubtype.battles,
+    ];
+    const conflictSubtypeExplosions = acledSubtype.explosions;
+    const conflictSubtypeCivilians = acledSubtype.civilians;
+    const conflictSubtypeStrategic = acledSubtype.strategic;
+    const conflictSubtypeProtests = acledSubtype.protests;
+    const conflictSubtypeRiots = acledSubtype.riots;
+    const recombinedConflictPoints = [
+      ...conflictSubtypeBattles,
+      ...conflictSubtypeExplosions,
+      ...conflictSubtypeCivilians,
+      ...conflictSubtypeStrategic,
+      ...conflictSubtypeProtests,
+      ...conflictSubtypeRiots,
+    ];
     const allowCuratedConflictFallback =
-      alignedLiveStrikes.length + alignedConflicts.length + alignedNews.length < 25;
+      alignedLiveStrikes.length + recombinedConflictPoints.length + alignedNews.length < 25;
     const activeConflictCountries = buildActiveConflictCountries(
       alignedLiveStrikes,
-      alignedConflicts,
+      recombinedConflictPoints,
       alignedNews,
       allowCuratedConflictFallback
     );
     const escalationRiskCountries = buildEscalationRiskCountries(
       alignedLiveStrikes,
-      alignedConflicts,
+      recombinedConflictPoints,
       alignedNews
     );
     const mappedEscalationRiskPoints: Array<IntelPoint | null> = escalationRiskCountries
@@ -5787,7 +5864,13 @@ export async function GET(request: Request) {
     );
 
     const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
-      conflicts: alignedConflicts,
+      conflicts: recombinedConflictPoints,
+      conflictsBattles: conflictSubtypeBattles,
+      conflictsExplosions: conflictSubtypeExplosions,
+      conflictsCivilians: conflictSubtypeCivilians,
+      conflictsStrategic: conflictSubtypeStrategic,
+      conflictsProtests: conflictSubtypeProtests,
+      conflictsRiots: conflictSubtypeRiots,
       liveStrikes: alignedLiveStrikes,
       flights: dedupedFlights,
       vessels: mergedVesselPoints,
@@ -5824,9 +5907,9 @@ export async function GET(request: Request) {
         },
         {
           provider: "Conflict fusion",
-          ok: alignedConflicts.length > 0 || alignedLiveStrikes.length > 0,
+          ok: recombinedConflictPoints.length > 0 || alignedLiveStrikes.length > 0,
           updatedAt: new Date().toISOString(),
-          message: `Conflicts: ${alignedConflicts.length} validated DB points | Live strikes: ${alignedLiveStrikes.length} near-live events | News: ${alignedNews.length}`,
+          message: `Conflicts: ${recombinedConflictPoints.length} classified points | Live strikes: ${alignedLiveStrikes.length} near-live events | News: ${alignedNews.length}`,
         },
         {
           provider: "Adapter telemetry",

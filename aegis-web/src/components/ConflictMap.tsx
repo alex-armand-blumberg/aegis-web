@@ -75,6 +75,15 @@ const COUNTRY_HIGHLIGHT_DENYLIST = new Set([
   "mexico",
   "chad",
 ]);
+const CONFLICT_LAYER_KEYS = new Set<IntelLayerKey>([
+  "conflicts",
+  "conflictsBattles",
+  "conflictsExplosions",
+  "conflictsCivilians",
+  "conflictsStrategic",
+  "conflictsProtests",
+  "conflictsRiots",
+]);
 
 function isCountryHighlightDenied(name: string): boolean {
   const normalized = normalizeCountryName(name);
@@ -391,7 +400,7 @@ export default function ConflictMap({
                   ? 25000
                   : layerKey === "news"
                     ? 15500
-                  : layerKey === "conflicts"
+                  : CONFLICT_LAYER_KEYS.has(layerKey)
                     ? 23000
                     : 18500;
             const magnitude = Math.max(0.6, Math.min(2, (d.magnitude ?? 1) / 20));

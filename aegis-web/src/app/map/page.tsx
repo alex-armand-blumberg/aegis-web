@@ -27,8 +27,16 @@ const ConflictGlobe = dynamic(() => import("@/components/ConflictGlobe"), {
 });
 
 const TIME_RANGES = ["1h", "6h", "24h", "7d", "30d"] as const;
+const CONFLICT_SUBTYPE_LAYERS: IntelLayerKey[] = [
+  "conflictsBattles",
+  "conflictsExplosions",
+  "conflictsCivilians",
+  "conflictsStrategic",
+  "conflictsProtests",
+  "conflictsRiots",
+];
 const ALL_LAYERS: IntelLayerKey[] = [
-  "conflicts",
+  ...CONFLICT_SUBTYPE_LAYERS,
   "liveStrikes",
   "flights",
   "vessels",
@@ -38,11 +46,35 @@ const ALL_LAYERS: IntelLayerKey[] = [
   "hotspots",
   "infrastructure",
 ];
+const LAYER_LABELS: Record<IntelLayerKey, string> = {
+  conflicts: "Conflicts (all)",
+  conflictsBattles: "ACLED Battles",
+  conflictsExplosions: "ACLED Explosions",
+  conflictsCivilians: "ACLED Civilians",
+  conflictsStrategic: "ACLED Strategic",
+  conflictsProtests: "ACLED Protests",
+  conflictsRiots: "ACLED Riots",
+  liveStrikes: "Live Strikes",
+  flights: "Flights",
+  vessels: "Vessels",
+  troopMovements: "Troop Movements",
+  carriers: "Carriers",
+  news: "News",
+  escalationRisk: "Escalation Risk",
+  hotspots: "Hotspots",
+  infrastructure: "Infrastructure",
+};
 
 
 function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
   return {
-    conflicts: true,
+    conflicts: false,
+    conflictsBattles: true,
+    conflictsExplosions: true,
+    conflictsCivilians: true,
+    conflictsStrategic: true,
+    conflictsProtests: false,
+    conflictsRiots: false,
     liveStrikes: true,
     flights: false,
     vessels: false,
@@ -53,6 +85,16 @@ function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
     hotspots: true,
     infrastructure: true,
   };
+}
+
+function isConflictSubtypeLayer(layer: IntelLayerKey): boolean {
+  return CONFLICT_SUBTYPE_LAYERS.includes(layer);
+}
+
+function getAllConflictPoints(layers: Record<IntelLayerKey, IntelPoint[]>): IntelPoint[] {
+  const points = CONFLICT_SUBTYPE_LAYERS.flatMap((k) => layers[k] ?? []);
+  if (points.length > 0) return points;
+  return layers.conflicts ?? [];
 }
 
 function simplifyProviderMessage(message: string): string {
@@ -96,7 +138,7 @@ function metaNumber(p: IntelPoint, key: string): number {
 }
 
 function isIndexEligibleConflictPoint(p: IntelPoint): boolean {
-  return p.layer === "conflicts" && p.source !== "ACLED ArcGIS";
+  return (p.layer === "conflicts" || isConflictSubtypeLayer(p.layer)) && p.source !== "ACLED ArcGIS";
 }
 
 function impactCountryMatchesSelection(p: IntelPoint, selectionCountry: string): boolean {
@@ -149,6 +191,7 @@ function inCountryScope(country: string, p: IntelPoint): boolean {
   if (
     p.layer === "liveStrikes" ||
     p.layer === "conflicts" ||
+    isConflictSubtypeLayer(p.layer) ||
     p.layer === "carriers"
   ) {
     const actorMatches = actorPointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
@@ -174,9 +217,10 @@ function buildLocalRegionIntel(
         })()
       : (p: IntelPoint) => inCountryScope(selection.country || selection.name, p);
 
+  const conflictPoints = getAllConflictPoints(data.layers);
   const dataPoints = [
     ...data.layers.liveStrikes,
-    ...data.layers.conflicts,
+    ...conflictPoints,
     ...data.layers.flights,
     ...data.layers.vessels,
     ...data.layers.carriers,
@@ -192,7 +236,7 @@ function buildLocalRegionIntel(
     return acc;
   }, {});
   const liveStrikes = counts.liveStrikes ?? 0;
-  const conflicts = counts.conflicts ?? 0;
+  const conflicts = dataPoints.filter((p) => isConflictSubtypeLayer(p.layer) || p.layer === "conflicts").length;
   const flights = counts.flights ?? 0;
   const vessels = counts.vessels ?? 0;
   const carriers = counts.carriers ?? 0;
@@ -208,7 +252,7 @@ function buildLocalRegionIntel(
       actorCountryMatchesSelection(p, selection.country || selection.name) &&
       !impactCountryMatchesSelection(p, selection.country || selection.name)
   );
-  const outboundActorConflicts = data.layers.conflicts
+  const outboundActorConflicts = conflictPoints
     .filter(isIndexEligibleConflictPoint)
     .filter(
       (p) =>
@@ -753,10 +797,16 @@ export default function MapPage() {
     apiData?.layers ??
     ({
       conflicts: [],
+      conflictsBattles: [],
+      conflictsExplosions: [],
+      conflictsCivilians: [],
+      conflictsStrategic: [],
+      conflictsProtests: [],
+      conflictsRiots: [],
       liveStrikes: [],
       flights: [],
       vessels: [],
-        troopMovements: [],
+      troopMovements: [],
       carriers: [],
       news: [],
       escalationRisk: [],
@@ -775,20 +825,21 @@ export default function MapPage() {
   );
 
   const worldStateRisk = useMemo(() => {
+    const conflictPoints = getAllConflictPoints(layers);
     const weightedSignals =
       layers.liveStrikes.reduce((s, p) => s + severityWeight(p.severity) * 2.5, 0) +
-      layers.conflicts.reduce((s, p) => s + severityWeight(p.severity) * 1.8, 0) +
+      conflictPoints.reduce((s, p) => s + severityWeight(p.severity) * 1.8, 0) +
       layers.news.reduce((s, p) => s + severityWeight(p.severity) * 0.7, 0) +
       layers.flights.length * 0.05 +
       layers.vessels.length * 0.04;
     const rawScaled = Math.min(100, Math.max(0, 100 - Math.exp(-weightedSignals / 360) * 100));
-    const kineticVolume = layers.liveStrikes.length + layers.conflicts.length;
+    const kineticVolume = layers.liveStrikes.length + conflictPoints.length;
     const criticalSignalCount =
       layers.liveStrikes.filter((p) => p.severity === "critical").length +
-      layers.conflicts.filter((p) => p.severity === "critical").length +
+      conflictPoints.filter((p) => p.severity === "critical").length +
       layers.news.filter((p) => p.severity === "critical").length;
     const highSeverityCountries = new Set(
-      [...layers.liveStrikes, ...layers.conflicts, ...layers.news]
+      [...layers.liveStrikes, ...conflictPoints, ...layers.news]
         .filter((p) => (p.severity === "high" || p.severity === "critical") && p.country)
         .map((p) => canonicalCountryMatchKey(p.country as string))
     );
@@ -949,10 +1000,11 @@ export default function MapPage() {
     setAssistantLoading(true);
     setAssistantError(null);
     try {
+      const conflictPoints = getAllConflictPoints(layers);
       const recent = [
         ...layers.liveStrikes,
         ...layers.news,
-        ...layers.conflicts,
+        ...conflictPoints,
       ]
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
         .slice(0, 40)
@@ -1114,7 +1166,7 @@ export default function MapPage() {
                   className="map-layer-dot"
                   style={{ background: layerColorCss(layer) }}
                 />
-                <span>{layer.toUpperCase()}</span>
+                <span>{LAYER_LABELS[layer]}</span>
                 <span className="map-layer-count">{layers[layer].length}</span>
               </label>
             ))}

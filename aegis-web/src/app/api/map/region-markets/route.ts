@@ -24,6 +24,78 @@ function scoreTextMatch(text: string, terms: string[]): number {
   return score;
 }
 
+const GEO_MARKET_ALLOW_TERMS = [
+  "election",
+  "president",
+  "prime minister",
+  "parliament",
+  "congress",
+  "senate",
+  "government",
+  "regime",
+  "coup",
+  "war",
+  "military",
+  "missile",
+  "strike",
+  "drone",
+  "airstrike",
+  "ceasefire",
+  "peace deal",
+  "treaty",
+  "nato",
+  "un",
+  "sanction",
+  "tariff",
+  "embargo",
+  "china",
+  "taiwan",
+  "iran",
+  "israel",
+  "ukraine",
+  "russia",
+  "gaza",
+  "palestine",
+  "sudan",
+  "north korea",
+  "south korea",
+  "middle east",
+  "red sea",
+  "hormuz",
+  "shipping",
+  "oil",
+  "energy",
+  "opec",
+];
+
+const GEO_MARKET_DENY_TERMS = [
+  "world cup",
+  "champions league",
+  "premier league",
+  "nfl",
+  "nba",
+  "mlb",
+  "nhl",
+  "tennis",
+  "golf",
+  "olympics",
+  "super bowl",
+  "movie",
+  "box office",
+  "album",
+  "grammy",
+  "oscar",
+  "celebrity",
+  "fashion",
+  "reality show",
+];
+
+function isModerateGeopoliticalMarket(text: string): boolean {
+  const t = text.toLowerCase();
+  if (GEO_MARKET_DENY_TERMS.some((term) => t.includes(term))) return false;
+  return GEO_MARKET_ALLOW_TERMS.some((term) => t.includes(term));
+}
+
 function toPct(v: number): number {
   if (!Number.isFinite(v)) return 50;
   if (v <= 1) return Math.max(1, Math.min(99, Math.round(v * 100)));
@@ -84,7 +156,13 @@ async function fetchKalshiQuotes(name: string): Promise<RegionMarketQuote[]> {
         const yesPct = parseKalshiYesPct(row);
         return { row, title, score, yesPct };
       })
-      .filter((x) => x.title && x.score > 0 && x.yesPct !== null)
+      .filter(
+        (x) =>
+          x.title &&
+          x.score > 0 &&
+          x.yesPct !== null &&
+          isModerateGeopoliticalMarket(x.title)
+      )
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
     return ranked.map((x) => {
@@ -118,7 +196,13 @@ async function fetchPolymarketQuotes(name: string): Promise<RegionMarketQuote[]>
         const yesPct = parsePolymarketYesPct(row);
         return { row, title, score, yesPct };
       })
-      .filter((x) => x.title && x.score > 0 && x.yesPct !== null)
+      .filter(
+        (x) =>
+          x.title &&
+          x.score > 0 &&
+          x.yesPct !== null &&
+          isModerateGeopoliticalMarket(x.title)
+      )
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
     return ranked.map((x) => ({

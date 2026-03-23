@@ -1,5 +1,11 @@
 export type IntelLayerKey =
   | "conflicts"
+  | "conflictsBattles"
+  | "conflictsExplosions"
+  | "conflictsCivilians"
+  | "conflictsStrategic"
+  | "conflictsProtests"
+  | "conflictsRiots"
   | "liveStrikes"
   | "flights"
   | "vessels"
