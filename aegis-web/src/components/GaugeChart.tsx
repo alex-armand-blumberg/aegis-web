@@ -1,7 +1,7 @@
 "use client";
 
 type GaugeChartProps = {
-  value: number;
+  value: number | null | undefined;
   label: string;
 };
 
@@ -10,7 +10,8 @@ function clamp(v: number): number {
 }
 
 export default function GaugeChart({ value, label }: GaugeChartProps) {
-  const safe = clamp(value);
+  const hasValue = Number.isFinite(value);
+  const safe = hasValue ? clamp(value as number) : 0;
   const rotationDeg = -120 + (safe / 100) * 240;
 
   return (
@@ -19,7 +20,7 @@ export default function GaugeChart({ value, label }: GaugeChartProps) {
         viewBox="0 0 820 377.01"
         xmlns="http://www.w3.org/2000/svg"
         role="img"
-        aria-label={`${label} ${safe} out of 100`}
+        aria-label={hasValue ? `${label} ${safe} out of 100` : `${label} unavailable`}
       >
         <defs>
           <linearGradient id="gaugeGradient" x1="110.1897" y1="191.1173" x2="706.6127" y2="191.1173">
@@ -60,7 +61,7 @@ export default function GaugeChart({ value, label }: GaugeChartProps) {
       </svg>
       <div style={{ marginTop: -10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
         <span>{label}</span>
-        <strong>{safe}/100</strong>
+        <strong>{hasValue ? `${safe}/100` : "--/100"}</strong>
       </div>
     </div>
   );

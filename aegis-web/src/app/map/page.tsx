@@ -218,6 +218,10 @@ function buildLocalRegionIntel(
   };
 }
 
+function regionSelectionCacheKey(selection: RegionSelection, range: string): string {
+  return `${selection.kind}:${selection.key}:${range}`;
+}
+
 export default function MapPage() {
   const [mode, setMode] = useState<"2d" | "3d">("2d");
   const [range, setRange] = useState<(typeof TIME_RANGES)[number]>("7d");
@@ -250,6 +254,7 @@ export default function MapPage() {
   const recenterRef = useRef<(() => void) | null>(null);
   const aiSummaryCacheRef = useRef<Record<string, string>>({});
   const usedRegionImagesRef = useRef<Set<string>>(new Set());
+  const regionIntelCacheRef = useRef<Record<string, RegionIntelResponse>>({});
 
   const requestedLayerList = useMemo(
     () => ALL_LAYERS.filter((k) => activeLayers[k]).join(","),
@@ -306,6 +311,18 @@ export default function MapPage() {
     }
 
     let active = true;
+    const cacheKey = regionSelectionCacheKey(selectedRegion, range);
+    const cachedIntel = regionIntelCacheRef.current[cacheKey];
+    if (cachedIntel) {
+      setRegionIntel(cachedIntel);
+    } else if (apiData) {
+      const localIntel = buildLocalRegionIntel(apiData, selectedRegion, range);
+      regionIntelCacheRef.current[cacheKey] = localIntel;
+      setRegionIntel(localIntel);
+    } else {
+      setRegionIntel(null);
+    }
+
     const params = new URLSearchParams({
       kind: selectedRegion.kind,
       key: selectedRegion.key,
@@ -319,13 +336,18 @@ export default function MapPage() {
         const res = await fetch(`/api/map/region?${qs}`);
         const data = (await res.json()) as RegionIntelResponse & { error?: string };
         if (!res.ok) throw new Error(data.error || "Failed region intelligence");
-        if (active) setRegionIntel(data);
+        if (active) {
+          regionIntelCacheRef.current[cacheKey] = data;
+          setRegionIntel(data);
+        }
       } catch {
         if (!active) return;
         if (apiData) {
-          setRegionIntel(buildLocalRegionIntel(apiData, selectedRegion, range));
+          const localIntel = buildLocalRegionIntel(apiData, selectedRegion, range);
+          regionIntelCacheRef.current[cacheKey] = localIntel;
+          setRegionIntel(localIntel);
         } else {
-          setRegionIntel(null);
+          setRegionIntel(regionIntelCacheRef.current[cacheKey] ?? null);
         }
       }
     };
@@ -704,27 +726,10 @@ export default function MapPage() {
   const regionPanelData: RegionIntelResponse | null = useMemo(() => {
     if (regionIntel) return regionIntel;
     if (!selectedRegion) return null;
-    return {
-      selection: selectedRegion,
-      range,
-      updatedAt: new Date().toISOString(),
-      escalationIndex: 0,
-      conflictIndex: 0,
-      status: "stable",
-      signals: {
-        liveStrikes: 0,
-        conflicts: 0,
-        militaryFlights: 0,
-        navalVessels: 0,
-        carrierSignals: 0,
-        criticalNews: 0,
-        infrastructure: 0,
-      },
-      timeline: [],
-      topNews: [],
-      dataPoints: [],
-    };
-  }, [regionIntel, selectedRegion, range]);
+    if (apiData) return buildLocalRegionIntel(apiData, selectedRegion, range);
+    const cached = regionIntelCacheRef.current[regionSelectionCacheKey(selectedRegion, range)];
+    return cached ?? null;
+  }, [apiData, regionIntel, selectedRegion, range]);
 
   return (
     <div className="map-page min-h-screen text-[#e2e8f0]">
