@@ -82,9 +82,13 @@ function buildCountryScopeMatcher(selectionCountry: string): (p: IntelPoint) => 
       return true;
     }
 
-    // Actor matching is only used for kinetic/news signals; it lets countries
-    // that launched strikes (e.g., Russia -> Iran) show up in the actor's risk gauge.
-    if (p.layer === "liveStrikes" || p.layer === "conflicts") {
+    // Actor matching for outbound military projection signals.
+    if (
+      p.layer === "liveStrikes" ||
+      p.layer === "conflicts" ||
+      p.layer === "flights" ||
+      p.layer === "carriers"
+    ) {
       const actorCandidates = extractActorCountryCandidates(p);
       if (
         actorCandidates.some((c) => {

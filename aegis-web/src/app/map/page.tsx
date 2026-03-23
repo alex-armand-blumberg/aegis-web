@@ -138,9 +138,14 @@ function inCountryScope(country: string, p: IntelPoint): boolean {
   const byLabel = pointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
   if (byLabel || countriesMatch(country, p.country)) return true;
 
-  // Actor matching: if impact country doesn't match, allow kinetic/news signals
-  // to still be attributed to the launching/operating actor country.
-  if (p.layer === "liveStrikes" || p.layer === "conflicts") {
+  // Actor matching: if impact country doesn't match, allow outbound military
+  // projection signals to still be attributed to launching/operating country.
+  if (
+    p.layer === "liveStrikes" ||
+    p.layer === "conflicts" ||
+    p.layer === "flights" ||
+    p.layer === "carriers"
+  ) {
     const actorMatches = actorPointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
     if (actorMatches) return true;
   }
