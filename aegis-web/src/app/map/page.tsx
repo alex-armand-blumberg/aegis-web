@@ -13,7 +13,9 @@ import type {
   RegionSelection,
 } from "@/lib/intel/types";
 import { layerColorCss } from "@/lib/intel/colors";
-import { formatCountryDisplayName } from "@/lib/countryDisplay";
+import { canonicalCountryMatchKey, countriesMatch, formatCountryDisplayName } from "@/lib/countryDisplay";
+import { getCountryBounds } from "@/lib/countryBounds";
+import { getOceanRegionByKey, pointInRegion } from "@/lib/regionGeometry";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
 import RegionIntelPanel from "@/components/RegionIntelPanel";
 
@@ -67,6 +69,137 @@ function severityWeight(sev: IntelPoint["severity"]): number {
   if (sev === "high") return 3;
   if (sev === "medium") return 2;
   return 1;
+}
+
+function clampIndex(v: number): number {
+  return Math.max(0, Math.min(100, Math.round(v)));
+}
+
+function scaledIndex(raw: number, volume: number, kind: "escalation" | "conflict"): number {
+  if (raw <= 0 || volume <= 0) return 0;
+  const baseDenominator = kind === "escalation" ? 16 : 14;
+  const dynamicDenominator = baseDenominator + Math.sqrt(volume) * (kind === "escalation" ? 2.3 : 1.9);
+  const normalized = Math.max(0, raw / dynamicDenominator);
+  return clampIndex(100 * (1 - Math.exp(-normalized)));
+}
+
+function pointCountryCandidates(p: IntelPoint): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v !== "string") return;
+    const t = v.trim();
+    if (t) out.push(t);
+  };
+  push(p.country);
+  push(p.metadata?.country);
+  push(p.metadata?.country_name);
+  push(p.metadata?.location_country);
+  push(p.metadata?.nation);
+  return out;
+}
+
+function inCountryScope(country: string, p: IntelPoint): boolean {
+  const canonical = canonicalCountryMatchKey(country);
+  const byLabel = pointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
+  if (byLabel || countriesMatch(country, p.country)) return true;
+  const bounds = getCountryBounds(country);
+  if (!bounds) return false;
+  const [[minLat, minLon], [maxLat, maxLon]] = bounds;
+  return p.lat >= minLat && p.lat <= maxLat && p.lon >= minLon && p.lon <= maxLon;
+}
+
+function buildLocalRegionIntel(
+  data: MapApiResponse,
+  selection: RegionSelection,
+  range: string
+): RegionIntelResponse {
+  const inScope =
+    selection.kind === "ocean"
+      ? (() => {
+          const feature = getOceanRegionByKey(selection.key);
+          return (p: IntelPoint) => (feature ? pointInRegion(p.lon, p.lat, feature) : false);
+        })()
+      : (p: IntelPoint) => inCountryScope(selection.country || selection.name, p);
+
+  const dataPoints = [
+    ...data.layers.liveStrikes,
+    ...data.layers.conflicts,
+    ...data.layers.flights,
+    ...data.layers.vessels,
+    ...data.layers.carriers,
+    ...data.layers.infrastructure,
+    ...data.layers.news,
+  ]
+    .filter(inScope)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, 220);
+
+  const counts = dataPoints.reduce<Record<string, number>>((acc, p) => {
+    acc[p.layer] = (acc[p.layer] ?? 0) + 1;
+    return acc;
+  }, {});
+  const severityMass = dataPoints.reduce((sum, p) => sum + severityWeight(p.severity), 0);
+  const liveStrikes = counts.liveStrikes ?? 0;
+  const conflicts = counts.conflicts ?? 0;
+  const flights = counts.flights ?? 0;
+  const vessels = counts.vessels ?? 0;
+  const carriers = counts.carriers ?? 0;
+  const infrastructure = counts.infrastructure ?? 0;
+  const criticalNews = dataPoints.filter((p) => p.layer === "news" && p.severity === "critical").length;
+  const volume = dataPoints.length;
+
+  const escalationRaw =
+    liveStrikes * 3.4 +
+    conflicts * 2.6 +
+    flights * 1.5 +
+    vessels * 1.3 +
+    carriers * 2.4 +
+    criticalNews * 1.2 +
+    infrastructure * 0.8 +
+    severityMass * 0.42;
+  const conflictRaw =
+    liveStrikes * 3.8 +
+    conflicts * 2.9 +
+    criticalNews * 1.35 +
+    infrastructure * 0.45 +
+    severityMass * 0.28;
+
+  let escalationIndex = scaledIndex(escalationRaw, Math.max(1, volume), "escalation");
+  let conflictIndex = scaledIndex(conflictRaw, Math.max(1, volume), "conflict");
+  if (volume > 0 && escalationIndex === 0) escalationIndex = Math.min(18, 4 + Math.round(Math.sqrt(volume)));
+  if (volume > 0 && conflictIndex === 0) conflictIndex = Math.min(14, 3 + Math.round(Math.sqrt(volume * 0.7)));
+
+  return {
+    selection,
+    range,
+    updatedAt: new Date().toISOString(),
+    escalationIndex,
+    conflictIndex,
+    status:
+      escalationIndex >= 70 || conflictIndex >= 70
+        ? "critical"
+        : escalationIndex >= 40 || conflictIndex >= 40
+          ? "elevated"
+          : "stable",
+    signals: {
+      liveStrikes,
+      conflicts,
+      militaryFlights: flights,
+      navalVessels: vessels,
+      carrierSignals: carriers,
+      criticalNews,
+      infrastructure,
+    },
+    timeline: [],
+    topNews: dataPoints.slice(0, 10).map((p) => ({
+      title: p.metadata?.original_headline ? String(p.metadata.original_headline) : p.title,
+      severity: p.severity,
+      source: p.source,
+      timestamp: p.timestamp,
+      url: String(p.metadata?.source_url ?? p.metadata?.article_url ?? p.metadata?.link ?? ""),
+    })),
+    dataPoints,
+  };
 }
 
 export default function MapPage() {
@@ -172,7 +305,12 @@ export default function MapPage() {
         if (!res.ok) throw new Error(data.error || "Failed region intelligence");
         if (active) setRegionIntel(data);
       } catch {
-        if (active) setRegionIntel(null);
+        if (!active) return;
+        if (apiData) {
+          setRegionIntel(buildLocalRegionIntel(apiData, selectedRegion, range));
+        } else {
+          setRegionIntel(null);
+        }
       }
     };
     const loadImage = async () => {
@@ -214,8 +352,21 @@ export default function MapPage() {
         setRegionAiError(data.error || "Summary request failed");
       } catch {
         if (!active) return;
-        setRegionAiSummary("");
-        setRegionAiError("Summary request failed");
+        const fallback = regionIntel ?? (apiData ? buildLocalRegionIntel(apiData, selectedRegion, range) : null);
+        if (fallback) {
+          setRegionAiSummary(
+            [
+              `- Work in progress fallback summary for ${fallback.selection.name}.`,
+              `- Escalation ${fallback.escalationIndex}/100, conflict ${fallback.conflictIndex}/100 over ${fallback.range}.`,
+              `- Signals: strikes ${fallback.signals.liveStrikes}, conflicts ${fallback.signals.conflicts}, flights ${fallback.signals.militaryFlights}, vessels ${fallback.signals.navalVessels}, carriers ${fallback.signals.carrierSignals}.`,
+              fallback.dataPoints[0] ? `- Latest mapped point: ${fallback.dataPoints[0].title}` : "- No mapped points in current scope.",
+            ].join("\n")
+          );
+          setRegionAiError(null);
+        } else {
+          setRegionAiSummary("");
+          setRegionAiError("Summary request failed");
+        }
       } finally {
         if (active) setRegionAiLoading(false);
       }
@@ -240,7 +391,7 @@ export default function MapPage() {
     return () => {
       active = false;
     };
-  }, [range, selectedRegion]);
+  }, [apiData, range, regionIntel, selectedRegion]);
 
   useEffect(() => {
     if (!selectedPoint) {
