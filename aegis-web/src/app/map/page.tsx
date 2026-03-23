@@ -798,12 +798,62 @@ export default function MapPage() {
   }, [layers]);
 
   const hotspotSummary = useMemo(() => {
-    const seeded = [...escalationRiskCountries]
-      .sort((a, b) => b.riskScore - a.riskScore)
-      .slice(0, 8)
-      .map((h) => ({
+    const priorityTheaters = new Set([
+      "iran",
+      "israel",
+      "sudan",
+      "south sudan",
+      "ukraine",
+      "russia",
+      "gaza",
+      "palestine",
+    ]);
+    const merged = new Map<
+      string,
+      {
+        country: string;
+        score100: number;
+        severity: "low" | "medium" | "high" | "critical";
+        trend: "rising" | "stable" | "declining";
+        latestEventAt: string;
+        reason: string;
+      }
+    >();
+    const upsert = (entry: {
+      country: string;
+      score100: number;
+      severity: "low" | "medium" | "high" | "critical";
+      trend: "rising" | "stable" | "declining";
+      latestEventAt: string;
+      reason: string;
+    }) => {
+      const key = canonicalCountryMatchKey(entry.country);
+      const prev = merged.get(key);
+      if (!prev) {
+        merged.set(key, entry);
+        return;
+      }
+      merged.set(key, {
+        ...prev,
+        score100: Math.max(prev.score100, entry.score100),
+        severity:
+          entry.severity === "critical" || prev.severity === "critical"
+            ? "critical"
+            : entry.severity === "high" || prev.severity === "high"
+              ? "high"
+              : entry.severity === "medium" || prev.severity === "medium"
+                ? "medium"
+                : "low",
+        trend: prev.trend === "rising" || entry.trend === "rising" ? "rising" : prev.trend,
+        latestEventAt: prev.latestEventAt > entry.latestEventAt ? prev.latestEventAt : entry.latestEventAt,
+        reason: prev.reason,
+      });
+    };
+
+    for (const h of escalationRiskCountries) {
+      upsert({
         country: formatCountryDisplayName(h.country),
-        score100: Math.max(0, Math.min(100, Math.round(h.riskScore * 5.5))),
+        score100: Math.max(0, Math.min(100, Math.round(h.riskScore * 5.9))),
         severity: h.severity,
         trend: h.trend,
         latestEventAt: h.latestEventAt,
@@ -811,24 +861,53 @@ export default function MapPage() {
           h.signals.length > 0
             ? `Signals: ${h.signals.slice(0, 3).join(", ")}`
             : "Signals: rising multi-source conflict indicators",
-      }));
+      });
+    }
+    for (const c of activeConflictCountries) {
+      upsert({
+        country: formatCountryDisplayName(c.country),
+        score100: Math.max(0, Math.min(100, Math.round(c.score * 6.8))),
+        severity: c.severity,
+        trend: "rising",
+        latestEventAt: c.latestEventAt,
+        reason:
+          c.sources.length > 0
+            ? `Signals: ${c.sources.slice(0, 3).join(", ")}`
+            : "Signals: sustained war-like kinetic reporting",
+      });
+    }
+
+    const sorted = Array.from(merged.values()).sort((a, b) => b.score100 - a.score100);
+    const prioritized = sorted.filter((x) => priorityTheaters.has(canonicalCountryMatchKey(x.country)));
+    const regular = sorted.filter((x) => !priorityTheaters.has(canonicalCountryMatchKey(x.country)));
+
     const manual = [
-      { country: "South China Sea", score100: 50, severity: "medium" as const, trend: "rising" as const, reason: "Baseline tension; score not boosted by recent kinetic events. Maritime standoffs, naval patrol pressure." },
-      { country: "China", score100: 48, severity: "medium" as const, trend: "rising" as const, reason: "Baseline tension; score not boosted by recent kinetic events. Regional coercion posture." },
-      { country: "Taiwan", score100: 50, severity: "medium" as const, trend: "rising" as const, reason: "Baseline tension; score not boosted by recent kinetic events. Cross-strait pressure narratives." },
-      { country: "Cuba", score100: 41, severity: "medium" as const, trend: "stable" as const, reason: "Signals: strategic pressure potential and regional spillover sensitivity." },
+      {
+        country: "South China Sea",
+        score100: 50,
+        severity: "medium" as const,
+        trend: "rising" as const,
+        reason: "Baseline tension; maritime standoffs and naval patrol pressure.",
+      },
+      {
+        country: "Taiwan",
+        score100: 50,
+        severity: "medium" as const,
+        trend: "rising" as const,
+        reason: "Baseline tension; cross-strait military pressure narratives.",
+      },
     ].map((m) => ({
       ...m,
       latestEventAt: new Date().toISOString(),
     }));
-    const merged = [...seeded];
+
+    const top = [...prioritized, ...regular].slice(0, 10);
     for (const m of manual) {
-      if (!merged.some((x) => x.country.toLowerCase() === m.country.toLowerCase())) merged.push(m);
+      if (top.length >= 10) break;
+      if (!top.some((x) => canonicalCountryMatchKey(x.country) === canonicalCountryMatchKey(m.country))) top.push(m);
     }
-    return merged
-      .sort((a, b) => b.score100 - a.score100)
-      .slice(0, 10);
-  }, [escalationRiskCountries]);
+    return top;
+  }, [activeConflictCountries, escalationRiskCountries]);
 
   const relayDigestHealth = useMemo(
     () => providerHealth.find((h) => h.provider === "Relay seed digest"),
