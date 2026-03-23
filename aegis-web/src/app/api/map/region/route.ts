@@ -73,11 +73,9 @@ function buildCountryScopeMatcher(selectionCountry: string): (p: IntelPoint) => 
   };
 }
 
-function scaledIndex(raw: number, volume: number, kind: "escalation" | "conflict"): number {
-  if (raw <= 0 || volume <= 0) return 0;
-  const baseDenominator = kind === "escalation" ? 16 : 14;
-  const dynamicDenominator = baseDenominator + Math.sqrt(volume) * (kind === "escalation" ? 2.3 : 1.9);
-  const normalized = Math.max(0, raw / dynamicDenominator);
+function scaledIndex(raw: number, denominator: number): number {
+  if (raw <= 0 || denominator <= 0) return 0;
+  const normalized = Math.max(0, raw / denominator);
   const curved = 100 * (1 - Math.exp(-normalized));
   return clampIndex(curved);
 }
@@ -164,7 +162,6 @@ export async function GET(request: Request) {
       acc[p.layer] = (acc[p.layer] ?? 0) + 1;
       return acc;
     }, {});
-    const severityMass = dataPoints.reduce((sum, p) => sum + severityWeight(p.severity), 0);
     const scopedVolume = dataPoints.length;
     const liveStrikesCount = layerCounts.liveStrikes ?? 0;
     const conflictsCount = layerCounts.conflicts ?? 0;
@@ -172,28 +169,43 @@ export async function GET(request: Request) {
     const vesselsCount = layerCounts.vessels ?? 0;
     const carriersCount = layerCounts.carriers ?? 0;
     const infraCount = layerCounts.infrastructure ?? 0;
-    const newsCount = layerCounts.news ?? 0;
     const criticalNewsCount = news.filter((n) => n.severity === "critical").length;
+    const kineticVolume = liveStrikesCount + conflictsCount;
+    const mobilityVolume = flightsCount + vesselsCount + carriersCount;
+    const mobilityComposite = flightsCount + vesselsCount * 0.8 + carriersCount * 1.2;
+    const kineticSeverityMass = [...liveStrikes, ...conflicts].reduce((sum, p) => sum + severityWeight(p.severity), 0);
+    const mobilityFactor = 0.25 + 0.75 * Math.min(1, (kineticVolume + criticalNewsCount) / 6);
 
     const escalationRaw =
-      liveStrikesCount * 3.4 +
-      conflictsCount * 2.6 +
-      flightsCount * 1.5 +
-      vesselsCount * 1.3 +
-      carriersCount * 2.4 +
-      criticalNewsCount * 1.2 +
-      infraCount * 0.8 +
-      severityMass * 0.42;
+      liveStrikesCount * 3.6 +
+      conflictsCount * 2.8 +
+      criticalNewsCount * 1.4 +
+      infraCount * 0.6 +
+      kineticSeverityMass * 0.35 +
+      mobilityComposite * 0.9 * mobilityFactor;
     const conflictRaw =
-      liveStrikesCount * 3.8 +
-      conflictsCount * 2.9 +
-      criticalNewsCount * 1.35 +
-      infraCount * 0.45 +
-      severityMass * 0.28;
-    let escalationIndex = scaledIndex(escalationRaw, Math.max(1, scopedVolume), "escalation");
-    let conflictIndex = scaledIndex(conflictRaw, Math.max(1, scopedVolume), "conflict");
-    if (scopedVolume > 0 && escalationIndex === 0) escalationIndex = Math.min(18, 4 + Math.round(Math.sqrt(scopedVolume)));
-    if (scopedVolume > 0 && conflictIndex === 0) conflictIndex = Math.min(14, 3 + Math.round(Math.sqrt(scopedVolume * 0.7)));
+      liveStrikesCount * 4.0 +
+      conflictsCount * 3.2 +
+      criticalNewsCount * 1.4 +
+      infraCount * 0.15 +
+      kineticSeverityMass * 0.35;
+    const escalationDenominator = 22 + Math.sqrt(Math.max(1, scopedVolume)) * 1.6 + Math.sqrt(mobilityVolume) * 0.9;
+    const conflictDenominator = 18 + Math.sqrt(kineticVolume + 1) * 1.2;
+    let escalationIndex = scaledIndex(escalationRaw, escalationDenominator);
+    let conflictIndex = scaledIndex(conflictRaw, conflictDenominator);
+    if (kineticVolume === 0) {
+      conflictIndex = Math.min(conflictIndex, 25);
+      if (criticalNewsCount < 2) escalationIndex = Math.min(escalationIndex, 35);
+    }
+    if (scopedVolume > 0 && escalationIndex === 0) {
+      escalationIndex =
+        kineticVolume > 0
+          ? Math.min(22, 6 + Math.round(Math.sqrt(kineticVolume + criticalNewsCount)))
+          : Math.min(10, 2 + Math.round(Math.sqrt(Math.max(1, mobilityVolume)) * 0.8));
+    }
+    if (scopedVolume > 0 && conflictIndex === 0) {
+      conflictIndex = kineticVolume > 0 ? Math.min(20, 5 + Math.round(Math.sqrt(kineticVolume))) : 0;
+    }
     const status: RegionIntelResponse["status"] =
       escalationIndex >= 70 || conflictIndex >= 70
         ? "critical"

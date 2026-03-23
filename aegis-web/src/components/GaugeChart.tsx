@@ -12,7 +12,8 @@ function clamp(v: number): number {
 export default function GaugeChart({ value, label }: GaugeChartProps) {
   const hasValue = Number.isFinite(value);
   const safe = hasValue ? clamp(value as number) : 0;
-  const rotationDeg = -120 + (safe / 100) * 240;
+  // Needle artwork is not authored at 0deg; calibrate sweep to the visible top semicircle.
+  const rotationDeg = -140 + (safe / 100) * 180;
 
   return (
     <div style={{ width: "100%", maxWidth: 360 }}>

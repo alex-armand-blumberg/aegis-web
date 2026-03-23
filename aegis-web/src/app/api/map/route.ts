@@ -723,6 +723,7 @@ function extractOpenSkyMilitaryPoints(
     const role = inferAircraftRole(callsign);
     const platform = inferAircraftPlatformCategory(callsign);
     const country = resolveFlightCountry(lat, lon, icao24, originCountry);
+    const operatorCountry = originCountry || countryFromIcao24Hex(icao24) || null;
 
     points.push({
       id: `flight-${icao24 || `${callsign}-${lat}-${lon}`}`,
@@ -739,6 +740,7 @@ function extractOpenSkyMilitaryPoints(
       confidence: 0.65,
       metadata: {
         country: country || null,
+        operator_country: operatorCountry,
         velocity_ms: velocity,
         speed_kts: speedKts,
         altitude_m: altitude,
@@ -856,6 +858,7 @@ async function fetchOpenSkyFlights(): Promise<{
     const platform = inferAircraftPlatformCategory(callsign || "");
     const hexStr = String(flight.hex ?? "").trim();
     const country = resolveFlightCountry(lat, lon, hexStr, "");
+    const operatorCountry = countryFromIcao24Hex(hexStr) || null;
     points.push({
       id: `flight-fallback-${flight.hex ?? `${lat}-${lon}`}`,
       layer: "flights",
@@ -871,6 +874,7 @@ async function fetchOpenSkyFlights(): Promise<{
       confidence: 0.55,
       metadata: {
         country: country || null,
+        operator_country: operatorCountry,
         velocity_ms: velocity,
         speed_kts: speedKts,
         altitude_m: altitude,
@@ -928,6 +932,7 @@ async function fetchOpenSkyFlights(): Promise<{
       const platform = inferAircraftPlatformCategory(callsign);
       const hexStr = String(flight.hex ?? "").trim();
       const country = resolveFlightCountry(lat, lon, hexStr, "");
+      const operatorCountry = countryFromIcao24Hex(hexStr) || null;
 
       points.push({
         id: `flight-grid-${c.label}-${flight.hex ?? `${lat}-${lon}`}`,
@@ -944,6 +949,7 @@ async function fetchOpenSkyFlights(): Promise<{
         confidence: 0.45,
         metadata: {
           country: country || null,
+          operator_country: operatorCountry,
           velocity_ms: velocity,
           speed_kts: speedKts,
           altitude_m: altitude,
@@ -1016,18 +1022,20 @@ function inferCountryFromLatLon(lat: number, lon: number): string | undefined {
   return undefined;
 }
 
-/** Prefer ADS-B origin, then ICAO hex allocation, then lat/lon bbox. */
+/** Prefer current geolocation for regional scope, keep origin/operator in metadata. */
 function resolveFlightCountry(
   lat: number,
   lon: number,
   hex: string | undefined,
   originCountry?: string
 ): string | undefined {
+  const geo = inferCountryFromLatLon(lat, lon);
+  if (geo) return geo;
   const o = originCountry?.trim();
   if (o) return o;
   const fromHex = countryFromIcao24Hex(hex);
   if (fromHex) return fromHex;
-  return inferCountryFromLatLon(lat, lon);
+  return undefined;
 }
 
 async function enrichFlightPointsWithAdsbHexMeta(points: IntelPoint[]): Promise<IntelPoint[]> {
@@ -4570,7 +4578,7 @@ async function fetchVesselSignals(): Promise<{
     const mmsiCountry = countryFromMmsi(String(v.id ?? "").trim());
     const nameCountry = countryFromNavalOrCommercialName(name);
     const geoCountry = inferCountryFromLatLon(lat, lon);
-    const country = flagCountry ?? mmsiCountry ?? nameCountry ?? geoCountry;
+    const country = geoCountry ?? flagCountry ?? mmsiCountry ?? nameCountry;
     points.push({
       id: `vessel-${v.id ?? `${lat}-${lon}`}`,
       layer: "vessels",

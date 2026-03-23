@@ -75,11 +75,9 @@ function clampIndex(v: number): number {
   return Math.max(0, Math.min(100, Math.round(v)));
 }
 
-function scaledIndex(raw: number, volume: number, kind: "escalation" | "conflict"): number {
-  if (raw <= 0 || volume <= 0) return 0;
-  const baseDenominator = kind === "escalation" ? 16 : 14;
-  const dynamicDenominator = baseDenominator + Math.sqrt(volume) * (kind === "escalation" ? 2.3 : 1.9);
-  const normalized = Math.max(0, raw / dynamicDenominator);
+function scaledIndex(raw: number, denominator: number): number {
+  if (raw <= 0 || denominator <= 0) return 0;
+  const normalized = Math.max(0, raw / denominator);
   return clampIndex(100 * (1 - Math.exp(-normalized)));
 }
 
@@ -98,26 +96,10 @@ function pointCountryCandidates(p: IntelPoint): string[] {
   return out;
 }
 
-function normalizeLooseCountryText(input: string): string {
-  return input
-    .toLowerCase()
-    .normalize("NFKC")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function inCountryScope(country: string, p: IntelPoint): boolean {
   const canonical = canonicalCountryMatchKey(country);
   const byLabel = pointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
   if (byLabel || countriesMatch(country, p.country)) return true;
-  const countryText = normalizeLooseCountryText(country);
-  const textBlob = normalizeLooseCountryText(
-    `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.country ?? "")} ${String(p.metadata?.location ?? "")} ${String(
-      p.metadata?.original_headline ?? ""
-    )}`
-  );
-  if (countryText && textBlob.includes(countryText)) return true;
   const bounds = getCountryBounds(country);
   if (!bounds) return false;
   const [[minLat, minLon], [maxLat, maxLon]] = bounds;
@@ -154,7 +136,6 @@ function buildLocalRegionIntel(
     acc[p.layer] = (acc[p.layer] ?? 0) + 1;
     return acc;
   }, {});
-  const severityMass = dataPoints.reduce((sum, p) => sum + severityWeight(p.severity), 0);
   const liveStrikes = counts.liveStrikes ?? 0;
   const conflicts = counts.conflicts ?? 0;
   const flights = counts.flights ?? 0;
@@ -163,27 +144,45 @@ function buildLocalRegionIntel(
   const infrastructure = counts.infrastructure ?? 0;
   const criticalNews = dataPoints.filter((p) => p.layer === "news" && p.severity === "critical").length;
   const volume = dataPoints.length;
+  const kineticVolume = liveStrikes + conflicts;
+  const mobilityVolume = flights + vessels + carriers;
+  const mobilityComposite = flights + vessels * 0.8 + carriers * 1.2;
+  const kineticSeverityMass = dataPoints
+    .filter((p) => p.layer === "liveStrikes" || p.layer === "conflicts")
+    .reduce((sum, p) => sum + severityWeight(p.severity), 0);
+  const mobilityFactor = 0.25 + 0.75 * Math.min(1, (kineticVolume + criticalNews) / 6);
 
   const escalationRaw =
-    liveStrikes * 3.4 +
-    conflicts * 2.6 +
-    flights * 1.5 +
-    vessels * 1.3 +
-    carriers * 2.4 +
-    criticalNews * 1.2 +
-    infrastructure * 0.8 +
-    severityMass * 0.42;
+    liveStrikes * 3.6 +
+    conflicts * 2.8 +
+    criticalNews * 1.4 +
+    infrastructure * 0.6 +
+    kineticSeverityMass * 0.35 +
+    mobilityComposite * 0.9 * mobilityFactor;
   const conflictRaw =
-    liveStrikes * 3.8 +
-    conflicts * 2.9 +
-    criticalNews * 1.35 +
-    infrastructure * 0.45 +
-    severityMass * 0.28;
+    liveStrikes * 4.0 +
+    conflicts * 3.2 +
+    criticalNews * 1.4 +
+    infrastructure * 0.15 +
+    kineticSeverityMass * 0.35;
 
-  let escalationIndex = scaledIndex(escalationRaw, Math.max(1, volume), "escalation");
-  let conflictIndex = scaledIndex(conflictRaw, Math.max(1, volume), "conflict");
-  if (volume > 0 && escalationIndex === 0) escalationIndex = Math.min(18, 4 + Math.round(Math.sqrt(volume)));
-  if (volume > 0 && conflictIndex === 0) conflictIndex = Math.min(14, 3 + Math.round(Math.sqrt(volume * 0.7)));
+  const escalationDenominator = 22 + Math.sqrt(Math.max(1, volume)) * 1.6 + Math.sqrt(mobilityVolume) * 0.9;
+  const conflictDenominator = 18 + Math.sqrt(kineticVolume + 1) * 1.2;
+  let escalationIndex = scaledIndex(escalationRaw, escalationDenominator);
+  let conflictIndex = scaledIndex(conflictRaw, conflictDenominator);
+  if (kineticVolume === 0) {
+    conflictIndex = Math.min(conflictIndex, 25);
+    if (criticalNews < 2) escalationIndex = Math.min(escalationIndex, 35);
+  }
+  if (volume > 0 && escalationIndex === 0) {
+    escalationIndex =
+      kineticVolume > 0
+        ? Math.min(22, 6 + Math.round(Math.sqrt(kineticVolume + criticalNews)))
+        : Math.min(10, 2 + Math.round(Math.sqrt(Math.max(1, mobilityVolume)) * 0.8));
+  }
+  if (volume > 0 && conflictIndex === 0) {
+    conflictIndex = kineticVolume > 0 ? Math.min(20, 5 + Math.round(Math.sqrt(kineticVolume))) : 0;
+  }
 
   return {
     selection,

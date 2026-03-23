@@ -28,6 +28,9 @@ export const metadata: Metadata = {
   title: "AEGIS — Advanced Early-Warning & Geostrategic Intelligence System",
   description:
     "AEGIS is an advanced early-warning and geostrategic intelligence system that surfaces conflict escalation risk using ACLED data and AI.",
+  icons: {
+    icon: "/icon.png",
+  },
 };
 
 export default function RootLayout({
