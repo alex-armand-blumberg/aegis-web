@@ -404,6 +404,15 @@ export async function GET(request: Request) {
           ? Math.min(36, 10 + Math.round(Math.sqrt(impactKineticVolume * 3 + fatalitiesSignal / 3)))
           : 0;
     }
+    // Final manual US floor override: keep US gauges elevated for active force projection
+    // even when impact-country attribution is sparse in the current window.
+    if (isUnitedStatesSelection) {
+      const usOutboundSignal = outboundActorKineticVolume * 3 + Math.sqrt(Math.max(0, outboundActorSupportVolume)) * 2.4;
+      const usEscalationFloor = Math.min(82, 64 + Math.round(usOutboundSignal));
+      const usConflictFloor = Math.min(60, 40 + Math.round(usOutboundSignal * 0.55));
+      escalationIndex = Math.max(escalationIndex, usEscalationFloor);
+      conflictIndex = Math.max(conflictIndex, usConflictFloor);
+    }
     const status: RegionIntelResponse["status"] =
       escalationIndex >= 70 || conflictIndex >= 70
         ? "critical"
