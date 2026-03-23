@@ -115,6 +115,10 @@ function metaNumber(p: IntelPoint, key: string): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
+function isIndexEligibleConflictPoint(p: IntelPoint): boolean {
+  return p.layer === "conflicts" && p.source !== "ACLED ArcGIS";
+}
+
 function impactCountryMatchesSelection(p: IntelPoint, selectionCountry: string): boolean {
   const canonicalSelection = canonicalCountryMatchKey(selectionCountry);
   if (!canonicalSelection) return false;
@@ -211,7 +215,8 @@ export async function GET(request: Request) {
     const carriersCount = layerCounts.carriers ?? 0;
     const infraCount = layerCounts.infrastructure ?? 0;
     const criticalNewsCount = news.filter((n) => n.severity === "critical").length;
-    const kineticPoints = [...liveStrikes, ...conflicts];
+    const indexConflicts = conflicts.filter(isIndexEligibleConflictPoint);
+    const kineticPoints = [...liveStrikes, ...indexConflicts];
     const impactKineticPoints =
       selection.kind === "country"
         ? kineticPoints.filter((p) => impactCountryMatchesSelection(p, selection.country ?? selection.name))
@@ -222,14 +227,14 @@ export async function GET(request: Request) {
         : [];
 
     const impactLiveStrikesCount = impactKineticPoints.filter((p) => p.layer === "liveStrikes").length;
-    const impactConflictsCount = impactKineticPoints.filter((p) => p.layer === "conflicts").length;
+    const impactConflictsCount = impactKineticPoints.filter(isIndexEligibleConflictPoint).length;
     const impactKineticVolume = impactLiveStrikesCount + impactConflictsCount;
     const actorKineticVolume = actorKineticOnlyPoints.length;
     const mobilityVolume = flightsCount + vesselsCount + carriersCount;
     const mobilityComposite = flightsCount + vesselsCount * 0.8 + carriersCount * 1.2;
 
     const impactKineticSeverityMass = impactKineticPoints.reduce((sum, p) => sum + severityWeight(p.severity), 0);
-    const impactConflictPoints = impactKineticPoints.filter((p) => p.layer === "conflicts");
+    const impactConflictPoints = impactKineticPoints.filter(isIndexEligibleConflictPoint);
     const impactFatalities = impactKineticPoints.reduce((sum, p) => sum + metaNumber(p, "fatalities"), 0);
     const impactBattles = impactConflictPoints.reduce((sum, p) => sum + metaNumber(p, "battles"), 0);
     const impactExplosions = impactConflictPoints.reduce((sum, p) => sum + metaNumber(p, "explosions"), 0);
