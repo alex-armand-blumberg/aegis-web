@@ -271,7 +271,7 @@ function buildLocalRegionIntel(
     mobilityComposite * (0.04 + 0.2 * evidenceFactor);
   const conflictRaw =
     impactIntensityRaw +
-    actorProjectionRaw * 0.3 +
+    actorProjectionRaw * 0.12 +
     criticalNews * 0.65 +
     infrastructure * 0.08;
 
@@ -303,8 +303,15 @@ function buildLocalRegionIntel(
     conflictIndex = Math.min(conflictIndex, 42);
   }
   if (impactBand < 3 && (actorKineticVolume >= 3 || outboundActorKineticVolume >= 2)) {
-    escalationIndex = Math.max(escalationIndex, outboundActorKineticVolume >= 4 ? 42 : 34);
-    conflictIndex = Math.max(conflictIndex, 20);
+    escalationIndex = Math.max(escalationIndex, outboundActorKineticVolume >= 4 ? 48 : 38);
+    conflictIndex = Math.max(conflictIndex, outboundActorKineticVolume >= 3 ? 26 : 18);
+  }
+
+  // Passive-state suppression: if there is almost no homeland impact and no outbound kinetic
+  // pressure, keep both gauges in low bands.
+  if (impactBand < 2.5 && outboundActorKineticVolume === 0 && actorKineticVolume < 2) {
+    escalationIndex = Math.min(escalationIndex, 12);
+    conflictIndex = Math.min(conflictIndex, 8);
   }
   if (volume > 0 && escalationIndex === 0) {
     escalationIndex =
