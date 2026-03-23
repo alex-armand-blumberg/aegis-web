@@ -86,6 +86,12 @@ function metaNumber(p: IntelPoint, key: string): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
+function impactCountryMatchesSelection(p: IntelPoint, selectionCountry: string): boolean {
+  const canonical = canonicalCountryMatchKey(selectionCountry);
+  if (!canonical) return false;
+  return pointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
+}
+
 function pointCountryCandidates(p: IntelPoint): string[] {
   const out: string[] = [];
   const push = (v: unknown) => {
@@ -170,62 +176,90 @@ function buildLocalRegionIntel(
   const infrastructure = counts.infrastructure ?? 0;
   const criticalNews = dataPoints.filter((p) => p.layer === "news" && p.severity === "critical").length;
   const volume = dataPoints.length;
-  const kineticVolume = liveStrikes + conflicts;
+  const kineticPoints = dataPoints.filter((p) => p.layer === "liveStrikes" || p.layer === "conflicts");
+  const impactKineticPoints = kineticPoints.filter((p) => impactCountryMatchesSelection(p, selection.country || selection.name));
+  const actorKineticOnlyPoints = kineticPoints.filter((p) => !impactCountryMatchesSelection(p, selection.country || selection.name));
+
+  const impactLiveStrikes = impactKineticPoints.filter((p) => p.layer === "liveStrikes").length;
+  const impactConflicts = impactKineticPoints.filter((p) => p.layer === "conflicts").length;
+  const impactKineticVolume = impactLiveStrikes + impactConflicts;
+  const actorKineticVolume = actorKineticOnlyPoints.length;
   const mobilityVolume = flights + vessels + carriers;
   const mobilityComposite = flights + vessels * 0.8 + carriers * 1.2;
-  const kineticSeverityMass = dataPoints
-    .filter((p) => p.layer === "liveStrikes" || p.layer === "conflicts")
-    .reduce((sum, p) => sum + severityWeight(p.severity), 0);
-  const conflictPoints = dataPoints.filter((p) => p.layer === "conflicts");
-  const kineticPoints = dataPoints.filter((p) => p.layer === "liveStrikes" || p.layer === "conflicts");
-  const totalFatalities = kineticPoints.reduce((sum, p) => sum + metaNumber(p, "fatalities"), 0);
-  const totalBattles = conflictPoints.reduce((sum, p) => sum + metaNumber(p, "battles"), 0);
-  const totalExplosions = conflictPoints.reduce((sum, p) => sum + metaNumber(p, "explosions"), 0);
-  const totalCivilians = conflictPoints.reduce((sum, p) => sum + metaNumber(p, "civilians"), 0);
 
-  const fatalitiesSignal = Math.min(45, Math.sqrt(Math.max(0, totalFatalities)) * 3.2);
-  const battlesSignal = Math.min(40, Math.sqrt(Math.max(0, totalBattles)) * 4.0);
-  const explosionsSignal = Math.min(36, Math.sqrt(Math.max(0, totalExplosions)) * 3.4);
-  const civilianSignal = Math.min(30, Math.sqrt(Math.max(0, totalCivilians)) * 3.0);
-  const evidenceFactor = Math.min(1, (kineticVolume + criticalNews + fatalitiesSignal / 8) / 8);
+  const impactKineticSeverityMass = impactKineticPoints.reduce((sum, p) => sum + severityWeight(p.severity), 0);
+  const impactConflictPoints = impactKineticPoints.filter((p) => p.layer === "conflicts");
+  const impactFatalities = impactKineticPoints.reduce((sum, p) => sum + metaNumber(p, "fatalities"), 0);
+  const impactBattles = impactConflictPoints.reduce((sum, p) => sum + metaNumber(p, "battles"), 0);
+  const impactExplosions = impactConflictPoints.reduce((sum, p) => sum + metaNumber(p, "explosions"), 0);
+  const impactCivilians = impactConflictPoints.reduce((sum, p) => sum + metaNumber(p, "civilians"), 0);
 
-  const kineticEvidenceRaw =
-    liveStrikes * 4.2 +
-    conflicts * 3.4 +
-    kineticSeverityMass * 0.5 +
-    fatalitiesSignal * 1.1 +
-    battlesSignal * 0.9 +
-    explosionsSignal * 0.8 +
-    civilianSignal * 0.9;
+  const fatalitiesSignal = Math.min(55, Math.sqrt(Math.max(0, impactFatalities)) * 3.8);
+  const battlesSignal = Math.min(48, Math.sqrt(Math.max(0, impactBattles)) * 4.2);
+  const explosionsSignal = Math.min(40, Math.sqrt(Math.max(0, impactExplosions)) * 3.5);
+  const civilianSignal = Math.min(34, Math.sqrt(Math.max(0, impactCivilians)) * 3.1);
+
+  const impactIntensityRaw =
+    impactLiveStrikes * 5.2 +
+    impactConflicts * 4.4 +
+    impactKineticSeverityMass * 0.6 +
+    fatalitiesSignal * 1.3 +
+    battlesSignal * 1.0 +
+    explosionsSignal * 0.9 +
+    civilianSignal * 1.0;
+
+  const actorProjectionRaw = actorKineticVolume * 2.1 + mobilityComposite * 0.42;
+  const evidenceFactor = Math.min(1, (impactKineticVolume + fatalitiesSignal / 9 + criticalNews) / 9);
 
   const escalationRaw =
-    kineticEvidenceRaw +
-    criticalNews * 1.2 +
-    infrastructure * 0.45 +
-    mobilityComposite * (0.15 + 0.85 * evidenceFactor);
+    impactIntensityRaw +
+    actorProjectionRaw * 0.32 +
+    criticalNews * 1.0 +
+    infrastructure * 0.3 +
+    mobilityComposite * (0.05 + 0.25 * evidenceFactor);
   const conflictRaw =
-    kineticEvidenceRaw +
-    criticalNews * 0.8 +
-    infrastructure * 0.12;
+    impactIntensityRaw +
+    actorProjectionRaw * 0.14 +
+    criticalNews * 0.65 +
+    infrastructure * 0.08;
 
-  const escalationDenominator = 26 + Math.sqrt(Math.max(1, volume)) * 1.4 + Math.sqrt(mobilityVolume) * 0.6;
-  const conflictDenominator = 20 + Math.sqrt(kineticVolume + 1) * 1.1 + Math.sqrt(1 + fatalitiesSignal) * 0.5;
+  const escalationDenominator =
+    30 + Math.sqrt(Math.max(1, volume)) * 1.35 + Math.sqrt(mobilityVolume) * 0.35 + Math.sqrt(impactKineticVolume + 1) * 0.8;
+  const conflictDenominator =
+    24 + Math.sqrt(impactKineticVolume + 1) * 1.2 + Math.sqrt(1 + fatalitiesSignal) * 0.8;
   let escalationIndex = scaledIndex(escalationRaw, escalationDenominator);
   let conflictIndex = scaledIndex(conflictRaw, conflictDenominator);
-  if (kineticVolume === 0 && fatalitiesSignal < 6) {
-    conflictIndex = Math.min(conflictIndex, 22);
-    if (criticalNews < 2) escalationIndex = Math.min(escalationIndex, 32);
+
+  const impactBand = impactKineticVolume + fatalitiesSignal / 10 + battlesSignal / 12;
+  if (impactBand >= 18) {
+    escalationIndex = Math.max(escalationIndex, 90);
+    conflictIndex = Math.max(conflictIndex, 86);
+  } else if (impactBand >= 11) {
+    escalationIndex = Math.max(escalationIndex, 76);
+    conflictIndex = Math.max(conflictIndex, 70);
+  } else if (impactBand >= 6) {
+    escalationIndex = Math.max(escalationIndex, 60);
+    conflictIndex = Math.max(conflictIndex, 54);
+  }
+
+  if (impactBand < 3 && impactFatalities < 6) {
+    escalationIndex = Math.min(escalationIndex, 56);
+    conflictIndex = Math.min(conflictIndex, 48);
+  }
+  if (impactBand < 2 && actorKineticVolume > impactKineticVolume * 2) {
+    escalationIndex = Math.min(escalationIndex, 50);
+    conflictIndex = Math.min(conflictIndex, 40);
   }
   if (volume > 0 && escalationIndex === 0) {
     escalationIndex =
-      kineticVolume > 0 || fatalitiesSignal > 0
-        ? Math.min(28, 8 + Math.round(Math.sqrt(kineticVolume * 2 + fatalitiesSignal / 3 + criticalNews)))
+      impactKineticVolume > 0 || fatalitiesSignal > 0
+        ? Math.min(40, 12 + Math.round(Math.sqrt(impactKineticVolume * 3 + fatalitiesSignal / 2 + criticalNews)))
         : Math.min(10, 2 + Math.round(Math.sqrt(Math.max(1, mobilityVolume)) * 0.8));
   }
   if (volume > 0 && conflictIndex === 0) {
     conflictIndex =
-      kineticVolume > 0 || fatalitiesSignal > 0
-        ? Math.min(26, 7 + Math.round(Math.sqrt(kineticVolume * 2 + fatalitiesSignal / 4)))
+      impactKineticVolume > 0 || fatalitiesSignal > 0
+        ? Math.min(36, 10 + Math.round(Math.sqrt(impactKineticVolume * 3 + fatalitiesSignal / 3)))
         : 0;
   }
 
