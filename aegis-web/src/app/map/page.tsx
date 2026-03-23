@@ -143,7 +143,6 @@ function inCountryScope(country: string, p: IntelPoint): boolean {
   if (
     p.layer === "liveStrikes" ||
     p.layer === "conflicts" ||
-    p.layer === "flights" ||
     p.layer === "carriers"
   ) {
     const actorMatches = actorPointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
@@ -227,18 +226,17 @@ function buildLocalRegionIntel(
     explosionsSignal * 0.9 +
     civilianSignal * 1.0;
 
-  const actorProjectionRaw = actorKineticVolume * 2.8 + mobilityComposite * 0.55;
+  const actorProjectionRaw = actorKineticVolume * 4.2 + carriers * 1.2 + flights * 0.15;
   const evidenceFactor = Math.min(1, (impactKineticVolume + fatalitiesSignal / 9 + criticalNews) / 9);
 
   const escalationRaw =
     impactIntensityRaw +
-    actorProjectionRaw * 0.55 +
+    actorProjectionRaw * 0.8 +
     criticalNews * 1.0 +
-    infrastructure * 0.3 +
-    mobilityComposite * (0.08 + 0.35 * evidenceFactor);
+    mobilityComposite * (0.04 + 0.2 * evidenceFactor);
   const conflictRaw =
     impactIntensityRaw +
-    actorProjectionRaw * 0.22 +
+    actorProjectionRaw * 0.3 +
     criticalNews * 0.65 +
     infrastructure * 0.08;
 
@@ -262,12 +260,16 @@ function buildLocalRegionIntel(
   }
 
   if (impactBand < 3 && impactFatalities < 6) {
-    escalationIndex = Math.min(escalationIndex, 66);
-    conflictIndex = Math.min(conflictIndex, 54);
+    escalationIndex = Math.min(escalationIndex, 58);
+    conflictIndex = Math.min(conflictIndex, 46);
   }
   if (impactBand < 2 && actorKineticVolume > impactKineticVolume * 2) {
-    escalationIndex = Math.min(escalationIndex, 62);
-    conflictIndex = Math.min(conflictIndex, 48);
+    escalationIndex = Math.min(escalationIndex, 55);
+    conflictIndex = Math.min(conflictIndex, 42);
+  }
+  if (impactBand < 3 && actorKineticVolume >= 3) {
+    escalationIndex = Math.max(escalationIndex, 30);
+    conflictIndex = Math.max(conflictIndex, 20);
   }
   if (volume > 0 && escalationIndex === 0) {
     escalationIndex =
