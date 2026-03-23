@@ -108,6 +108,7 @@ export default function ConflictGlobe({
 }: ConflictGlobeProps) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const [size, setSize] = useState({ width: 1000, height: 700 });
+  const [showWipNotice, setShowWipNotice] = useState(false);
 
   useEffect(() => {
     const updateSize = () => {
@@ -138,6 +139,7 @@ export default function ConflictGlobe({
     () => extractFrontlinePolygons(frontlineOverlays),
     [frontlineOverlays]
   );
+  const showExperimentalFrontlinePolygons = false;
 
   const pointsData = useMemo<GlobePoint[]>(() => {
     const out: GlobePoint[] = [];
@@ -188,7 +190,7 @@ export default function ConflictGlobe({
         pathPointLng={(p) => (p as PathPoint)[1]}
         pathColor={() => "rgba(253, 186, 116, 0.85)"}
         pathStroke={1.2}
-        polygonsData={polygonsData}
+        polygonsData={showExperimentalFrontlinePolygons ? polygonsData : []}
         polygonGeoJsonGeometry="geometry"
         polygonAltitude={0.014}
         polygonCapColor={() => "rgba(220, 38, 38, 0.38)"}
@@ -211,7 +213,13 @@ export default function ConflictGlobe({
             <div style='color:rgba(255,255,255,0.7);font-size:11px;margin-top:2px;'>${d.layer.toUpperCase()} · ${d.source}</div>
           </div>`;
         }}
-        onPointClick={(obj) => onPointSelect?.(obj as IntelPoint)}
+        onPointClick={(obj) => {
+          setShowWipNotice(true);
+          onPointSelect?.(obj as IntelPoint);
+        }}
+        onGlobeClick={() => {
+          setShowWipNotice(true);
+        }}
         onGlobeReady={() => {
           globeRef.current?.pointOfView(DEFAULT_POV, 0);
           onReady?.();
@@ -243,6 +251,29 @@ export default function ConflictGlobe({
         >
           No active points for selected layers and time range.
         </div>
+      )}
+      {showWipNotice && (
+        <button
+          type="button"
+          onClick={() => setShowWipNotice(false)}
+          style={{
+            position: "absolute",
+            right: 14,
+            top: 12,
+            zIndex: 25,
+            padding: "8px 10px",
+            borderRadius: 8,
+            border: "1px solid rgba(251, 191, 36, 0.55)",
+            background: "rgba(15, 23, 42, 0.92)",
+            color: "rgba(254, 240, 138, 0.95)",
+            fontSize: 11,
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+          }}
+        >
+          3D map work in progress
+        </button>
       )}
     </div>
   );
