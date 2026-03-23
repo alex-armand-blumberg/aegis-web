@@ -781,9 +781,26 @@ export default function MapPage() {
       layers.news.reduce((s, p) => s + severityWeight(p.severity) * 0.7, 0) +
       layers.flights.length * 0.05 +
       layers.vessels.length * 0.04;
-    const rawScaled = Math.min(100, Math.max(0, 100 - Math.exp(-weightedSignals / 260) * 100));
-    // Reserve 96–100% for imminent/active global conflict; compress display so current state doesn't sit at 100%.
-    const displayPercent = Math.round(Math.min(99, 100 * Math.pow(rawScaled / 100, 1.4)));
+    const rawScaled = Math.min(100, Math.max(0, 100 - Math.exp(-weightedSignals / 360) * 100));
+    const kineticVolume = layers.liveStrikes.length + layers.conflicts.length;
+    const criticalSignalCount =
+      layers.liveStrikes.filter((p) => p.severity === "critical").length +
+      layers.conflicts.filter((p) => p.severity === "critical").length +
+      layers.news.filter((p) => p.severity === "critical").length;
+    const highSeverityCountries = new Set(
+      [...layers.liveStrikes, ...layers.conflicts, ...layers.news]
+        .filter((p) => (p.severity === "high" || p.severity === "critical") && p.country)
+        .map((p) => canonicalCountryMatchKey(p.country as string))
+    );
+    const crossTheaterBreadth = highSeverityCountries.size;
+    // Reserve 96–99 for exceptional cross-theater escalation only.
+    const extremeGlobalEscalation =
+      kineticVolume >= 260 &&
+      crossTheaterBreadth >= 14 &&
+      criticalSignalCount >= 45 &&
+      weightedSignals >= 1900;
+    const compressedPercent = Math.round(Math.min(99, 100 * Math.pow(rawScaled / 100, 1.75)));
+    const displayPercent = extremeGlobalEscalation ? compressedPercent : Math.min(95, compressedPercent);
     const status =
       rawScaled >= 76 ? "Critical stress" : rawScaled >= 58 ? "Elevated stress" : rawScaled >= 38 ? "Guarded" : "Stable";
     const bandExplanation =
@@ -793,7 +810,7 @@ export default function MapPage() {
           ? "Sustained conflict reporting across multiple theaters is keeping risk elevated."
           : "Signal intensity is mixed, with fewer high-severity kinetic spikes in the current window.";
     const explanation =
-      `${bandExplanation} Based on weighted counts of live strikes, conflict reports, and news in the selected time window, plus flight and vessel activity. Closer to 100% indicates greater global stress; 96–99% would indicate imminent escalation risk, 100% reserved for active global conflict.`;
+      `${bandExplanation} Based on weighted counts of live strikes, conflict reports, and news in the selected time window, plus flight and vessel activity. High-90s now require exceptional multi-theater, high-severity escalation; 96–99% is reserved for near-global-war conditions, with 100% reserved for active global conflict.`;
     return { percent: displayPercent, status, explanation };
   }, [layers]);
 
