@@ -254,18 +254,18 @@ export async function GET(request: Request) {
       explosionsSignal * 0.9 +
       civilianSignal * 1.0;
 
-    const actorProjectionRaw = actorKineticVolume * 2.1 + mobilityComposite * 0.42;
+    const actorProjectionRaw = actorKineticVolume * 2.8 + mobilityComposite * 0.55;
     const evidenceFactor = Math.min(1, (impactKineticVolume + fatalitiesSignal / 9 + criticalNewsCount) / 9);
 
     const escalationRaw =
       impactIntensityRaw +
-      actorProjectionRaw * 0.32 +
+      actorProjectionRaw * 0.55 +
       criticalNewsCount * 1.0 +
       infraCount * 0.3 +
-      mobilityComposite * (0.05 + 0.25 * evidenceFactor);
+      mobilityComposite * (0.08 + 0.35 * evidenceFactor);
     const conflictRaw =
       impactIntensityRaw +
-      actorProjectionRaw * 0.14 +
+      actorProjectionRaw * 0.22 +
       criticalNewsCount * 0.65 +
       infraCount * 0.08;
 
@@ -290,12 +290,12 @@ export async function GET(request: Request) {
     }
 
     if (impactBand < 3 && impactFatalities < 6) {
-      escalationIndex = Math.min(escalationIndex, 56);
-      conflictIndex = Math.min(conflictIndex, 48);
+      escalationIndex = Math.min(escalationIndex, 66);
+      conflictIndex = Math.min(conflictIndex, 54);
     }
     if (impactBand < 2 && actorKineticVolume > impactKineticVolume * 2) {
-      escalationIndex = Math.min(escalationIndex, 50);
-      conflictIndex = Math.min(conflictIndex, 40);
+      escalationIndex = Math.min(escalationIndex, 62);
+      conflictIndex = Math.min(conflictIndex, 48);
     }
 
     if (scopedVolume > 0 && escalationIndex === 0) {

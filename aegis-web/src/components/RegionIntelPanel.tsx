@@ -16,6 +16,15 @@ type RegionIntelPanelProps = {
   onClose: () => void;
 };
 
+function formatRangeLabel(range: string): string {
+  if (range === "1h") return "1 hour";
+  if (range === "6h") return "6 hours";
+  if (range === "24h") return "24 hours";
+  if (range === "7d") return "7 days";
+  if (range === "30d") return "30 days";
+  return range;
+}
+
 export default function RegionIntelPanel({
   data,
   imageUrl,
@@ -72,7 +81,7 @@ export default function RegionIntelPanel({
         </div>
         <div className="intel-side-kicker">REGION INTELLIGENCE</div>
         <h3>{data.selection.name}</h3>
-        <p>{data.range.toUpperCase()} operational picture</p>
+        <p>{formatRangeLabel(data.range)} operational picture</p>
       </div>
 
       <div className="intel-side-metadata">

@@ -64,6 +64,15 @@ function simplifyProviderMessage(message: string): string {
     .trim();
 }
 
+function formatRangeLabel(range: string): string {
+  if (range === "1h") return "1 hour";
+  if (range === "6h") return "6 hours";
+  if (range === "24h") return "24 hours";
+  if (range === "7d") return "7 days";
+  if (range === "30d") return "30 days";
+  return range;
+}
+
 function severityWeight(sev: IntelPoint["severity"]): number {
   if (sev === "critical") return 4;
   if (sev === "high") return 3;
@@ -213,18 +222,18 @@ function buildLocalRegionIntel(
     explosionsSignal * 0.9 +
     civilianSignal * 1.0;
 
-  const actorProjectionRaw = actorKineticVolume * 2.1 + mobilityComposite * 0.42;
+  const actorProjectionRaw = actorKineticVolume * 2.8 + mobilityComposite * 0.55;
   const evidenceFactor = Math.min(1, (impactKineticVolume + fatalitiesSignal / 9 + criticalNews) / 9);
 
   const escalationRaw =
     impactIntensityRaw +
-    actorProjectionRaw * 0.32 +
+    actorProjectionRaw * 0.55 +
     criticalNews * 1.0 +
     infrastructure * 0.3 +
-    mobilityComposite * (0.05 + 0.25 * evidenceFactor);
+    mobilityComposite * (0.08 + 0.35 * evidenceFactor);
   const conflictRaw =
     impactIntensityRaw +
-    actorProjectionRaw * 0.14 +
+    actorProjectionRaw * 0.22 +
     criticalNews * 0.65 +
     infrastructure * 0.08;
 
@@ -248,12 +257,12 @@ function buildLocalRegionIntel(
   }
 
   if (impactBand < 3 && impactFatalities < 6) {
-    escalationIndex = Math.min(escalationIndex, 56);
-    conflictIndex = Math.min(conflictIndex, 48);
+    escalationIndex = Math.min(escalationIndex, 66);
+    conflictIndex = Math.min(conflictIndex, 54);
   }
   if (impactBand < 2 && actorKineticVolume > impactKineticVolume * 2) {
-    escalationIndex = Math.min(escalationIndex, 50);
-    conflictIndex = Math.min(conflictIndex, 40);
+    escalationIndex = Math.min(escalationIndex, 62);
+    conflictIndex = Math.min(conflictIndex, 48);
   }
   if (volume > 0 && escalationIndex === 0) {
     escalationIndex =
@@ -473,7 +482,7 @@ export default function MapPage() {
         if (localIntel) {
           setRegionAiSummary(
             [
-              `${localIntel.selection.name} ${localIntel.range.toUpperCase()} geopolitical snapshot:`,
+              `${localIntel.selection.name} ${formatRangeLabel(localIntel.range)} geopolitical snapshot:`,
               `- Escalation ${localIntel.escalationIndex}/100, conflict ${localIntel.conflictIndex}/100.`,
               `- Signals: strikes ${localIntel.signals.liveStrikes}, conflicts ${localIntel.signals.conflicts}, flights ${localIntel.signals.militaryFlights}, vessels ${localIntel.signals.navalVessels}, carriers ${localIntel.signals.carrierSignals}.`,
               localIntel.dataPoints[0] ? `- Latest mapped development: ${localIntel.dataPoints[0].title}` : "- No mapped points in current scope.",
@@ -490,7 +499,7 @@ export default function MapPage() {
         if (localIntel) {
           setRegionAiSummary(
             [
-              `${localIntel.selection.name} ${localIntel.range.toUpperCase()} geopolitical snapshot:`,
+              `${localIntel.selection.name} ${formatRangeLabel(localIntel.range)} geopolitical snapshot:`,
               `- Escalation ${localIntel.escalationIndex}/100, conflict ${localIntel.conflictIndex}/100.`,
               `- Signals: strikes ${localIntel.signals.liveStrikes}, conflicts ${localIntel.signals.conflicts}, flights ${localIntel.signals.militaryFlights}, vessels ${localIntel.signals.navalVessels}, carriers ${localIntel.signals.carrierSignals}.`,
               localIntel.dataPoints[0] ? `- Latest mapped development: ${localIntel.dataPoints[0].title}` : "- No mapped points in current scope.",
@@ -766,7 +775,7 @@ export default function MapPage() {
         assistantMode === "summary"
           ? [
               "Task: summarize major world conflict developments right now in short form.",
-              `Map range: ${range}`,
+              `Map range: ${formatRangeLabel(range)}`,
               "Recent mapped events:",
               recent || "Unavailable",
               "Write 6 concise bullet points. Include regions, actors, and immediate developments.",
@@ -775,7 +784,7 @@ export default function MapPage() {
           : [
               "Task: answer the user's map intelligence question fully.",
               `User question: ${assistantQuestion || "No question provided."}`,
-              `Map range: ${range}`,
+              `Map range: ${formatRangeLabel(range)}`,
               "Recent mapped events:",
               recent || "Unavailable",
               "Answer in 6-10 bullet points. Use map evidence and external online corroboration.",
@@ -871,7 +880,7 @@ export default function MapPage() {
                 style={{ padding: "8px 10px", fontSize: 11 }}
                 onClick={() => setRange(r)}
               >
-                {r}
+                {formatRangeLabel(r)}
               </button>
             ))}
             <button
@@ -933,7 +942,7 @@ export default function MapPage() {
             <span>
               Updated: {apiData ? new Date(apiData.updatedAt).toLocaleTimeString() : "--"}
             </span>
-            <span>Range: {range}</span>
+            <span>Range: {formatRangeLabel(range)}</span>
             <span>Adapters: core + requested-source live feeds</span>
           </div>
           <div className="map-status-caption">Zoom in for more points to become visible.</div>
@@ -958,7 +967,7 @@ export default function MapPage() {
           {error && <div className="map-error-banner">{error}</div>}
 
           <div ref={mapContainerRef} className="map-container" style={{ position: "relative" }}>
-            <div className="map-title-overlay">■ {range.toUpperCase()} AEGIS MAP BETA</div>
+            <div className="map-title-overlay">■ {formatRangeLabel(range).toUpperCase()} AEGIS MAP BETA</div>
 
             {selectedPoint && (
               <IntelInfoPanel

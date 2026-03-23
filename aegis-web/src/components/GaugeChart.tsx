@@ -25,12 +25,11 @@ export default function GaugeChart({ value, label }: GaugeChartProps) {
       >
         <defs>
           <linearGradient id="gaugeGradient" x1="110.1897" y1="191.1173" x2="706.6127" y2="191.1173">
-            {/* Explicit tri-color bands: low=green, mid=yellow, high=red */}
+            {/* SVG-like tri-color ramp: left green, top yellow, right red */}
             <stop offset="0%" stopColor="#22C55E" />
-            <stop offset="33.3%" stopColor="#22C55E" />
-            <stop offset="33.31%" stopColor="#FACC15" />
-            <stop offset="66.6%" stopColor="#FACC15" />
-            <stop offset="66.61%" stopColor="#EF4444" />
+            <stop offset="30%" stopColor="#6ACB43" />
+            <stop offset="50%" stopColor="#F4C430" />
+            <stop offset="70%" stopColor="#F28C28" />
             <stop offset="100%" stopColor="#EF4444" />
           </linearGradient>
         </defs>
