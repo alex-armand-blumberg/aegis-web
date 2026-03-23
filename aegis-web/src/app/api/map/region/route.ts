@@ -128,6 +128,12 @@ function impactCountryMatchesSelection(p: IntelPoint, selectionCountry: string):
   return extractImpactCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonicalSelection);
 }
 
+function actorCountryMatchesSelection(p: IntelPoint, selectionCountry: string): boolean {
+  const canonicalSelection = canonicalCountryMatchKey(selectionCountry);
+  if (!canonicalSelection) return false;
+  return extractActorCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonicalSelection);
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams, origin } = new URL(request.url);
@@ -228,11 +234,48 @@ export async function GET(request: Request) {
       selection.kind === "country"
         ? kineticPoints.filter((p) => !impactCountryMatchesSelection(p, selection.country ?? selection.name))
         : [];
+    const outboundActorLiveStrikes =
+      selection.kind === "country"
+        ? mapData.layers.liveStrikes.filter(
+            (p) =>
+              actorCountryMatchesSelection(p, selection.country ?? selection.name) &&
+              !impactCountryMatchesSelection(p, selection.country ?? selection.name)
+          )
+        : [];
+    const outboundActorConflicts =
+      selection.kind === "country"
+        ? mapData.layers.conflicts
+            .filter(isIndexEligibleConflictPoint)
+            .filter(
+              (p) =>
+                actorCountryMatchesSelection(p, selection.country ?? selection.name) &&
+                !impactCountryMatchesSelection(p, selection.country ?? selection.name)
+            )
+        : [];
+    const outboundActorCarriers =
+      selection.kind === "country"
+        ? mapData.layers.carriers.filter(
+            (p) =>
+              actorCountryMatchesSelection(p, selection.country ?? selection.name) &&
+              !impactCountryMatchesSelection(p, selection.country ?? selection.name)
+          )
+        : [];
+    const outboundActorFlights =
+      selection.kind === "country"
+        ? mapData.layers.flights.filter(
+            (p) =>
+              actorCountryMatchesSelection(p, selection.country ?? selection.name) &&
+              !impactCountryMatchesSelection(p, selection.country ?? selection.name)
+          )
+        : [];
 
     const impactLiveStrikesCount = impactKineticPoints.filter((p) => p.layer === "liveStrikes").length;
     const impactConflictsCount = impactKineticPoints.filter(isIndexEligibleConflictPoint).length;
     const impactKineticVolume = impactLiveStrikesCount + impactConflictsCount;
     const actorKineticVolume = actorKineticOnlyPoints.length;
+    const outboundActorKineticVolume =
+      outboundActorLiveStrikes.length + outboundActorConflicts.length + outboundActorCarriers.length;
+    const outboundActorSupportVolume = outboundActorFlights.length;
     const mobilityVolume = flightsCount + vesselsCount + carriersCount;
     const mobilityComposite = flightsCount + vesselsCount * 0.8 + carriersCount * 1.2;
 
@@ -258,11 +301,15 @@ export async function GET(request: Request) {
       civilianSignal * 1.0;
 
     const actorProjectionRaw = actorKineticVolume * 4.2 + carriersCount * 1.2 + flightsCount * 0.15;
+    const outboundProjectionRaw =
+      outboundActorKineticVolume * 4.8 +
+      outboundActorSupportVolume * (outboundActorKineticVolume > 0 ? 0.35 : 0.08);
     const evidenceFactor = Math.min(1, (impactKineticVolume + fatalitiesSignal / 9 + criticalNewsCount) / 9);
 
     const escalationRaw =
       impactIntensityRaw +
       actorProjectionRaw * 0.8 +
+      outboundProjectionRaw * 0.9 +
       criticalNewsCount * 1.0 +
       mobilityComposite * (0.04 + 0.2 * evidenceFactor);
     const conflictRaw =
@@ -299,8 +346,8 @@ export async function GET(request: Request) {
       escalationIndex = Math.min(escalationIndex, 55);
       conflictIndex = Math.min(conflictIndex, 42);
     }
-    if (impactBand < 3 && actorKineticVolume >= 3) {
-      escalationIndex = Math.max(escalationIndex, 30);
+    if (impactBand < 3 && (actorKineticVolume >= 3 || outboundActorKineticVolume >= 2)) {
+      escalationIndex = Math.max(escalationIndex, outboundActorKineticVolume >= 4 ? 42 : 34);
       conflictIndex = Math.max(conflictIndex, 20);
     }
 

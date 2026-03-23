@@ -105,6 +105,12 @@ function impactCountryMatchesSelection(p: IntelPoint, selectionCountry: string):
   return pointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
 }
 
+function actorCountryMatchesSelection(p: IntelPoint, selectionCountry: string): boolean {
+  const canonical = canonicalCountryMatchKey(selectionCountry);
+  if (!canonical) return false;
+  return actorPointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
+}
+
 function pointCountryCandidates(p: IntelPoint): string[] {
   const out: string[] = [];
   const push = (v: unknown) => {
@@ -197,11 +203,36 @@ function buildLocalRegionIntel(
   const kineticPoints = [...dataPoints.filter((p) => p.layer === "liveStrikes"), ...indexConflicts];
   const impactKineticPoints = kineticPoints.filter((p) => impactCountryMatchesSelection(p, selection.country || selection.name));
   const actorKineticOnlyPoints = kineticPoints.filter((p) => !impactCountryMatchesSelection(p, selection.country || selection.name));
+  const outboundActorLiveStrikes = data.layers.liveStrikes.filter(
+    (p) =>
+      actorCountryMatchesSelection(p, selection.country || selection.name) &&
+      !impactCountryMatchesSelection(p, selection.country || selection.name)
+  );
+  const outboundActorConflicts = data.layers.conflicts
+    .filter(isIndexEligibleConflictPoint)
+    .filter(
+      (p) =>
+        actorCountryMatchesSelection(p, selection.country || selection.name) &&
+        !impactCountryMatchesSelection(p, selection.country || selection.name)
+    );
+  const outboundActorCarriers = data.layers.carriers.filter(
+    (p) =>
+      actorCountryMatchesSelection(p, selection.country || selection.name) &&
+      !impactCountryMatchesSelection(p, selection.country || selection.name)
+  );
+  const outboundActorFlights = data.layers.flights.filter(
+    (p) =>
+      actorCountryMatchesSelection(p, selection.country || selection.name) &&
+      !impactCountryMatchesSelection(p, selection.country || selection.name)
+  );
 
   const impactLiveStrikes = impactKineticPoints.filter((p) => p.layer === "liveStrikes").length;
   const impactConflicts = impactKineticPoints.filter(isIndexEligibleConflictPoint).length;
   const impactKineticVolume = impactLiveStrikes + impactConflicts;
   const actorKineticVolume = actorKineticOnlyPoints.length;
+  const outboundActorKineticVolume =
+    outboundActorLiveStrikes.length + outboundActorConflicts.length + outboundActorCarriers.length;
+  const outboundActorSupportVolume = outboundActorFlights.length;
   const mobilityVolume = flights + vessels + carriers;
   const mobilityComposite = flights + vessels * 0.8 + carriers * 1.2;
 
@@ -227,11 +258,15 @@ function buildLocalRegionIntel(
     civilianSignal * 1.0;
 
   const actorProjectionRaw = actorKineticVolume * 4.2 + carriers * 1.2 + flights * 0.15;
+  const outboundProjectionRaw =
+    outboundActorKineticVolume * 4.8 +
+    outboundActorSupportVolume * (outboundActorKineticVolume > 0 ? 0.35 : 0.08);
   const evidenceFactor = Math.min(1, (impactKineticVolume + fatalitiesSignal / 9 + criticalNews) / 9);
 
   const escalationRaw =
     impactIntensityRaw +
     actorProjectionRaw * 0.8 +
+    outboundProjectionRaw * 0.9 +
     criticalNews * 1.0 +
     mobilityComposite * (0.04 + 0.2 * evidenceFactor);
   const conflictRaw =
@@ -267,8 +302,8 @@ function buildLocalRegionIntel(
     escalationIndex = Math.min(escalationIndex, 55);
     conflictIndex = Math.min(conflictIndex, 42);
   }
-  if (impactBand < 3 && actorKineticVolume >= 3) {
-    escalationIndex = Math.max(escalationIndex, 30);
+  if (impactBand < 3 && (actorKineticVolume >= 3 || outboundActorKineticVolume >= 2)) {
+    escalationIndex = Math.max(escalationIndex, outboundActorKineticVolume >= 4 ? 42 : 34);
     conflictIndex = Math.max(conflictIndex, 20);
   }
   if (volume > 0 && escalationIndex === 0) {
