@@ -1022,6 +1022,51 @@ function inferCountryFromLatLon(lat: number, lon: number): string | undefined {
   return undefined;
 }
 
+function resolveCountryBbox(country: string): [number, number, number, number, number, number] | undefined {
+  const normalized = normalizeCountryKey(country);
+  const canonical = canonicalConflictCountry(country);
+  const canonicalNormalized = normalizeCountryKey(canonical);
+  const aliasNormalized =
+    HOTSPOT_CENTER_ALIAS_TO_NORMALIZED[normalized] ??
+    HOTSPOT_CENTER_ALIAS_TO_NORMALIZED[canonicalNormalized];
+  const candidates = [
+    normalized,
+    canonicalNormalized,
+    aliasNormalized,
+    normalizeCountryKey(formatCountryDisplayName(canonical)),
+  ].filter(Boolean) as string[];
+  for (const key of candidates) {
+    const bbox = COUNTRY_BBOX_BY_NORMALIZED.get(key);
+    if (bbox) return bbox;
+  }
+  return undefined;
+}
+
+function pinPointToDeclaredCountry(point: IntelPoint): IntelPoint {
+  if (!point.country) return point;
+  const bbox = resolveCountryBbox(point.country);
+  if (!bbox) return point;
+  const [latMin, latMax, lonMin, lonMax, centerLat, centerLon] = bbox;
+  const margin = 3.5;
+  const outOfCountryBounds =
+    point.lat < latMin - margin ||
+    point.lat > latMax + margin ||
+    point.lon < lonMin - margin ||
+    point.lon > lonMax + margin;
+  if (!outOfCountryBounds) return point;
+  return {
+    ...point,
+    lat: centerLat,
+    lon: centerLon,
+    metadata: {
+      ...(point.metadata ?? {}),
+      original_lat: point.lat,
+      original_lon: point.lon,
+      geo_relocated_to_country_center: true,
+    },
+  };
+}
+
 /** Prefer current geolocation for regional scope, keep origin/operator in metadata. */
 function resolveFlightCountry(
   lat: number,
@@ -5693,18 +5738,21 @@ export async function GET(request: Request) {
       ...vesselsRes.points,
     ]).slice(0, 9000);
     const carrierGroups = extractCarrierGroups(mergedVesselPoints);
+    const alignedLiveStrikes = dedupedLiveStrikes.map(pinPointToDeclaredCountry);
+    const alignedConflicts = mergedConflicts.map(pinPointToDeclaredCountry);
+    const alignedNews = fusedNewsPoints.map(pinPointToDeclaredCountry);
     const allowCuratedConflictFallback =
-      dedupedLiveStrikes.length + mergedConflicts.length + fusedNewsPoints.length < 25;
+      alignedLiveStrikes.length + alignedConflicts.length + alignedNews.length < 25;
     const activeConflictCountries = buildActiveConflictCountries(
-      dedupedLiveStrikes,
-      mergedConflicts,
-      fusedNewsPoints,
+      alignedLiveStrikes,
+      alignedConflicts,
+      alignedNews,
       allowCuratedConflictFallback
     );
     const escalationRiskCountries = buildEscalationRiskCountries(
-      dedupedLiveStrikes,
-      mergedConflicts,
-      fusedNewsPoints
+      alignedLiveStrikes,
+      alignedConflicts,
+      alignedNews
     );
     const mappedEscalationRiskPoints: Array<IntelPoint | null> = escalationRiskCountries
       .map((risk, idx) => {
@@ -5739,15 +5787,15 @@ export async function GET(request: Request) {
     );
 
     const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
-      conflicts: mergedConflicts,
-      liveStrikes: dedupedLiveStrikes,
+      conflicts: alignedConflicts,
+      liveStrikes: alignedLiveStrikes,
       flights: dedupedFlights,
       vessels: mergedVesselPoints,
       // No verified ground-force troop movement dataset available in this build.
       // We keep the layer key for compatibility, but it is always empty.
       troopMovements: [],
       carriers: carrierGroups,
-      news: fusedNewsPoints,
+      news: alignedNews,
       escalationRisk: escalationRiskPoints,
       hotspots: [],
       infrastructure: dedupeEventPoints(
@@ -5776,9 +5824,9 @@ export async function GET(request: Request) {
         },
         {
           provider: "Conflict fusion",
-          ok: mergedConflicts.length > 0 || dedupedLiveStrikes.length > 0,
+          ok: alignedConflicts.length > 0 || alignedLiveStrikes.length > 0,
           updatedAt: new Date().toISOString(),
-          message: `Conflicts: ${mergedConflicts.length} validated DB points | Live strikes: ${dedupedLiveStrikes.length} near-live events | News: ${fusedNewsPoints.length}`,
+          message: `Conflicts: ${alignedConflicts.length} validated DB points | Live strikes: ${alignedLiveStrikes.length} near-live events | News: ${alignedNews.length}`,
         },
         {
           provider: "Adapter telemetry",
