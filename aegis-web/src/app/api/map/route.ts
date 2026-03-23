@@ -1035,6 +1035,8 @@ function resolveFlightCountry(
   if (o) return o;
   const fromHex = countryFromIcao24Hex(hex);
   if (fromHex) return fromHex;
+  // Last resort: we still return undefined here; downstream region scoping can
+  // use metadata/operator country when available.
   return undefined;
 }
 
@@ -2971,6 +2973,7 @@ async function fetchLiveuamapEvents(rangeHours: number): Promise<{
     const city = String(e.city ?? "").trim();
     const countryRaw = String(e.country_name ?? e.country ?? "").trim();
     const country = countryRaw || extractMentionedCountry(fullText);
+    const actorCountry = extractMentionedCountry(fullText);
     if (!country) continue;
     const bbox = COUNTRY_BBOX[country];
     const finalLat = Number.isFinite(lat) ? lat : bbox?.[4];
@@ -2998,6 +3001,7 @@ async function fetchLiveuamapEvents(rangeHours: number): Promise<{
         short_label: descriptor.shortLabel,
         original_headline: title,
         city: city || null,
+        actor_country: actorCountry ? normalizeCountryLabel(actorCountry) : null,
       },
     });
   }
@@ -3070,6 +3074,7 @@ async function fetchGdeltEmergencyFallback(rangeHours: number): Promise<IntelPoi
       if (!descriptor.isConflict) continue;
       const city = extractMentionedCity(textBlob);
       const country = city?.country || extractMentionedCountry(textBlob);
+      const actorCountry = extractMentionedCountry(textBlob);
       if (!country) continue;
       const bbox = COUNTRY_BBOX[country];
       if (!bbox && !city) continue;
@@ -3092,6 +3097,7 @@ async function fetchGdeltEmergencyFallback(rangeHours: number): Promise<IntelPoi
           event_type: descriptor.eventType,
           short_label: descriptor.shortLabel,
           original_headline: title,
+          actor_country: actorCountry ? normalizeCountryLabel(actorCountry) : null,
         },
       });
     }
@@ -3197,6 +3203,7 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
     const city = extractMentionedCity(title);
     const sourceCountryRaw = String(a.sourcecountry ?? "").trim().toUpperCase();
     const sourceCountryFromCode = GDELT_SOURCECOUNTRY_MAP[sourceCountryRaw];
+    const actorCountry = extractMentionedCountry(title);
     const country =
       city?.country ||
       extractMentionedCountry(title) ||
@@ -3229,6 +3236,7 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
         short_label: descriptor.shortLabel,
         publisher: a.domain ?? "unknown",
         source_url: a.url ?? null,
+        actor_country: actorCountry ? normalizeCountryLabel(actorCountry) : null,
       },
     });
   }
@@ -3847,6 +3855,8 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
       const corroboration = c.publishers.size;
       const trusted = isTrustedPublisher(Array.from(c.publishers).join(" "));
       const norm = Math.min(1, corroboration / 4);
+    const sampleEvent = c.evidence[0] ?? "";
+    const actorCountry = extractMentionedCountry(`${c.title} ${sampleEvent}`);
       points.push({
         id: `rapid-${key}`,
         layer: "liveStrikes",
@@ -3869,6 +3879,7 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
           sample_event: c.evidence[0] ?? "",
           image_url: c.imageUrl,
           trusted_source: trusted,
+          actor_country: actorCountry ? normalizeCountryLabel(actorCountry) : null,
         },
       });
     }

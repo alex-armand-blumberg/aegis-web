@@ -96,10 +96,31 @@ function pointCountryCandidates(p: IntelPoint): string[] {
   return out;
 }
 
+function actorPointCountryCandidates(p: IntelPoint): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v !== "string") return;
+    const t = v.trim();
+    if (t) out.push(t);
+  };
+  push(p.metadata?.actor_country);
+  push(p.metadata?.operator_country);
+  push(p.metadata?.origin_country);
+  return out;
+}
+
 function inCountryScope(country: string, p: IntelPoint): boolean {
   const canonical = canonicalCountryMatchKey(country);
   const byLabel = pointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
   if (byLabel || countriesMatch(country, p.country)) return true;
+
+  // Actor matching: if impact country doesn't match, allow kinetic/news signals
+  // to still be attributed to the launching/operating actor country.
+  if (p.layer === "liveStrikes" || p.layer === "conflicts") {
+    const actorMatches = actorPointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
+    if (actorMatches) return true;
+  }
+
   const bounds = getCountryBounds(country);
   if (!bounds) return false;
   const [[minLat, minLon], [maxLat, maxLon]] = bounds;

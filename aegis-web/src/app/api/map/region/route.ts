@@ -33,7 +33,7 @@ function pointInBounds(p: IntelPoint, bounds: [[number, number], [number, number
   return p.lat >= minLat && p.lat <= maxLat && p.lon >= minLon && p.lon <= maxLon;
 }
 
-function extractPointCountryCandidates(p: IntelPoint): string[] {
+function extractImpactCountryCandidates(p: IntelPoint): string[] {
   const out: string[] = [];
   const push = (v: unknown) => {
     if (typeof v !== "string") return;
@@ -52,18 +52,48 @@ function extractPointCountryCandidates(p: IntelPoint): string[] {
   return out;
 }
 
+function extractActorCountryCandidates(p: IntelPoint): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v !== "string") return;
+    const t = v.trim();
+    if (!t) return;
+    out.push(t);
+  };
+  const md = p.metadata;
+  if (!md) return out;
+  push(md.actor_country);
+  push(md.operator_country);
+  push(md.origin_country);
+  return out;
+}
+
 function buildCountryScopeMatcher(selectionCountry: string): (p: IntelPoint) => boolean {
   const canonicalSelection = canonicalCountryMatchKey(selectionCountry);
   const bounds = getCountryBounds(selectionCountry);
   return (p: IntelPoint) => {
-    const candidates = extractPointCountryCandidates(p);
+    const impactCandidates = extractImpactCountryCandidates(p);
     if (
-      candidates.some((c) => {
+      impactCandidates.some((c) => {
         const key = canonicalCountryMatchKey(c);
         return key && key === canonicalSelection;
       })
     ) {
       return true;
+    }
+
+    // Actor matching is only used for kinetic/news signals; it lets countries
+    // that launched strikes (e.g., Russia -> Iran) show up in the actor's risk gauge.
+    if (p.layer === "liveStrikes" || p.layer === "conflicts") {
+      const actorCandidates = extractActorCountryCandidates(p);
+      if (
+        actorCandidates.some((c) => {
+          const key = canonicalCountryMatchKey(c);
+          return key && key === canonicalSelection;
+        })
+      ) {
+        return true;
+      }
     }
     // Some feeds omit country labels; use a geographic fallback to avoid dropping valid points.
     if (bounds && pointInBounds(p, bounds)) {
