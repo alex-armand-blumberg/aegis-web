@@ -98,10 +98,26 @@ function pointCountryCandidates(p: IntelPoint): string[] {
   return out;
 }
 
+function normalizeLooseCountryText(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function inCountryScope(country: string, p: IntelPoint): boolean {
   const canonical = canonicalCountryMatchKey(country);
   const byLabel = pointCountryCandidates(p).some((c) => canonicalCountryMatchKey(c) === canonical);
   if (byLabel || countriesMatch(country, p.country)) return true;
+  const countryText = normalizeLooseCountryText(country);
+  const textBlob = normalizeLooseCountryText(
+    `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.country ?? "")} ${String(p.metadata?.location ?? "")} ${String(
+      p.metadata?.original_headline ?? ""
+    )}`
+  );
+  if (countryText && textBlob.includes(countryText)) return true;
   const bounds = getCountryBounds(country);
   if (!bounds) return false;
   const [[minLat, minLon], [maxLat, maxLon]] = bounds;
@@ -348,24 +364,37 @@ export default function MapPage() {
           setRegionAiError(null);
           return;
         }
-        setRegionAiSummary("");
-        setRegionAiError(data.error || "Summary request failed");
-      } catch {
-        if (!active) return;
-        const fallback = regionIntel ?? (apiData ? buildLocalRegionIntel(apiData, selectedRegion, range) : null);
-        if (fallback) {
+        const localIntel = apiData ? buildLocalRegionIntel(apiData, selectedRegion, range) : null;
+        if (localIntel) {
           setRegionAiSummary(
             [
-              `- Work in progress fallback summary for ${fallback.selection.name}.`,
-              `- Escalation ${fallback.escalationIndex}/100, conflict ${fallback.conflictIndex}/100 over ${fallback.range}.`,
-              `- Signals: strikes ${fallback.signals.liveStrikes}, conflicts ${fallback.signals.conflicts}, flights ${fallback.signals.militaryFlights}, vessels ${fallback.signals.navalVessels}, carriers ${fallback.signals.carrierSignals}.`,
-              fallback.dataPoints[0] ? `- Latest mapped point: ${fallback.dataPoints[0].title}` : "- No mapped points in current scope.",
+              `${localIntel.selection.name} ${localIntel.range.toUpperCase()} geopolitical snapshot:`,
+              `- Escalation ${localIntel.escalationIndex}/100, conflict ${localIntel.conflictIndex}/100.`,
+              `- Signals: strikes ${localIntel.signals.liveStrikes}, conflicts ${localIntel.signals.conflicts}, flights ${localIntel.signals.militaryFlights}, vessels ${localIntel.signals.navalVessels}, carriers ${localIntel.signals.carrierSignals}.`,
+              localIntel.dataPoints[0] ? `- Latest mapped development: ${localIntel.dataPoints[0].title}` : "- No mapped points in current scope.",
             ].join("\n")
           );
           setRegionAiError(null);
         } else {
           setRegionAiSummary("");
-          setRegionAiError("Summary request failed");
+          setRegionAiError("Summary temporarily unavailable");
+        }
+      } catch {
+        if (!active) return;
+        const localIntel = apiData ? buildLocalRegionIntel(apiData, selectedRegion, range) : null;
+        if (localIntel) {
+          setRegionAiSummary(
+            [
+              `${localIntel.selection.name} ${localIntel.range.toUpperCase()} geopolitical snapshot:`,
+              `- Escalation ${localIntel.escalationIndex}/100, conflict ${localIntel.conflictIndex}/100.`,
+              `- Signals: strikes ${localIntel.signals.liveStrikes}, conflicts ${localIntel.signals.conflicts}, flights ${localIntel.signals.militaryFlights}, vessels ${localIntel.signals.navalVessels}, carriers ${localIntel.signals.carrierSignals}.`,
+              localIntel.dataPoints[0] ? `- Latest mapped development: ${localIntel.dataPoints[0].title}` : "- No mapped points in current scope.",
+            ].join("\n")
+          );
+          setRegionAiError(null);
+        } else {
+          setRegionAiSummary("");
+          setRegionAiError("Summary temporarily unavailable");
         }
       } finally {
         if (active) setRegionAiLoading(false);
@@ -391,7 +420,7 @@ export default function MapPage() {
     return () => {
       active = false;
     };
-  }, [apiData, range, regionIntel, selectedRegion]);
+  }, [apiData, range, selectedRegion]);
 
   useEffect(() => {
     if (!selectedPoint) {

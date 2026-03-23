@@ -9,6 +9,7 @@ export const JUDEA_SAMARIA_PALESTINE_LABEL = "Judea & Samaria / Palestine";
 export function normalizeCountryKey(input: string | undefined | null): string {
   return (input ?? "")
     .normalize("NFKC")
+    .replace(/[^a-z0-9\s/&-]/gi, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
@@ -34,6 +35,8 @@ const CANONICAL_COUNTRY_ALIASES: Record<string, string> = {
   scotland: "united kingdom",
   wales: "united kingdom",
   "russian federation": "russia",
+  irn: "iran",
+  "islamic republic of iran": "iran",
   "iran islamic republic of": "iran",
   "syrian arab republic": "syria",
   "democratic republic of congo": "democratic republic of the congo",
