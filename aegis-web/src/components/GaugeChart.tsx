@@ -25,17 +25,12 @@ export default function GaugeChart({ value, label }: GaugeChartProps) {
       >
         <defs>
           <linearGradient id="gaugeGradient" x1="110.1897" y1="191.1173" x2="706.6127" y2="191.1173">
-            <stop offset="0.0163" stopColor="#FF414E" />
-            <stop offset="0.1164" stopColor="#FF454B" />
-            <stop offset="0.22" stopColor="#FF5241" />
-            <stop offset="0.3252" stopColor="#FF6631" />
-            <stop offset="0.4308" stopColor="#FF831A" />
-            <stop offset="0.5267" stopColor="#FFA400" />
-            <stop offset="0.5711" stopColor="#EEA700" />
-            <stop offset="0.7099" stopColor="#BFB000" />
-            <stop offset="0.8327" stopColor="#9DB700" />
-            <stop offset="0.9336" stopColor="#88BB00" />
-            <stop offset="1" stopColor="#80BC00" />
+            <stop offset="0.02" stopColor="#22C55E" />
+            <stop offset="0.20" stopColor="#4ADE80" />
+            <stop offset="0.45" stopColor="#FACC15" />
+            <stop offset="0.65" stopColor="#F59E0B" />
+            <stop offset="0.82" stopColor="#F97316" />
+            <stop offset="1" stopColor="#EF4444" />
           </linearGradient>
         </defs>
 

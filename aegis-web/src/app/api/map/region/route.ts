@@ -110,6 +110,11 @@ function scaledIndex(raw: number, denominator: number): number {
   return clampIndex(curved);
 }
 
+function metaNumber(p: IntelPoint, key: string): number {
+  const v = p.metadata?.[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams, origin } = new URL(request.url);
@@ -204,37 +209,51 @@ export async function GET(request: Request) {
     const mobilityVolume = flightsCount + vesselsCount + carriersCount;
     const mobilityComposite = flightsCount + vesselsCount * 0.8 + carriersCount * 1.2;
     const kineticSeverityMass = [...liveStrikes, ...conflicts].reduce((sum, p) => sum + severityWeight(p.severity), 0);
-    const mobilityFactor = 0.25 + 0.75 * Math.min(1, (kineticVolume + criticalNewsCount) / 6);
+    const totalFatalities = [...conflicts, ...liveStrikes].reduce((sum, p) => sum + metaNumber(p, "fatalities"), 0);
+    const totalBattles = conflicts.reduce((sum, p) => sum + metaNumber(p, "battles"), 0);
+    const totalExplosions = conflicts.reduce((sum, p) => sum + metaNumber(p, "explosions"), 0);
+    const totalCivilians = conflicts.reduce((sum, p) => sum + metaNumber(p, "civilians"), 0);
+
+    const fatalitiesSignal = Math.min(45, Math.sqrt(Math.max(0, totalFatalities)) * 3.2);
+    const battlesSignal = Math.min(40, Math.sqrt(Math.max(0, totalBattles)) * 4.0);
+    const explosionsSignal = Math.min(36, Math.sqrt(Math.max(0, totalExplosions)) * 3.4);
+    const civilianSignal = Math.min(30, Math.sqrt(Math.max(0, totalCivilians)) * 3.0);
+    const evidenceFactor = Math.min(1, (kineticVolume + criticalNewsCount + fatalitiesSignal / 8) / 8);
+
+    const kineticEvidenceRaw =
+      liveStrikesCount * 4.2 +
+      conflictsCount * 3.4 +
+      kineticSeverityMass * 0.5 +
+      fatalitiesSignal * 1.1 +
+      battlesSignal * 0.9 +
+      explosionsSignal * 0.8 +
+      civilianSignal * 0.9;
 
     const escalationRaw =
-      liveStrikesCount * 3.6 +
-      conflictsCount * 2.8 +
-      criticalNewsCount * 1.4 +
-      infraCount * 0.6 +
-      kineticSeverityMass * 0.35 +
-      mobilityComposite * 0.9 * mobilityFactor;
-    const conflictRaw =
-      liveStrikesCount * 4.0 +
-      conflictsCount * 3.2 +
-      criticalNewsCount * 1.4 +
-      infraCount * 0.15 +
-      kineticSeverityMass * 0.35;
-    const escalationDenominator = 22 + Math.sqrt(Math.max(1, scopedVolume)) * 1.6 + Math.sqrt(mobilityVolume) * 0.9;
-    const conflictDenominator = 18 + Math.sqrt(kineticVolume + 1) * 1.2;
+      kineticEvidenceRaw +
+      criticalNewsCount * 1.2 +
+      infraCount * 0.45 +
+      mobilityComposite * (0.15 + 0.85 * evidenceFactor);
+    const conflictRaw = kineticEvidenceRaw + criticalNewsCount * 0.8 + infraCount * 0.12;
+    const escalationDenominator = 26 + Math.sqrt(Math.max(1, scopedVolume)) * 1.4 + Math.sqrt(mobilityVolume) * 0.6;
+    const conflictDenominator = 20 + Math.sqrt(kineticVolume + 1) * 1.1 + Math.sqrt(1 + fatalitiesSignal) * 0.5;
     let escalationIndex = scaledIndex(escalationRaw, escalationDenominator);
     let conflictIndex = scaledIndex(conflictRaw, conflictDenominator);
-    if (kineticVolume === 0) {
-      conflictIndex = Math.min(conflictIndex, 25);
-      if (criticalNewsCount < 2) escalationIndex = Math.min(escalationIndex, 35);
+    if (kineticVolume === 0 && fatalitiesSignal < 6) {
+      conflictIndex = Math.min(conflictIndex, 22);
+      if (criticalNewsCount < 2) escalationIndex = Math.min(escalationIndex, 32);
     }
     if (scopedVolume > 0 && escalationIndex === 0) {
       escalationIndex =
-        kineticVolume > 0
-          ? Math.min(22, 6 + Math.round(Math.sqrt(kineticVolume + criticalNewsCount)))
+        kineticVolume > 0 || fatalitiesSignal > 0
+          ? Math.min(28, 8 + Math.round(Math.sqrt(kineticVolume * 2 + fatalitiesSignal / 3 + criticalNewsCount)))
           : Math.min(10, 2 + Math.round(Math.sqrt(Math.max(1, mobilityVolume)) * 0.8));
     }
     if (scopedVolume > 0 && conflictIndex === 0) {
-      conflictIndex = kineticVolume > 0 ? Math.min(20, 5 + Math.round(Math.sqrt(kineticVolume))) : 0;
+      conflictIndex =
+        kineticVolume > 0 || fatalitiesSignal > 0
+          ? Math.min(26, 7 + Math.round(Math.sqrt(kineticVolume * 2 + fatalitiesSignal / 4)))
+          : 0;
     }
     const status: RegionIntelResponse["status"] =
       escalationIndex >= 70 || conflictIndex >= 70
