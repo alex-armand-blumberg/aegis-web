@@ -257,21 +257,22 @@ function buildLocalRegionIntel(
     explosionsSignal * 0.9 +
     civilianSignal * 1.0;
 
-  const actorProjectionRaw = actorKineticVolume * 5.6 + carriers * 1.6 + flights * 0.22;
+  const actorProjectionRaw = actorKineticVolume * 6.4 + carriers * 2.0 + flights * 0.28;
   const outboundProjectionRaw =
-    outboundActorKineticVolume * 4.8 +
-    outboundActorSupportVolume * (outboundActorKineticVolume > 0 ? 0.35 : 0.08);
+    outboundActorKineticVolume * 6.4 +
+    outboundActorSupportVolume * (outboundActorKineticVolume > 0 ? 0.58 : 0.1);
   const evidenceFactor = Math.min(1, (impactKineticVolume + fatalitiesSignal / 9 + criticalNews) / 9);
 
   const escalationRaw =
     impactIntensityRaw +
-    actorProjectionRaw * 1.1 +
-    outboundProjectionRaw * 0.9 +
+    actorProjectionRaw * 1.3 +
+    outboundProjectionRaw * 1.22 +
     criticalNews * 1.0 +
     mobilityComposite * (0.04 + 0.2 * evidenceFactor);
   const conflictRaw =
     impactIntensityRaw +
-    actorProjectionRaw * 0.12 +
+    actorProjectionRaw * 0.32 +
+    outboundProjectionRaw * 0.62 +
     criticalNews * 0.65 +
     infrastructure * 0.08;
 
@@ -314,6 +315,30 @@ function buildLocalRegionIntel(
   if (impactBand < 3 && (actorKineticVolume >= 3 || outboundActorKineticVolume >= 2)) {
     escalationIndex = Math.max(escalationIndex, outboundActorKineticVolume >= 4 ? 48 : 38);
     conflictIndex = Math.max(conflictIndex, outboundActorKineticVolume >= 3 ? 26 : 18);
+  }
+
+  // Deterministic outbound floor for highly active force-projection countries (US-targeted lift).
+  const selectedCountry = canonicalCountryMatchKey(selection.country || selection.name);
+  const isUnitedStatesSelection =
+    selectedCountry === "united states" || selectedCountry === "united states of america" || selectedCountry === "usa";
+  const strongOutboundPosture = outboundActorKineticVolume >= 4 || outboundActorSupportVolume >= 24;
+  const veryStrongOutboundPosture = outboundActorKineticVolume >= 7 || outboundActorSupportVolume >= 45;
+
+  if (impactBand < 6 && strongOutboundPosture) {
+    escalationIndex = Math.max(escalationIndex, 60);
+    conflictIndex = Math.max(conflictIndex, 35);
+  }
+  if (impactBand < 6 && veryStrongOutboundPosture) {
+    escalationIndex = Math.max(escalationIndex, 68);
+    conflictIndex = Math.max(conflictIndex, 42);
+  }
+  if (impactBand < 6 && isUnitedStatesSelection && strongOutboundPosture) {
+    escalationIndex = Math.max(escalationIndex, 66);
+    conflictIndex = Math.max(conflictIndex, 39);
+  }
+  if (impactBand < 6 && isUnitedStatesSelection && veryStrongOutboundPosture) {
+    escalationIndex = Math.max(escalationIndex, 74);
+    conflictIndex = Math.max(conflictIndex, 46);
   }
 
   // Passive-state suppression: if there is almost no homeland impact and no outbound kinetic
