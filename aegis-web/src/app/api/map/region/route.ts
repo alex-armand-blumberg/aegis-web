@@ -85,6 +85,13 @@ function scaledIndex(raw: number, volume: number, kind: "escalation" | "conflict
 export async function GET(request: Request) {
   try {
     const { searchParams, origin } = new URL(request.url);
+    const forwardHeaders: Record<string, string> = {};
+    const cookie = request.headers.get("cookie");
+    const authorization = request.headers.get("authorization");
+    const bypass = request.headers.get("x-vercel-protection-bypass");
+    if (cookie) forwardHeaders.cookie = cookie;
+    if (authorization) forwardHeaders.authorization = authorization;
+    if (bypass) forwardHeaders["x-vercel-protection-bypass"] = bypass;
     const range = searchParams.get("range") || "7d";
     const kind = (searchParams.get("kind") || "country").trim().toLowerCase();
     const key = (searchParams.get("key") || "").trim();
@@ -97,11 +104,15 @@ export async function GET(request: Request) {
       `${origin}/api/map?range=${encodeURIComponent(
         range
       )}&layers=conflicts,liveStrikes,flights,vessels,carriers,news,infrastructure`,
-      { cache: "no-store" }
+      { cache: "no-store", headers: forwardHeaders }
     );
-    const mapData = (await mapRes.json()) as MapApiResponse;
-    if (!mapRes.ok || !mapData.layers) {
+    const mapContentType = (mapRes.headers.get("content-type") || "").toLowerCase();
+    if (!mapRes.ok || !mapContentType.includes("application/json")) {
       return NextResponse.json({ error: "failed to fetch map feeds" }, { status: 502 });
+    }
+    const mapData = (await mapRes.json()) as MapApiResponse;
+    if (!mapData.layers) {
+      return NextResponse.json({ error: "failed to parse map feeds" }, { status: 502 });
     }
 
     let selection: RegionSelection;

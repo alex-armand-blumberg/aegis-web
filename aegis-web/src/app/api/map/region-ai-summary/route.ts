@@ -18,6 +18,13 @@ async function fetchWithTimeout(
 export async function GET(request: Request) {
   try {
     const { searchParams, origin } = new URL(request.url);
+    const forwardHeaders: Record<string, string> = {};
+    const cookie = request.headers.get("cookie");
+    const authorization = request.headers.get("authorization");
+    const bypass = request.headers.get("x-vercel-protection-bypass");
+    if (cookie) forwardHeaders.cookie = cookie;
+    if (authorization) forwardHeaders.authorization = authorization;
+    if (bypass) forwardHeaders["x-vercel-protection-bypass"] = bypass;
     const kind = (searchParams.get("kind") ?? "country").trim();
     const key = (searchParams.get("key") ?? "").trim();
     const name = (searchParams.get("name") ?? "").trim();
@@ -30,10 +37,11 @@ export async function GET(request: Request) {
       `${origin}/api/map/region?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(
         key
       )}&name=${encodeURIComponent(name)}&range=${encodeURIComponent(range)}`,
-      { cache: "no-store" },
+      { cache: "no-store", headers: forwardHeaders },
       9_000
     );
-    if (!intelRes.ok) {
+    const intelContentType = (intelRes.headers.get("content-type") || "").toLowerCase();
+    if (!intelRes.ok || !intelContentType.includes("application/json")) {
       const details = (await intelRes.text().catch(() => "")).slice(0, 300);
       return NextResponse.json(
         { error: details || "Failed region intel context" },
@@ -65,7 +73,7 @@ export async function GET(request: Request) {
       `${origin}/api/ai`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...forwardHeaders },
         body: JSON.stringify({
           mode: "sentinel_qa",
           maxTokens: 620,
@@ -75,13 +83,15 @@ export async function GET(request: Request) {
       },
       18_000
     );
-    const aiJson = (await aiRes.json()) as { content?: string; error?: string };
-    if (!aiRes.ok) {
+    const aiContentType = (aiRes.headers.get("content-type") || "").toLowerCase();
+    if (!aiRes.ok || !aiContentType.includes("application/json")) {
+      const details = (await aiRes.text().catch(() => "")).slice(0, 300);
       return NextResponse.json(
-        { error: aiJson.error ?? "AI summary failed" },
+        { error: details || "AI summary failed" },
         { status: 502 }
       );
     }
+    const aiJson = (await aiRes.json()) as { content?: string; error?: string };
     return NextResponse.json({
       summary:
         aiJson.content?.trim() ||
