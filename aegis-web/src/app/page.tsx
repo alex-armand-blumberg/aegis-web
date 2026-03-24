@@ -101,21 +101,21 @@ export default function Home() {
         <div className="hero-stats">
           <div className="stat">
             <div className="stat-num">
-              <AnimatedNumber value={50} suffix="+" suffixClassName="stat-plus-accent" />
+              <AnimatedNumber value={180} suffix="+" suffixClassName="stat-plus-accent" />
             </div>
-            <div className="stat-label">Countries Tracked</div>
+            <div className="stat-label">Countries &amp; regions</div>
           </div>
           <div className="stat">
             <div className="stat-num">
-              <AnimatedNumber value={6} />
+              <AnimatedNumber value={16} />
             </div>
-            <div className="stat-label">Index Components</div>
+            <div className="stat-label">Intel layer types</div>
           </div>
           <div className="stat">
             <div className="stat-num">
-              <AnimatedNumber value={7} suffix="+" suffixClassName="stat-plus-accent" />
+              <AnimatedNumber value={8} suffix="+" suffixClassName="stat-plus-accent" />
             </div>
-            <div className="stat-label">Years of Data</div>
+            <div className="stat-label">Years of ACLED history</div>
           </div>
           <div className="stat">
             <div className="stat-num">AI</div>

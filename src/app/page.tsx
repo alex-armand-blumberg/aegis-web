@@ -63,9 +63,9 @@ export default function Home() {
           </a>
         </div>
         <div className="hero-stats hero-stats-responsive relative z-10 mt-[72px] flex flex-wrap justify-center gap-12 opacity-0 animate-[fadeUp_0.7s_0.65s_forwards]" style={{ animationFillMode: "forwards" }}>
-          <AnimatedStat value={50} suffix="+" label="Countries Tracked" redSuffix />
-          <AnimatedStat value={6} label="Index Components" />
-          <AnimatedStat value={7} suffix="+" label="Years of Data" redSuffix />
+          <AnimatedStat value={180} suffix="+" label="Countries & regions" redSuffix />
+          <AnimatedStat value={16} label="Intel layer types" />
+          <AnimatedStat value={8} suffix="+" label="Years of ACLED history" redSuffix />
           <div className="stat text-center min-w-[100px]">
             <div className="stat-num font-bebas text-[36px] tracking-[0.06em] leading-none text-white">AI</div>
             <div className="stat-label mt-1 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">Powered Analysis</div>
