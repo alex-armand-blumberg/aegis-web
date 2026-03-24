@@ -1,32 +1,8 @@
 import { NextResponse } from "next/server";
 import type { RegionMarketQuote } from "@/lib/intel/types";
+import { publicSearchQueries, regionMarketSearchTerms } from "@/lib/regionMarketPolymarketTerms";
 
 const POLY_GAMMA = "https://gamma-api.polymarket.com";
-
-function regionMarketSearchTerms(name: string): string[] {
-  const n = name.toLowerCase();
-  if (n.includes("south china sea")) return ["china", "taiwan", "philippines", "navy"];
-  if (n.includes("hormuz")) return ["iran", "oil", "shipping", "middle east"];
-  if (n.includes("indian ocean")) return ["iran", "shipping", "india", "red sea"];
-  if (n.includes("arctic")) return ["arctic", "oil", "russia", "nato"];
-  if (n.includes("antarctica")) return ["antarctica", "resources", "treaty", "climate"];
-  if (n.includes("atlantic")) return ["nato", "shipping", "russia", "carrier"];
-  const tokens = n.split(/\s+/).filter(Boolean);
-  if (n.includes("united states")) tokens.push("us", "usa", "america", "u.s.");
-  if (n.includes("united kingdom")) tokens.push("uk", "britain", "u.k.");
-  if (n.includes("judea") || n.includes("palestine")) tokens.push("palestine", "gaza", "west bank", "israel");
-  if (n.includes("russia")) tokens.push("russian");
-  if (n.includes("ukraine")) tokens.push("ukrainian");
-  if (n.includes("iran")) tokens.push("iranian");
-  if (n.includes("afghanistan")) tokens.push("afghan", "taliban", "kabul");
-  if (n.includes("israel")) tokens.push("israeli", "tel aviv", "jerusalem", "gaza");
-  if (n.includes("russia")) tokens.push("moscow");
-  if (n.includes("china")) tokens.push("beijing");
-  if (n.includes("india")) tokens.push("indian");
-  if (n.includes("pakistan")) tokens.push("pakistani");
-  if (n.includes("sudan")) tokens.push("khartoum", "darfur");
-  return Array.from(new Set(tokens));
-}
 
 function scoreTextMatch(text: string, terms: string[]): number {
   const t = text.toLowerCase();
@@ -109,25 +85,59 @@ const GEO_MARKET_ALLOW_TERMS = [
   "oil",
   "energy",
   "opec",
+  "nuclear",
+  "sanctions",
+  "invasion",
+  "troops",
+  "border",
+  "embassy",
+  "diplomat",
+  "foreign policy",
 ];
+
+function hasGeoDeny(text: string): boolean {
+  const t = text.toLowerCase();
+  return GEO_MARKET_DENY_TERMS.some((term) => t.includes(term));
+}
 
 function isModerateGeopoliticalMarket(text: string): boolean {
   const t = text.toLowerCase();
-  if (GEO_MARKET_DENY_TERMS.some((term) => t.includes(term))) return false;
+  if (hasGeoDeny(t)) return false;
   return GEO_MARKET_ALLOW_TERMS.some((term) => t.includes(term));
 }
 
-function pickRankedOrFallback<T extends { title: string; score: number; yesPct: number | null }>(
-  rows: T[]
-): T[] {
+type Candidate = {
+  row: Record<string, unknown>;
+  title: string;
+  context: string;
+  score: number;
+  yesPct: number | null;
+};
+
+function pickRankedOrFallback(rows: Candidate[]): Candidate[] {
+  const byScore = (a: Candidate, b: Candidate) => b.score - a.score;
   const strict = rows
-    .filter((x) => x.title && x.score > 0 && x.yesPct !== null && isModerateGeopoliticalMarket(x.title))
-    .sort((a, b) => b.score - a.score)
+    .filter(
+      (x) =>
+        x.title &&
+        x.score > 0 &&
+        x.yesPct !== null &&
+        !hasGeoDeny(x.context) &&
+        isModerateGeopoliticalMarket(x.context)
+    )
+    .sort(byScore)
     .slice(0, 3);
   if (strict.length > 0) return strict;
   return rows
-    .filter((x) => x.title && x.score > 0 && x.yesPct !== null && isModerateGeopoliticalMarket(x.title))
-    .sort((a, b) => b.score - a.score)
+    .filter(
+      (x) =>
+        x.title &&
+        x.score > 0 &&
+        x.yesPct !== null &&
+        !hasGeoDeny(x.context) &&
+        (x.score >= 2 || isModerateGeopoliticalMarket(x.context))
+    )
+    .sort(byScore)
     .slice(0, 3);
 }
 
@@ -137,14 +147,27 @@ function toPct(v: number): number {
   return Math.max(1, Math.min(99, Math.round(v)));
 }
 
+function parseJsonArrayMaybe(raw: unknown): unknown[] | null {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const p = JSON.parse(raw);
+      return Array.isArray(p) ? p : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 function parsePolymarketYesPct(row: Record<string, unknown>): number | null {
   const prob = row.probability;
   if (typeof prob === "number") return toPct(prob);
   const yesPrice = row.lastTradePrice;
   if (typeof yesPrice === "number") return toPct(yesPrice);
-  const outcomes = row.outcomes;
-  const outcomePrices = row.outcomePrices;
-  if (Array.isArray(outcomes) && Array.isArray(outcomePrices)) {
+  const outcomes = parseJsonArrayMaybe(row.outcomes);
+  const outcomePrices = parseJsonArrayMaybe(row.outcomePrices);
+  if (outcomes && outcomePrices && outcomes.length === outcomePrices.length) {
     const yesIdx = outcomes.findIndex((o) => String(o).toLowerCase() === "yes");
     if (yesIdx >= 0) {
       const raw = outcomePrices[yesIdx];
@@ -155,39 +178,117 @@ function parsePolymarketYesPct(row: Record<string, unknown>): number | null {
   return null;
 }
 
+function buildContext(row: Record<string, unknown>): string {
+  return String(
+    `${row.question ?? ""} ${row.title ?? ""} ${row.description ?? ""} ${row.category ?? ""} ${row.slug ?? ""} ${row.tags ?? ""}`
+  ).trim();
+}
+
+function dedupeKey(row: Record<string, unknown>): string {
+  return String(row.conditionId ?? row.id ?? row.slug ?? "").trim();
+}
+
+function flattenPublicSearchEvents(json: unknown): Record<string, unknown>[] {
+  if (!json || typeof json !== "object") return [];
+  const events = (json as { events?: unknown[] }).events;
+  if (!Array.isArray(events)) return [];
+  const out: Record<string, unknown>[] = [];
+  for (const ev of events) {
+    if (!ev || typeof ev !== "object") continue;
+    const e = ev as { slug?: string; markets?: unknown[] };
+    const markets = e.markets;
+    if (!Array.isArray(markets)) continue;
+    for (const m of markets) {
+      if (!m || typeof m !== "object") continue;
+      const row = { ...(m as Record<string, unknown>) };
+      const slug = String(row.slug ?? e.slug ?? "").trim();
+      if (slug) {
+        row.slug = slug;
+        row.url = `https://polymarket.com/event/${slug}`;
+      }
+      out.push(row);
+    }
+  }
+  return out;
+}
+
+function isOpenMarket(row: Record<string, unknown>): boolean {
+  return row.active === true && row.closed === false;
+}
+
 async function fetchPolymarketQuotes(name: string): Promise<RegionMarketQuote[]> {
   try {
     const terms = regionMarketSearchTerms(name);
-    const res = await fetch(`${POLY_GAMMA}/markets?active=true&closed=false&limit=2000`, {
-      cache: "no-store",
+    const queries = publicSearchQueries(name);
+
+    const bulkUrl = `${POLY_GAMMA}/markets?active=true&closed=false&limit=2000`;
+    const searchUrls = queries.map((q) => {
+      const u = new URL(`${POLY_GAMMA}/public-search`);
+      u.searchParams.set("q", q);
+      u.searchParams.set("search_profiles", "false");
+      u.searchParams.set("search_tags", "false");
+      u.searchParams.set("limit_per_type", "15");
+      u.searchParams.set("keep_closed_markets", "0");
+      return u.toString();
     });
-    if (!res.ok) return [];
-    const rows = (await res.json()) as Array<Record<string, unknown>>;
-    const candidates = rows
-      .map((row) => {
-        const title = String(row.question ?? row.title ?? "").trim();
-        const context = String(
-          `${row.question ?? ""} ${row.title ?? ""} ${row.description ?? ""} ${row.category ?? ""} ${row.slug ?? ""} ${row.tags ?? ""}`
-        ).trim();
-        const score = scoreTextMatch(context, terms);
-        const yesPct = parsePolymarketYesPct(row);
-        return { row, title, score, yesPct, context };
-      });
-    const ranked = pickRankedOrFallback(
-      candidates.filter((x) => isModerateGeopoliticalMarket(x.context))
-    );
-    return ranked.map((x) => ({
-      provider: "Polymarket",
-      title: x.title,
-      yesChancePct: x.yesPct ?? 50,
-      noChancePct: 100 - (x.yesPct ?? 50),
-      updatedAt: new Date().toISOString(),
-      url: String(x.row.url ?? "").startsWith("http")
-        ? String(x.row.url)
-        : String(x.row.slug ?? "").trim()
-          ? `https://polymarket.com/event/${String(x.row.slug).trim()}`
-          : undefined,
-    }));
+
+    const responses = await Promise.all([
+      fetch(bulkUrl, { cache: "no-store" }),
+      ...searchUrls.map((u) => fetch(u, { cache: "no-store" })),
+    ]);
+
+    const [bulkRes, ...searchRes] = responses;
+    const rawRows: Record<string, unknown>[] = [];
+
+    if (bulkRes.ok) {
+      const bulk = (await bulkRes.json()) as Array<Record<string, unknown>>;
+      rawRows.push(...bulk);
+    }
+
+    for (const sr of searchRes) {
+      if (!sr.ok) continue;
+      const j = await sr.json();
+      const flat = flattenPublicSearchEvents(j).filter(isOpenMarket);
+      rawRows.push(...flat);
+    }
+
+    const seen = new Set<string>();
+    const merged: Record<string, unknown>[] = [];
+    for (const row of rawRows) {
+      const key = dedupeKey(row);
+      if (!key) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(row);
+    }
+
+    const candidates: Candidate[] = merged.map((row) => {
+      const title = String(row.question ?? row.title ?? "").trim();
+      const context = buildContext(row);
+      const score = scoreTextMatch(context, terms);
+      const yesPct = parsePolymarketYesPct(row);
+      return { row, title, score, yesPct, context };
+    });
+
+    const relevant = candidates.filter((x) => x.score > 0);
+    const ranked = pickRankedOrFallback(relevant);
+    return ranked.map((x) => {
+      const slug = String(x.row.slug ?? "").trim();
+      const url =
+        String(x.row.url ?? "").startsWith("http")
+          ? String(x.row.url)
+          : slug
+            ? `https://polymarket.com/event/${slug}`
+            : undefined;
+      return {
+        provider: "Polymarket",
+        title: x.title,
+        yesChancePct: x.yesPct ?? 50,
+        noChancePct: 100 - (x.yesPct ?? 50),
+        updatedAt: new Date().toISOString(),
+        url,
+      };
+    });
   } catch {
     return [];
   }
