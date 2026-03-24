@@ -53,12 +53,56 @@ const GEO_MARKET_DENY_TERMS = [
   "reality show",
 ];
 
+const GEO_MARKET_ALLOW_TERMS = [
+  "election",
+  "president",
+  "prime minister",
+  "parliament",
+  "congress",
+  "senate",
+  "government",
+  "regime",
+  "coup",
+  "war",
+  "military",
+  "missile",
+  "strike",
+  "drone",
+  "airstrike",
+  "ceasefire",
+  "peace",
+  "treaty",
+  "deal",
+  "sanction",
+  "tariff",
+  "embargo",
+  "nato",
+  "un ",
+  "united nations",
+  "china",
+  "taiwan",
+  "iran",
+  "israel",
+  "ukraine",
+  "russia",
+  "gaza",
+  "palestine",
+  "sudan",
+  "north korea",
+  "south korea",
+  "middle east",
+  "red sea",
+  "hormuz",
+  "shipping",
+  "oil",
+  "energy",
+  "opec",
+];
+
 function isModerateGeopoliticalMarket(text: string): boolean {
   const t = text.toLowerCase();
   if (GEO_MARKET_DENY_TERMS.some((term) => t.includes(term))) return false;
-  // Region term scoring is already mandatory; keep this gate denylist-first
-  // so relevant geopolitical contracts with terse wording are not over-filtered.
-  return true;
+  return GEO_MARKET_ALLOW_TERMS.some((term) => t.includes(term));
 }
 
 function pickRankedOrFallback<T extends { title: string; score: number; yesPct: number | null }>(
@@ -70,7 +114,7 @@ function pickRankedOrFallback<T extends { title: string; score: number; yesPct: 
     .slice(0, 3);
   if (strict.length > 0) return strict;
   return rows
-    .filter((x) => x.title && x.yesPct !== null && isModerateGeopoliticalMarket(x.title))
+    .filter((x) => x.title && x.score > 0 && x.yesPct !== null && isModerateGeopoliticalMarket(x.title))
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
 }
@@ -128,14 +172,17 @@ async function fetchKalshiQuotes(name: string): Promise<RegionMarketQuote[]> {
     const rows = json.markets ?? [];
     const candidates = rows
       .map((row) => {
-        const title = String(
-          row.title ?? row.subtitle ?? row.market_title ?? row.ticker ?? ""
+        const title = String(row.title ?? row.market_title ?? row.ticker ?? "").trim();
+        const context = String(
+          `${row.title ?? ""} ${row.subtitle ?? ""} ${row.market_title ?? ""} ${row.ticker ?? ""} ${row.category ?? ""}`
         ).trim();
         const score = scoreTextMatch(title, terms);
         const yesPct = parseKalshiYesPct(row);
-        return { row, title, score, yesPct };
+        return { row, title, score, yesPct, context };
       });
-    const ranked = pickRankedOrFallback(candidates);
+    const ranked = pickRankedOrFallback(
+      candidates.filter((x) => isModerateGeopoliticalMarket(x.context))
+    );
     return ranked.map((x) => {
       const ticker = String(x.row.ticker ?? "").trim();
       return {
@@ -163,11 +210,16 @@ async function fetchPolymarketQuotes(name: string): Promise<RegionMarketQuote[]>
     const candidates = rows
       .map((row) => {
         const title = String(row.question ?? row.title ?? "").trim();
+        const context = String(
+          `${row.question ?? ""} ${row.title ?? ""} ${row.description ?? ""} ${row.category ?? ""} ${row.slug ?? ""}`
+        ).trim();
         const score = scoreTextMatch(title, terms);
         const yesPct = parsePolymarketYesPct(row);
-        return { row, title, score, yesPct };
+        return { row, title, score, yesPct, context };
       });
-    const ranked = pickRankedOrFallback(candidates);
+    const ranked = pickRankedOrFallback(
+      candidates.filter((x) => isModerateGeopoliticalMarket(x.context))
+    );
     return ranked.map((x) => ({
       provider: "Polymarket",
       title: x.title,

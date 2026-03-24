@@ -43,8 +43,16 @@ export default function RootLayout({
     process.env.VERCEL_DEPLOYMENT_CREATED_AT ||
     process.env.NEXT_PUBLIC_DEPLOYED_AT ||
     new Date().toISOString();
-  const deploymentDisplay = new Date(deploymentIso).toLocaleString();
-  const commitShort = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7);
+  const deploymentDisplay = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).format(new Date(deploymentIso));
   return (
     <html
       lang="en"
@@ -53,8 +61,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-[#020611] text-[#e2e8f0] antialiased">
         <div className="global-deploy-banner">
           <span>Latest version</span>
-          <strong>{deploymentDisplay}</strong>
-          {commitShort ? <span className="global-deploy-commit">({commitShort})</span> : null}
+          <strong>{deploymentDisplay} EST</strong>
         </div>
         <EscalationPlotProvider>{children}</EscalationPlotProvider>
       </body>
