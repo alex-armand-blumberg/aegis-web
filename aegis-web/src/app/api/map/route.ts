@@ -1045,11 +1045,13 @@ function extractMentionedCountry(text: string): string | null {
   const normalized = text.toLowerCase();
 
   for (const alias of COUNTRY_ALIASES) {
-    if (normalized.includes(alias.keyword)) return alias.country;
+    const aliasRe = new RegExp(`\\b${alias.keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (aliasRe.test(normalized)) return alias.country;
   }
 
   for (const name of COUNTRY_NAMES) {
-    if (normalized.includes(name.toLowerCase())) return name;
+    const nameRe = new RegExp(`\\b${name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (nameRe.test(normalized)) return name;
   }
   return null;
 }
@@ -1086,6 +1088,14 @@ function pinPointToDeclaredCountry(point: IntelPoint): IntelPoint {
   if (!point.country) return point;
   const bbox = resolveCountryBbox(point.country);
   if (!bbox) return point;
+  const geoCountry = inferCountryFromLatLon(point.lat, point.lon);
+  // News-derived country strings can be weak/noisy; avoid aggressive snapping
+  // when we have either contradictory geolocation or known offshore references.
+  const text = `${point.title} ${point.subtitle ?? ""}`.toLowerCase();
+  if (point.layer === "news") {
+    if (geoCountry && !countriesMatch(geoCountry, point.country)) return point;
+    if (text.includes("diego garcia") || text.includes("chagos")) return point;
+  }
   const [latMin, latMax, lonMin, lonMax, centerLat, centerLon] = bbox;
   const margin = 3.5;
   const outOfCountryBounds =
@@ -1801,6 +1811,8 @@ const CITY_COORDS: Record<string, { lat: number; lon: number; country: string }>
   "arak": { lat: 34.0917, lon: 49.6892, country: "Iran" },
   "parchin": { lat: 35.5, lon: 51.78, country: "Iran" },
   "bandar abbas": { lat: 27.1832, lon: 56.2666, country: "Iran" },
+  "diego garcia": { lat: -7.3133, lon: 72.4115, country: "United Kingdom" },
+  chagos: { lat: -6.9, lon: 71.8, country: "United Kingdom" },
   "chabahar": { lat: 25.2919, lon: 60.643, country: "Iran" },
   "kerman": { lat: 30.2839, lon: 57.0834, country: "Iran" },
   "tabas": { lat: 33.5959, lon: 56.9244, country: "Iran" },

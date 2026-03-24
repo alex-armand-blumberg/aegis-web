@@ -48,12 +48,12 @@ const ALL_LAYERS: IntelLayerKey[] = [
 ];
 const LAYER_LABELS: Record<IntelLayerKey, string> = {
   conflicts: "Conflicts (all)",
-  conflictsBattles: "ACLED Battles",
-  conflictsExplosions: "ACLED Explosions",
-  conflictsCivilians: "ACLED Civilians",
-  conflictsStrategic: "ACLED Strategic",
-  conflictsProtests: "ACLED Protests",
-  conflictsRiots: "ACLED Riots",
+  conflictsBattles: "Battles",
+  conflictsExplosions: "Explosions",
+  conflictsCivilians: "Attack on Civilians",
+  conflictsStrategic: "Strat. Dev.",
+  conflictsProtests: "Protests",
+  conflictsRiots: "Riots",
   liveStrikes: "Live Strikes",
   flights: "Flights",
   vessels: "Vessels",
@@ -95,6 +95,28 @@ function getAllConflictPoints(layers: Record<IntelLayerKey, IntelPoint[]>): Inte
   const points = CONFLICT_SUBTYPE_LAYERS.flatMap((k) => layers[k] ?? []);
   if (points.length > 0) return points;
   return layers.conflicts ?? [];
+}
+
+function getGaugeKineticConflictPoints(layers: Record<IntelLayerKey, IntelPoint[]>): IntelPoint[] {
+  const kinetic = [
+    ...(layers.conflictsBattles ?? []),
+    ...(layers.conflictsExplosions ?? []),
+    ...(layers.conflictsCivilians ?? []),
+    ...(layers.conflictsStrategic ?? []),
+  ];
+  if (kinetic.length > 0) return kinetic;
+  return layers.conflicts ?? [];
+}
+
+function dedupeConflictEventsForGauge(points: IntelPoint[]): IntelPoint[] {
+  const seen = new Map<string, IntelPoint>();
+  for (const p of points) {
+    const baseId = p.id.replace(/-(battles|explosions|civilians|strategic|protests|riots)(-\d+)?$/i, "");
+    const key = `${baseId}|${p.timestamp}|${p.country ?? ""}|${String(p.metadata?.eventMonth ?? "")}`;
+    const cur = seen.get(key);
+    if (!cur || severityWeight(p.severity) > severityWeight(cur.severity)) seen.set(key, p);
+  }
+  return Array.from(seen.values());
 }
 
 function simplifyProviderMessage(message: string): string {
@@ -826,6 +848,7 @@ export default function MapPage() {
 
   const worldStateRisk = useMemo(() => {
     const conflictPoints = getAllConflictPoints(layers);
+    const kineticConflictPoints = dedupeConflictEventsForGauge(getGaugeKineticConflictPoints(layers));
     const weightedSignals =
       layers.liveStrikes.reduce((s, p) => s + severityWeight(p.severity) * 2.5, 0) +
       conflictPoints.reduce((s, p) => s + severityWeight(p.severity) * 1.8, 0) +
@@ -833,13 +856,13 @@ export default function MapPage() {
       layers.flights.length * 0.05 +
       layers.vessels.length * 0.04;
     const rawScaled = Math.min(100, Math.max(0, 100 - Math.exp(-weightedSignals / 360) * 100));
-    const kineticVolume = layers.liveStrikes.length + conflictPoints.length;
+    const kineticVolume = layers.liveStrikes.length + kineticConflictPoints.length;
     const criticalSignalCount =
       layers.liveStrikes.filter((p) => p.severity === "critical").length +
-      conflictPoints.filter((p) => p.severity === "critical").length +
+      kineticConflictPoints.filter((p) => p.severity === "critical").length +
       layers.news.filter((p) => p.severity === "critical").length;
     const highSeverityCountries = new Set(
-      [...layers.liveStrikes, ...conflictPoints, ...layers.news]
+      [...layers.liveStrikes, ...kineticConflictPoints, ...layers.news]
         .filter((p) => (p.severity === "high" || p.severity === "critical") && p.country)
         .map((p) => canonicalCountryMatchKey(p.country as string))
     );

@@ -24,50 +24,6 @@ function scoreTextMatch(text: string, terms: string[]): number {
   return score;
 }
 
-const GEO_MARKET_ALLOW_TERMS = [
-  "election",
-  "president",
-  "prime minister",
-  "parliament",
-  "congress",
-  "senate",
-  "government",
-  "regime",
-  "coup",
-  "war",
-  "military",
-  "missile",
-  "strike",
-  "drone",
-  "airstrike",
-  "ceasefire",
-  "peace deal",
-  "treaty",
-  "nato",
-  "un",
-  "sanction",
-  "tariff",
-  "embargo",
-  "china",
-  "taiwan",
-  "iran",
-  "israel",
-  "ukraine",
-  "russia",
-  "gaza",
-  "palestine",
-  "sudan",
-  "north korea",
-  "south korea",
-  "middle east",
-  "red sea",
-  "hormuz",
-  "shipping",
-  "oil",
-  "energy",
-  "opec",
-];
-
 const GEO_MARKET_DENY_TERMS = [
   "world cup",
   "champions league",
@@ -93,7 +49,9 @@ const GEO_MARKET_DENY_TERMS = [
 function isModerateGeopoliticalMarket(text: string): boolean {
   const t = text.toLowerCase();
   if (GEO_MARKET_DENY_TERMS.some((term) => t.includes(term))) return false;
-  return GEO_MARKET_ALLOW_TERMS.some((term) => t.includes(term));
+  // Region term scoring is already mandatory; keep this gate denylist-first
+  // so relevant geopolitical contracts with terse wording are not over-filtered.
+  return true;
 }
 
 function toPct(v: number): number {
