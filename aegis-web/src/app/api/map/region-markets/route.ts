@@ -19,6 +19,7 @@ function regionMarketSearchTerms(name: string): string[] {
   if (n.includes("russia")) tokens.push("russian");
   if (n.includes("ukraine")) tokens.push("ukrainian");
   if (n.includes("iran")) tokens.push("iranian");
+  if (n.includes("afghanistan")) tokens.push("afghan", "taliban", "kabul");
   return Array.from(new Set(tokens));
 }
 
@@ -114,7 +115,7 @@ function pickRankedOrFallback<T extends { title: string; score: number; yesPct: 
     .slice(0, 3);
   if (strict.length > 0) return strict;
   return rows
-    .filter((x) => x.title && x.score > 0 && x.yesPct !== null && isModerateGeopoliticalMarket(x.title))
+    .filter((x) => x.title && x.yesPct !== null && isModerateGeopoliticalMarket(x.title))
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
 }
