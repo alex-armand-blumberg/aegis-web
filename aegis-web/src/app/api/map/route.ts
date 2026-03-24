@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { COUNTRY_BBOX } from "@/lib/countryBounds";
-import { formatCountryDisplayName, normalizeCountryKey } from "@/lib/countryDisplay";
+import { countriesMatch, formatCountryDisplayName, normalizeCountryKey } from "@/lib/countryDisplay";
 import { countryFromIcao24Hex } from "@/lib/icao24HexCountry";
 import { countryFromMmsi } from "@/lib/mmsiMidCountry";
 import { countryFromNavalOrCommercialName } from "@/lib/vesselNameCountry";
