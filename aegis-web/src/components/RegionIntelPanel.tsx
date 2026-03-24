@@ -135,13 +135,44 @@ export default function RegionIntelPanel({
           <div className="intel-side-item"><span>Loading odds...</span></div>
         ) : markets.length > 0 ? (
           markets.map((m, idx) => (
-            <div key={`${m.provider}-${m.title}-${idx}`} className="intel-side-item" style={{ alignItems: "flex-start" }}>
+            <div
+              key={`${m.provider}-${m.title}-${idx}`}
+              className="intel-side-item"
+              style={{ alignItems: "flex-start", flexDirection: "column", gap: 6 }}
+            >
               <span>{m.provider}</span>
-              <strong style={{ maxWidth: 180 }}>
+              <strong style={{ maxWidth: 210 }}>
                 {m.title}
-                <br />
-                YES {m.yesChancePct}% / NO {m.noChancePct}%
               </strong>
+              <div style={{ width: "100%" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    width: "100%",
+                    height: 8,
+                    borderRadius: 999,
+                    overflow: "hidden",
+                    border: "1px solid rgba(148,163,184,0.35)",
+                    background: "rgba(15,23,42,0.7)",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.max(0, Math.min(100, m.yesChancePct))}%`,
+                      background: "linear-gradient(90deg, rgba(34,197,94,0.9), rgba(132,204,22,0.92))",
+                    }}
+                  />
+                  <div
+                    style={{
+                      width: `${Math.max(0, Math.min(100, m.noChancePct))}%`,
+                      background: "linear-gradient(90deg, rgba(239,68,68,0.82), rgba(244,63,94,0.86))",
+                    }}
+                  />
+                </div>
+                <div style={{ marginTop: 4, fontSize: 11, color: "rgba(226,232,240,0.85)" }}>
+                  YES {m.yesChancePct}% / NO {m.noChancePct}%
+                </div>
+              </div>
             </div>
           ))
         ) : (

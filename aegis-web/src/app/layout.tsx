@@ -38,12 +38,24 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const deploymentIso =
+    process.env.VERCEL_GIT_COMMIT_TIMESTAMP ||
+    process.env.VERCEL_DEPLOYMENT_CREATED_AT ||
+    process.env.NEXT_PUBLIC_DEPLOYED_AT ||
+    new Date().toISOString();
+  const deploymentDisplay = new Date(deploymentIso).toLocaleString();
+  const commitShort = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7);
   return (
     <html
       lang="en"
       className={`${bebasNeue.variable} ${barlow.variable} ${barlowCondensed.variable} ${oswald.variable} overflow-x-hidden bg-[#020611] text-[#e2e8f0]`}
     >
       <body className="min-h-screen bg-[#020611] text-[#e2e8f0] antialiased">
+        <div className="global-deploy-banner">
+          <span>Latest version</span>
+          <strong>{deploymentDisplay}</strong>
+          {commitShort ? <span className="global-deploy-commit">({commitShort})</span> : null}
+        </div>
         <EscalationPlotProvider>{children}</EscalationPlotProvider>
       </body>
     </html>

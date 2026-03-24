@@ -12,7 +12,14 @@ function regionMarketSearchTerms(name: string): string[] {
   if (n.includes("arctic")) return ["arctic", "oil", "russia", "nato"];
   if (n.includes("antarctica")) return ["antarctica", "resources", "treaty", "climate"];
   if (n.includes("atlantic")) return ["nato", "shipping", "russia", "carrier"];
-  return n.split(/\s+/).filter(Boolean);
+  const tokens = n.split(/\s+/).filter(Boolean);
+  if (n.includes("united states")) tokens.push("us", "usa", "america", "u.s.");
+  if (n.includes("united kingdom")) tokens.push("uk", "britain", "u.k.");
+  if (n.includes("judea") || n.includes("palestine")) tokens.push("palestine", "gaza", "west bank", "israel");
+  if (n.includes("russia")) tokens.push("russian");
+  if (n.includes("ukraine")) tokens.push("ukrainian");
+  if (n.includes("iran")) tokens.push("iranian");
+  return Array.from(new Set(tokens));
 }
 
 function scoreTextMatch(text: string, terms: string[]): number {
@@ -52,6 +59,20 @@ function isModerateGeopoliticalMarket(text: string): boolean {
   // Region term scoring is already mandatory; keep this gate denylist-first
   // so relevant geopolitical contracts with terse wording are not over-filtered.
   return true;
+}
+
+function pickRankedOrFallback<T extends { title: string; score: number; yesPct: number | null }>(
+  rows: T[]
+): T[] {
+  const strict = rows
+    .filter((x) => x.title && x.score > 0 && x.yesPct !== null && isModerateGeopoliticalMarket(x.title))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+  if (strict.length > 0) return strict;
+  return rows
+    .filter((x) => x.title && x.yesPct !== null && isModerateGeopoliticalMarket(x.title))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
 }
 
 function toPct(v: number): number {
@@ -105,7 +126,7 @@ async function fetchKalshiQuotes(name: string): Promise<RegionMarketQuote[]> {
     if (!res.ok) return [];
     const json = (await res.json()) as { markets?: Array<Record<string, unknown>> };
     const rows = json.markets ?? [];
-    const ranked = rows
+    const candidates = rows
       .map((row) => {
         const title = String(
           row.title ?? row.subtitle ?? row.market_title ?? row.ticker ?? ""
@@ -113,16 +134,8 @@ async function fetchKalshiQuotes(name: string): Promise<RegionMarketQuote[]> {
         const score = scoreTextMatch(title, terms);
         const yesPct = parseKalshiYesPct(row);
         return { row, title, score, yesPct };
-      })
-      .filter(
-        (x) =>
-          x.title &&
-          x.score > 0 &&
-          x.yesPct !== null &&
-          isModerateGeopoliticalMarket(x.title)
-      )
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
+      });
+    const ranked = pickRankedOrFallback(candidates);
     return ranked.map((x) => {
       const ticker = String(x.row.ticker ?? "").trim();
       return {
@@ -147,31 +160,25 @@ async function fetchPolymarketQuotes(name: string): Promise<RegionMarketQuote[]>
     });
     if (!res.ok) return [];
     const rows = (await res.json()) as Array<Record<string, unknown>>;
-    const ranked = rows
+    const candidates = rows
       .map((row) => {
         const title = String(row.question ?? row.title ?? "").trim();
         const score = scoreTextMatch(title, terms);
         const yesPct = parsePolymarketYesPct(row);
         return { row, title, score, yesPct };
-      })
-      .filter(
-        (x) =>
-          x.title &&
-          x.score > 0 &&
-          x.yesPct !== null &&
-          isModerateGeopoliticalMarket(x.title)
-      )
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
+      });
+    const ranked = pickRankedOrFallback(candidates);
     return ranked.map((x) => ({
       provider: "Polymarket",
       title: x.title,
       yesChancePct: x.yesPct ?? 50,
       noChancePct: 100 - (x.yesPct ?? 50),
       updatedAt: new Date().toISOString(),
-      url: String(x.row.url ?? x.row.slug ?? "").startsWith("http")
+      url: String(x.row.url ?? "").startsWith("http")
         ? String(x.row.url)
-        : undefined,
+        : String(x.row.slug ?? "").trim()
+          ? `https://polymarket.com/event/${String(x.row.slug).trim()}`
+          : undefined,
     }));
   } catch {
     return [];

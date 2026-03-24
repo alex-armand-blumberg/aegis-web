@@ -39,6 +39,35 @@ body {
   position: relative;
 }
 
+.global-deploy-banner {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(2, 8, 20, 0.86);
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.global-deploy-banner strong {
+  color: #bfdbfe;
+  font-weight: 600;
+}
+
+.global-deploy-commit {
+  color: rgba(148, 163, 184, 0.95);
+}
+
 /* Noise overlay */
 body::before {
   content: "";
