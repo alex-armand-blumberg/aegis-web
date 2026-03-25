@@ -115,7 +115,7 @@ export default function Home() {
             <div className="stat-num">
               <AnimatedNumber value={8} suffix="+" suffixClassName="stat-plus-accent" />
             </div>
-            <div className="stat-label">Years of ACLED history</div>
+            <div className="stat-label">Years of history</div>
           </div>
           <div className="stat">
             <div className="stat-num">AI</div>

@@ -1420,7 +1420,9 @@ export default function MapPage() {
               </li>
               <li>
                 Military ships and carrier groups can disable or spoof AIS/ADS-B, which can
-                hide active deployments during sensitive missions.
+                hide active deployments during sensitive missions. Carrier markers can be
+                approximate—AIS fixes are sporadic, and fleet-tracker headlines often map to
+                theater centroids rather than exact hull positions.
               </li>
               <li>
                 News-derived event geolocation uses city/country extraction and

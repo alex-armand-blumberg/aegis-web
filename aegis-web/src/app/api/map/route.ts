@@ -1195,7 +1195,7 @@ function inferVesselPurposeFromName(name: string): string {
   if (/\b(AOR|AKR|T-?AKR|T-?AO|LOGISTICS|SUPPLY|REPLENISH|TANKER|OILER)\b/.test(t)) {
     return "Logistics/Replenishment";
   }
-  if (/\b(CARRIER)\b/.test(t)) return "Carrier aviation support";
+  if (/\b(AIRCRAFT\s*CARRIER|CVN|CV-)\b/.test(t)) return "Carrier aviation support";
   if (/\b(SUBMARINE)\b/.test(t)) return "Submarine/undersea operations";
   if (/\b(DESTROYER|FRIGATE|CORVETTE|CRUISER|DDG|CG-|FFG)\b/.test(t)) {
     return "Surface combatant";
@@ -1260,6 +1260,20 @@ function inferVesselClassFromName(name: string): string {
   }
 
   return "Merchant / type not reported (AIS)";
+}
+
+/** True when the vessel name denotes a merchant *carrier* (bulk/LNG/container/etc.), not an aircraft carrier. */
+function isCommercialMerchantCarrierName(name: string): boolean {
+  const t = name.toUpperCase();
+  if (/\b(LNG|LNGC)\b/.test(t)) return true;
+  if (/\b(LPG|LPGC)\b/.test(t)) return true;
+  if (/\b(TANKER|CRUDE|PRODUCT|VLCC|ULCC|AFRAMAX|AFRA\s*MAX)\b/.test(t)) return true;
+  if (/\b(BULK|CAPE\s*SIZE|PANAMAX|SUPRAMAX|HANDYSIZE)\b/.test(t)) return true;
+  if (/\b(CONTAINER|CONTAINERS|FEEDER|\bTEU\b|BOX)\b/.test(t)) return true;
+  if (/\b(RO-?RO|RORO|CAR\s*CARRIER|ROLL[-\s]?ON|ROLL[-\s]?OFF)\b/.test(t)) return true;
+  if (/\b(WOOD\s*CHIP|CHIP\s*CARRIER|CEMENT\s*CARRIER|LIVESTOCK)\b/.test(t)) return true;
+  if (/\b(BULK|CONTAINER|VEHICLE|GENERAL\s+CARGO|ORE|CHEMICAL|PRODUCT)\s+CARRIER\b/.test(t)) return true;
+  return false;
 }
 
 /** Map relay `flag` strings to a country when possible (relays vary in format). */
@@ -4631,7 +4645,7 @@ async function fetchVesselSignals(): Promise<{
 
   const vessels = allVessels;
   const GOV_VESSEL_RE =
-    /\b(USS|USNS|USCGC|HMS|HMCS|HMAS|ROKS|INS|PLAN|NAVE|ARMADA|MARINA|NAVY|COAST\s*GUARD|GUARDIA|CGC|CG-|PATROL|CORVETTE|FRIGATE|DESTROYER|CRUISER|CARRIER|BATTLESHIP|AMPHIB|WARSHIP|SUBMARINE|FLEET|TASK\s*FORCE|LHD|LPD|LST|LSV|LCAC|LHA|LPH|AOR|AOE|AKR|T-?AKR|T-?AO|MCM|LCC)\b/i;
+    /\b(USS|USNS|USCGC|HMS|HMCS|HMAS|ROKS|INS|PLAN|NAVE|ARMADA|MARINA|NAVY|COAST\s*GUARD|GUARDIA|CGC|CG-|PATROL|CORVETTE|FRIGATE|DESTROYER|CRUISER|AIRCRAFT\s*CARRIER|CVN|CV-|BATTLESHIP|AMPHIB|WARSHIP|SUBMARINE|FLEET|TASK\s*FORCE|LHD|LPD|LST|LSV|LCAC|LHA|LPH|AOR|AOE|AKR|T-?AKR|T-?AO|MCM|LCC)\b/i;
   const GOV_FLAG_HINT_RE =
     /\b(NAVY|COAST\s*GUARD|GOVERNMENT|MILITARY|STATE|DEFENCE|DEFENSE|MINISTRY|ARMADA|MARINA|SECURITY)\b/i;
   const points: IntelPoint[] = [];
@@ -4714,6 +4728,7 @@ async function fetchVesselSignals(): Promise<{
         speed_knots: speed,
         inferred_military_movement: inferredMilitaryMovement,
         mmsi: String(v.id ?? "").trim() || null,
+        ais_ship_type_code: aisShipTypeCode,
       },
     });
   }
@@ -4730,7 +4745,8 @@ async function fetchVesselSignals(): Promise<{
   };
 }
 
-const US_CARRIERS = [
+/** Substrings for known aircraft carriers (US + allies/partners); excludes merchant *X carrier* names. */
+const KNOWN_AIRCRAFT_CARRIER_NAME_TOKENS = [
   "USS GERALD R FORD",
   "USS GEORGE WASHINGTON",
   "USS HARRY S TRUMAN",
@@ -4764,10 +4780,32 @@ const US_CARRIERS = [
   "REAGAN",
   "BUSH",
   "FORD",
+  "QUEEN ELIZABETH",
+  "PRINCE OF WALES",
+  "HMS QUEEN",
+  "LIAONING",
+  "SHANDONG",
+  "FUJIAN",
+  "CV-16",
+  "CV-17",
+  "CV-18",
+  "CHARLES DE GAULLE",
+  "CAVOUR",
+  "VIKRAMADITYA",
+  "VIKRANT",
+  "ADMIRAL KUZNETSOV",
+  "KUZNETSOV",
+  "IZUMO",
+  "KAGA",
+  "JS IZUMO",
+  "JS KAGA",
 ];
 
 const MIL_NAVAL_HINT_RE =
-  /\b(USS|USNS|HMS|HMAS|ROKS|INS|PLAN|DDG|CG-|FFG|FRIGATE|DESTROYER|CRUISER|CARRIER)\b/i;
+  /\b(USS|USNS|HMS|HMAS|ROKS|INS|PLAN|DDG|CG-|FFG|FRIGATE|DESTROYER|CRUISER|AIRCRAFT\s*CARRIER|CVN|CV-)\b/i;
+
+const USNI_CARRIER_HEADLINE_RE =
+  /\b(CVN-\d{2}|AIRCRAFT\s*CARRIER|CARRIER\s+STRIKE\s+GROUP|CARRIER\s+GROUP)\b/i;
 
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = (v: number) => (v * Math.PI) / 180;
@@ -4779,15 +4817,76 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function extractCarrierGroups(vesselPoints: IntelPoint[]): IntelPoint[] {
-  const carriers = vesselPoints.filter((v) => {
-    const title = (v.title || "").toUpperCase();
-    if (US_CARRIERS.some((c) => title.includes(c))) return true;
-    if (title.includes(" CARRIER")) return true;
-    return false;
-  });
+function isProbableNavalEscortTitle(title: string): boolean {
+  if (isCommercialMerchantCarrierName(title)) return false;
+  return MIL_NAVAL_HINT_RE.test(title);
+}
 
-  const escorts = vesselPoints.filter((v) => MIL_NAVAL_HINT_RE.test(v.title || ""));
+function isLikelyAircraftCarrierIntelPoint(v: IntelPoint): boolean {
+  const name = v.title || "";
+  if (isCommercialMerchantCarrierName(name)) return false;
+  const title = name.toUpperCase();
+  if (KNOWN_AIRCRAFT_CARRIER_NAME_TOKENS.some((c) => title.includes(c))) return true;
+  if (inferVesselClassFromName(name) === "Aircraft carrier") return true;
+  const code = v.metadata?.ais_ship_type_code;
+  if (
+    code === 35 &&
+    /\b(USS|USNS|HMS|HMAS|HMCS|ROKS|INS|CVN|AIRCRAFT\s*CARRIER)\b/i.test(title)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** USNI Fleet Tracker RSS points that reference a carrier / CSG — theater centroid, not ship AIS. */
+function extractUsniCarrierTheaters(vesselPoints: IntelPoint[]): IntelPoint[] {
+  const nowIso = new Date().toISOString();
+  const out: IntelPoint[] = [];
+  for (const v of vesselPoints) {
+    if (v.source !== "USNI Fleet Tracker") continue;
+    const hint = String(v.metadata?.ship_hint ?? "");
+    const combined = `${hint} ${v.title ?? ""} ${v.subtitle ?? ""}`;
+    if (isCommercialMerchantCarrierName(combined)) continue;
+    const u = combined.toUpperCase();
+    const navalShipBlob = `${hint} ${v.title ?? ""}`.trim();
+    const hasNamedNavalUnit =
+      /\b(USS|USNS|HMS|HMCS|HMAS|ROKS|INS|JS)\s+[A-Z0-9][A-Z0-9\-\s]{2,40}\b/i.test(navalShipBlob);
+    const looksCarrier =
+      USNI_CARRIER_HEADLINE_RE.test(u) ||
+      /\bCVN-\d{2}\b/.test(u) ||
+      (hasNamedNavalUnit && KNOWN_AIRCRAFT_CARRIER_NAME_TOKENS.some((c) => u.includes(c)));
+    if (!looksCarrier) continue;
+    out.push({
+      ...v,
+      id: `usni-carrier-${v.id}`,
+      layer: "carriers",
+      subtitle: "Approximate theater (USNI Fleet Tracker)",
+      source: "USNI Fleet Tracker",
+      timestamp: v.timestamp || nowIso,
+      confidence: Math.min(0.84, (v.confidence ?? 0.72) * 0.92),
+      metadata: {
+        ...v.metadata,
+        carrier_group: "USNI Fleet Tracker (theater estimate)",
+        position_note: "Theater centroid from open-source headlines, not verified ship AIS",
+      },
+    });
+  }
+  return out;
+}
+
+function mergeCarrierSignals(aisCarriers: IntelPoint[], usniCarriers: IntelPoint[]): IntelPoint[] {
+  const merged = [...aisCarriers];
+  for (const u of usniCarriers) {
+    const nearExisting = merged.some((c) => haversineKm(c.lat, c.lon, u.lat, u.lon) < 130);
+    if (!nearExisting) merged.push(u);
+  }
+  return merged.slice(0, 120);
+}
+
+function extractCarrierGroups(vesselPoints: IntelPoint[]): IntelPoint[] {
+  const carriers = vesselPoints.filter((v) => isLikelyAircraftCarrierIntelPoint(v));
+
+  const escorts = vesselPoints.filter((v) => isProbableNavalEscortTitle(v.title || ""));
   const nowIso = new Date().toISOString();
   const out: IntelPoint[] = [];
 
@@ -4825,14 +4924,14 @@ function extractCarrierGroups(vesselPoints: IntelPoint[]): IntelPoint[] {
 
   if (out.length === 0) {
     const usNavalContacts = vesselPoints.filter((v) => {
-      const title = (v.title || "").toUpperCase();
+      const title = v.title || "";
       const subtitle = (v.subtitle || "").toUpperCase();
       return (
-        MIL_NAVAL_HINT_RE.test(title) &&
+        isProbableNavalEscortTitle(title) &&
         (subtitle.includes("US") ||
           subtitle.includes("USA") ||
-          title.includes("USS") ||
-          title.includes("USNS"))
+          title.toUpperCase().includes("USS") ||
+          title.toUpperCase().includes("USNS"))
       );
     });
 
@@ -5807,7 +5906,10 @@ export async function GET(request: Request) {
       ...usniVesselsRes.points,
       ...vesselsRes.points,
     ]).slice(0, 9000);
-    const carrierGroups = extractCarrierGroups(mergedVesselPoints);
+    const carrierGroups = mergeCarrierSignals(
+      extractCarrierGroups(mergedVesselPoints),
+      extractUsniCarrierTheaters(mergedVesselPoints)
+    );
     const alignedLiveStrikes = dedupedLiveStrikes.map(pinPointToDeclaredCountry);
     const alignedConflicts = mergedConflicts.map(pinPointToDeclaredCountry);
     const alignedNews = fusedNewsPoints.map(pinPointToDeclaredCountry);
