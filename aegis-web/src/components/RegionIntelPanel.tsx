@@ -114,7 +114,7 @@ export default function RegionIntelPanel({
         <div className="intel-side-item"><span>Riots</span><strong>{conflictSubtypeCounts.riots}</strong></div>
         <div className="intel-side-item"><span>Flights</span><strong>{data.signals.militaryFlights}</strong></div>
         <div className="intel-side-item"><span>Vessels</span><strong>{data.signals.navalVessels}</strong></div>
-        <div className="intel-side-item"><span>Carriers</span><strong>{data.signals.carrierSignals}</strong></div>
+        <div className="intel-side-item"><span>Carriers (WIP)</span><strong>{data.signals.carrierSignals}</strong></div>
         <div className="intel-side-item"><span>Infrastructure</span><strong>{data.signals.infrastructure}</strong></div>
       </div>
 

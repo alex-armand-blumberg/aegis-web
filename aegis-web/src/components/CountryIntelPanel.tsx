@@ -58,7 +58,7 @@ export default function CountryIntelPanel({ data, onClose }: CountryIntelPanelPr
           <strong>{data.signals.navalVessels}</strong>
         </div>
         <div className="intel-side-item">
-          <span>Carrier signals</span>
+          <span>Carrier signals (WIP)</span>
           <strong>{data.signals.carrierSignals}</strong>
         </div>
         <div className="intel-side-item">

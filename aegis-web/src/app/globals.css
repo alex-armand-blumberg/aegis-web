@@ -2038,6 +2038,30 @@ footer {
   margin: 0 auto;
   padding: 0 0 16px;
 }
+
+@media (min-width: 901px) {
+  .map-page .map-content-wrap {
+    padding: 20px 24px 28px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background:
+      linear-gradient(180deg, rgba(4, 10, 28, 0.88) 0%, rgba(4, 12, 32, 0.94) 45%, rgba(2, 6, 18, 0.96) 100%),
+      url("/javier-miranda-AlJ9TQqeCV0-unsplash.jpg") center 40% / cover no-repeat;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+  }
+
+  .map-page .map-layer-toolbar,
+  .map-page .map-legend,
+  .map-page .map-world-gauge {
+    background: rgba(15, 23, 42, 0.72);
+    backdrop-filter: blur(8px);
+  }
+
+  .map-page .map-status-bar {
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(6px);
+  }
+}
 .map-page .map-ai-assistant {
   margin-top: 16px;
   border: 1px solid rgba(96, 165, 250, 0.22);

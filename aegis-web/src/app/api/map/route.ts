@@ -4745,8 +4745,11 @@ async function fetchVesselSignals(): Promise<{
   };
 }
 
-/** Substrings for known aircraft carriers (US + allies/partners); excludes merchant *X carrier* names. */
-const KNOWN_AIRCRAFT_CARRIER_NAME_TOKENS = [
+/**
+ * Unmistakable aircraft-carrier name fragments only (no bare president surnames / short tokens
+ * that match merchant or random AIS names).
+ */
+const STRICT_AIRCRAFT_CARRIER_SUBSTRINGS = [
   "USS GERALD R FORD",
   "USS GEORGE WASHINGTON",
   "USS HARRY S TRUMAN",
@@ -4769,20 +4772,8 @@ const KNOWN_AIRCRAFT_CARRIER_NAME_TOKENS = [
   "CVN-76",
   "CVN-77",
   "CVN-78",
-  "NIMITZ",
-  "EISENHOWER",
-  "VINSON",
-  "ROOSEVELT",
-  "LINCOLN",
-  "WASHINGTON",
-  "STENNIS",
-  "TRUMAN",
-  "REAGAN",
-  "BUSH",
-  "FORD",
-  "QUEEN ELIZABETH",
-  "PRINCE OF WALES",
-  "HMS QUEEN",
+  "HMS QUEEN ELIZABETH",
+  "HMS PRINCE OF WALES",
   "LIAONING",
   "SHANDONG",
   "FUJIAN",
@@ -4791,12 +4782,9 @@ const KNOWN_AIRCRAFT_CARRIER_NAME_TOKENS = [
   "CV-18",
   "CHARLES DE GAULLE",
   "CAVOUR",
-  "VIKRAMADITYA",
-  "VIKRANT",
+  "INS VIKRAMADITYA",
+  "INS VIKRANT",
   "ADMIRAL KUZNETSOV",
-  "KUZNETSOV",
-  "IZUMO",
-  "KAGA",
   "JS IZUMO",
   "JS KAGA",
 ];
@@ -4826,16 +4814,11 @@ function isLikelyAircraftCarrierIntelPoint(v: IntelPoint): boolean {
   const name = v.title || "";
   if (isCommercialMerchantCarrierName(name)) return false;
   const title = name.toUpperCase();
-  if (KNOWN_AIRCRAFT_CARRIER_NAME_TOKENS.some((c) => title.includes(c))) return true;
-  if (inferVesselClassFromName(name) === "Aircraft carrier") return true;
-  const code = v.metadata?.ais_ship_type_code;
-  if (
-    code === 35 &&
-    /\b(USS|USNS|HMS|HMAS|HMCS|ROKS|INS|CVN|AIRCRAFT\s*CARRIER)\b/i.test(title)
-  ) {
-    return true;
-  }
-  return false;
+  if (/\bCVN-\d{2}\b/.test(title)) return true;
+  if (/\bCV-1[6-8]\b/.test(title)) return true;
+  if (/\bAIRCRAFT\s+CARRIER\b/.test(title)) return true;
+  if (STRICT_AIRCRAFT_CARRIER_SUBSTRINGS.some((c) => title.includes(c))) return true;
+  return inferVesselClassFromName(name) === "Aircraft carrier";
 }
 
 /** USNI Fleet Tracker RSS points that reference a carrier / CSG — theater centroid, not ship AIS. */
@@ -4854,7 +4837,7 @@ function extractUsniCarrierTheaters(vesselPoints: IntelPoint[]): IntelPoint[] {
     const looksCarrier =
       USNI_CARRIER_HEADLINE_RE.test(u) ||
       /\bCVN-\d{2}\b/.test(u) ||
-      (hasNamedNavalUnit && KNOWN_AIRCRAFT_CARRIER_NAME_TOKENS.some((c) => u.includes(c)));
+      (hasNamedNavalUnit && STRICT_AIRCRAFT_CARRIER_SUBSTRINGS.some((c) => u.includes(c)));
     if (!looksCarrier) continue;
     out.push({
       ...v,
@@ -4920,51 +4903,6 @@ function extractCarrierGroups(vesselPoints: IntelPoint[]): IntelPoint[] {
         grouped_units: groupSize,
       },
     });
-  }
-
-  if (out.length === 0) {
-    const usNavalContacts = vesselPoints.filter((v) => {
-      const title = v.title || "";
-      const subtitle = (v.subtitle || "").toUpperCase();
-      return (
-        isProbableNavalEscortTitle(title) &&
-        (subtitle.includes("US") ||
-          subtitle.includes("USA") ||
-          title.toUpperCase().includes("USS") ||
-          title.toUpperCase().includes("USNS"))
-      );
-    });
-
-    const used = new Set<string>();
-    for (const anchor of usNavalContacts) {
-      if (used.has(anchor.id)) continue;
-      const group = usNavalContacts.filter(
-        (v) => haversineKm(anchor.lat, anchor.lon, v.lat, v.lon) <= 320
-      );
-      for (const g of group) used.add(g.id);
-      if (group.length < 3) continue;
-      out.push({
-        id: `carrier-group-inferred-${anchor.id}`,
-        layer: "carriers",
-        title: "US naval task group (inferred)",
-        subtitle: `${group.length} military naval contacts in formation window`,
-        lat: anchor.lat,
-        lon: anchor.lon,
-        country: anchor.country,
-        severity: group.length >= 6 ? "high" : "medium",
-        source: "AIS naval group inference",
-        timestamp: anchor.timestamp || nowIso,
-        magnitude: Math.min(24, group.length * 2),
-        confidence: 0.46,
-        metadata: {
-          vessel_class: "Naval task group (surface)",
-          carrier_group: "Inferred task group",
-          grouped_units: group.length,
-          inference_mode: "task-group-cluster",
-        },
-      });
-      if (out.length >= 25) break;
-    }
   }
 
   return out.slice(0, 120);

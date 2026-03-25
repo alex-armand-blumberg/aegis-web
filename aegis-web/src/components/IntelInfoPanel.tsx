@@ -363,7 +363,9 @@ export default function IntelInfoPanel({
             className="intel-side-image"
           />
         ) : null}
-        <div className="intel-side-kicker">{point.layer.toUpperCase()}</div>
+        <div className="intel-side-kicker">
+          {point.layer === "carriers" ? "CARRIERS · WIP" : point.layer.toUpperCase()}
+        </div>
         <h3>{point.title}</h3>
         <p>{point.subtitle || point.country || "Global signal"}</p>
       </div>

@@ -58,7 +58,7 @@ const LAYER_LABELS: Record<IntelLayerKey, string> = {
   flights: "Flights",
   vessels: "Vessels",
   troopMovements: "Troop Movements",
-  carriers: "Carriers",
+  carriers: "Carriers (WIP)",
   news: "News",
   escalationRisk: "Escalation Risk",
   hotspots: "Hotspots",
@@ -1197,7 +1197,9 @@ export default function MapPage() {
           <div className="map-status-caption">
             Requested conflict source adapters run automatically; use layer toggles above only for visualization
             filtering. <strong>Vessels</strong> are maritime AIS (ships), not aircraft—enable <strong>flights</strong>{" "}
-            for ADS-B military aircraft tracks.
+            for ADS-B military aircraft tracks. <strong>Carriers</strong> is work in progress: only hulls matching
+            known carrier names, CVN/CV- hull numbers, or explicit &quot;aircraft carrier&quot; wording are shown—
+            not general cargo or bulk carriers.
           </div>
 
           <div className="map-status-bar">
@@ -1419,10 +1421,14 @@ export default function MapPage() {
                 weeks, so live strike urgency depends on the real-time feeds.
               </li>
               <li>
+                <strong>Carriers (WIP):</strong> the carriers layer lists only contacts that match strict
+                carrier naming rules (CVN/CV-, known hull names, or explicit &quot;aircraft carrier&quot; text).
+                Many carriers do not broadcast reliable AIS; positions can be approximate theater estimates
+                from open-source fleet trackers, not verified hull coordinates.
+              </li>
+              <li>
                 Military ships and carrier groups can disable or spoof AIS/ADS-B, which can
-                hide active deployments during sensitive missions. Carrier markers can be
-                approximate—AIS fixes are sporadic, and fleet-tracker headlines often map to
-                theater centroids rather than exact hull positions.
+                hide active deployments during sensitive missions.
               </li>
               <li>
                 News-derived event geolocation uses city/country extraction and
