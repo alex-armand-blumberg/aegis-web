@@ -1639,6 +1639,8 @@ const COUNTRY_HIGHLIGHT_DENYLIST = new Set([
   // Often noisy from generic “war/conflict” news or unrelated crime coverage — not primary war theaters for this map.
   "mexico",
   "chad",
+  "united kingdom",
+  "great britain",
 ]);
 
 const HIGH_REPEAT_EXCLUDE_RE =

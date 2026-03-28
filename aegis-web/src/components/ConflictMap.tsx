@@ -74,6 +74,8 @@ const COUNTRY_HIGHLIGHT_DENYLIST = new Set([
   "democratic republic of the congo",
   "mexico",
   "chad",
+  "united kingdom",
+  "great britain",
 ]);
 const CONFLICT_LAYER_KEYS = new Set<IntelLayerKey>([
   "conflicts",

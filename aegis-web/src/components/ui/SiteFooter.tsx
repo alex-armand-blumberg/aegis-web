@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useContactModal } from "./ContactModalContext";
 
 type SiteFooterProps = {
   showCta?: boolean;
@@ -6,6 +9,8 @@ type SiteFooterProps = {
 };
 
 export function SiteFooter({ showCta = true, className = "" }: SiteFooterProps) {
+  const { openContact } = useContactModal();
+
   return (
     <footer className={`site-footer-enhanced ${className}`.trim()}>
       <div className="site-footer-grid">
@@ -14,8 +19,7 @@ export function SiteFooter({ showCta = true, className = "" }: SiteFooterProps) 
             AEG<span>I</span>S
           </div>
           <p className="mt-3 max-w-xs text-sm text-slate-500">
-            Advanced early-warning and geostrategic intelligence — escalation signals, live map, and
-            transparent methodology.
+            Advanced early-warning and geostrategic intelligence — escalation signals and live map.
           </p>
         </div>
         <div className="site-footer-col">
@@ -32,9 +36,7 @@ export function SiteFooter({ showCta = true, className = "" }: SiteFooterProps) 
           <div className="site-footer-col-title">Trust</div>
           <Link href="/limitations">Limitations & coverage</Link>
           <Link href="/#methodology">Methodology</Link>
-          <a href="https://acleddata.com" target="_blank" rel="noreferrer">
-            Data: ACLED
-          </a>
+          <Link href="/data">Data</Link>
         </div>
         <div className="site-footer-col">
           <div className="site-footer-col-title">Contact</div>
@@ -44,6 +46,9 @@ export function SiteFooter({ showCta = true, className = "" }: SiteFooterProps) 
           <a href="https://github.com/alex-armand-blumberg/aegis-web" target="_blank" rel="noreferrer">
             GitHub
           </a>
+          <button type="button" onClick={openContact} className="site-footer-contact-btn">
+            Contact
+          </button>
         </div>
       </div>
       <div className="site-footer-signature">

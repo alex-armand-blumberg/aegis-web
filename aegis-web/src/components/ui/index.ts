@@ -21,5 +21,6 @@ export { WatchlistCard, type WatchlistCardProps } from "./WatchlistCard";
 export { EventTimeline, type TimelineItem } from "./EventTimeline";
 export { ComparisonLayout } from "./ComparisonLayout";
 export { DataMatrix } from "./DataMatrix";
-export { HomePreviewModules } from "./HomePreviewModules";
 export { UiProviders } from "./UiProviders";
+export { ContactModalProvider, useContactModal } from "./ContactModalContext";
+export { AppRouteNav } from "./AppRouteNav";

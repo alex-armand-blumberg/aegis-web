@@ -1,20 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import AnimatedNumber from "@/components/AnimatedNumber";
 import AnimatedNumberOnView from "@/components/AnimatedNumberOnView";
 import AnimatedMethodWeight from "@/components/AnimatedMethodWeight";
-import ContactModal from "@/components/ContactModal";
 import BackgroundVideo from "@/components/BackgroundVideo";
 import { MarketingNav } from "@/components/ui/MarketingNav";
 import { SectionHeader } from "@/components/ui/SectionHeader";
-import { HomePreviewModules } from "@/components/ui/HomePreviewModules";
 import { CtaBand } from "@/components/ui/CtaBand";
 import { SiteFooter } from "@/components/ui/SiteFooter";
+import { useContactModal } from "@/components/ui/ContactModalContext";
 
 export default function Home() {
-  const [contactOpen, setContactOpen] = useState(false);
+  const { openContact } = useContactModal();
 
   useEffect(() => {
     const revealObs = new IntersectionObserver(
@@ -61,7 +60,7 @@ export default function Home() {
 
   return (
     <>
-      <MarketingNav onContactClick={() => setContactOpen(true)} />
+      <MarketingNav onContactClick={openContact} />
 
       <section id="hero" className="hero-with-video">
         <BackgroundVideo
@@ -112,7 +111,7 @@ export default function Home() {
 
       <div className="divider" />
 
-      <section id="features">
+      <section id="features" className="section-ambient">
         <div className="section">
           <SectionHeader
             className="reveal"
@@ -159,23 +158,7 @@ export default function Home() {
         </div>
       </section>
 
-      <div className="divider" />
-
-      <section id="product-preview">
-        <div className="section">
-          <SectionHeader
-            className="reveal"
-            eyebrow="Product surface"
-            title="The same UI language as the live app"
-            description="Preview modules mirror map, watchlist, charts, and transparency patterns used inside the demo."
-          />
-          <HomePreviewModules />
-        </div>
-      </section>
-
-      <div className="divider" />
-
-      <section id="about">
+      <section id="about" className="section-ambient">
         <div className="section">
           <div className="inner">
             <div className="about-text">
@@ -274,18 +257,17 @@ export default function Home() {
                   letterSpacing: "0.06em",
                 }}
               >
-                Source:{" "}
-                <a
-                  href="https://acleddata.com"
-                  target="_blank"
-                  rel="noreferrer"
+                See{" "}
+                <Link
+                  href="/data"
                   style={{
                     color: "rgba(255,255,255,0.38)",
                     textDecoration: "underline",
                   }}
                 >
-                  ACLED (acleddata.com)
-                </a>
+                  Data &amp; sources
+                </Link>{" "}
+                for feeds and provenance.
               </div>
             </div>
           </div>
@@ -294,7 +276,7 @@ export default function Home() {
 
       <div className="divider" />
 
-      <section id="methodology">
+      <section id="methodology" className="section-ambient">
         <div className="section">
           <div className="methodology-header">
             <SectionHeader
@@ -350,7 +332,7 @@ export default function Home() {
               <Link href="/escalation" className="btn-primary">
                 Launch Demo &rarr;
               </Link>
-              <button type="button" onClick={() => setContactOpen(true)} className="btn-secondary">
+              <button type="button" onClick={openContact} className="btn-secondary">
                 Contact
               </button>
             </>
@@ -359,8 +341,6 @@ export default function Home() {
       </section>
 
       <SiteFooter />
-
-      <ContactModal isOpen={contactOpen} onClose={() => setContactOpen(false)} />
     </>
   );
 }

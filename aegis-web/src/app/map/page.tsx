@@ -19,6 +19,7 @@ import { getOceanRegionByKey, pointInRegion } from "@/lib/regionGeometry";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
 import RegionIntelPanel from "@/components/RegionIntelPanel";
 import { AppCommandBar } from "@/components/ui/AppCommandBar";
+import { AppRouteNav } from "@/components/ui/AppRouteNav";
 import { LayerChipGroup, type LayerChipItem } from "@/components/ui/LayerChipGroup";
 import { useRegisterMapHandlers } from "@/components/ui/MapCommandsContext";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
@@ -73,6 +74,39 @@ const LAYER_LABELS: Record<IntelLayerKey, string> = {
   infrastructure: "Infrastructure",
 };
 
+function formatHotspotSignalLabels(signals: string[], max = 3): string {
+  const cleaned = signals.slice(0, max).map((s) =>
+    s
+      .replace(/\s*\(tier[1-4]\)/gi, "")
+      .replace(/\s*\(domain live\)/gi, "")
+      .replace(/\bdomain live\b/gi, "")
+      .replace(/\s*\(fallback\)/gi, "")
+      .replace(/\bfallback\b/gi, "")
+      .replace(/\s*GDELT fallback\b/gi, "GDELT")
+      .trim()
+      .replace(/\s{2,}/g, " ")
+  );
+  return cleaned.join(", ");
+}
+
+function spreadHotspotDisplayScores<
+  T extends { rawScore: number; country: string; severity: string; trend: string; latestEventAt: string; reason: string },
+>(entries: T[], minDisplay = 52, maxDisplay = 100): Array<T & { score100: number }> {
+  if (entries.length === 0) return [];
+  const raws = entries.map((e) => e.rawScore);
+  const minR = Math.min(...raws);
+  const maxR = Math.max(...raws);
+  if (maxR - minR < 1e-9) {
+    return entries.map((e, i) => ({
+      ...e,
+      score100: Math.max(minDisplay, Math.round(maxDisplay - i * ((maxDisplay - minDisplay) / Math.max(entries.length - 1, 1)))),
+    }));
+  }
+  return entries.map((e) => ({
+    ...e,
+    score100: Math.round(minDisplay + ((maxDisplay - minDisplay) * (e.rawScore - minR)) / (maxR - minR)),
+  }));
+}
 
 function buildInitialLayerState(): Record<IntelLayerKey, boolean> {
   return {
@@ -920,7 +954,7 @@ export default function MapPage() {
       string,
       {
         country: string;
-        score100: number;
+        rawScore: number;
         severity: "low" | "medium" | "high" | "critical";
         trend: "rising" | "stable" | "declining";
         latestEventAt: string;
@@ -929,7 +963,7 @@ export default function MapPage() {
     >();
     const upsert = (entry: {
       country: string;
-      score100: number;
+      rawScore: number;
       severity: "low" | "medium" | "high" | "critical";
       trend: "rising" | "stable" | "declining";
       latestEventAt: string;
@@ -941,9 +975,10 @@ export default function MapPage() {
         merged.set(key, entry);
         return;
       }
+      const useEntryReason = entry.rawScore >= prev.rawScore;
       merged.set(key, {
         ...prev,
-        score100: Math.max(prev.score100, entry.score100),
+        rawScore: Math.max(prev.rawScore, entry.rawScore),
         severity:
           entry.severity === "critical" || prev.severity === "critical"
             ? "critical"
@@ -954,52 +989,54 @@ export default function MapPage() {
                 : "low",
         trend: prev.trend === "rising" || entry.trend === "rising" ? "rising" : prev.trend,
         latestEventAt: prev.latestEventAt > entry.latestEventAt ? prev.latestEventAt : entry.latestEventAt,
-        reason: prev.reason,
+        reason: useEntryReason ? entry.reason : prev.reason,
       });
     };
 
     for (const h of escalationRiskCountries) {
+      const rawScore = h.riskScore * 5.9;
       upsert({
         country: formatCountryDisplayName(h.country),
-        score100: Math.max(0, Math.min(100, Math.round(h.riskScore * 5.9))),
+        rawScore,
         severity: h.severity,
         trend: h.trend,
         latestEventAt: h.latestEventAt,
         reason:
           h.signals.length > 0
-            ? `Signals: ${h.signals.slice(0, 3).join(", ")}`
+            ? `Signals: ${formatHotspotSignalLabels(h.signals, 3)}`
             : "Signals: rising multi-source conflict indicators",
       });
     }
     for (const c of activeConflictCountries) {
+      const rawScore = c.score * 6.8;
       upsert({
         country: formatCountryDisplayName(c.country),
-        score100: Math.max(0, Math.min(100, Math.round(c.score * 6.8))),
+        rawScore,
         severity: c.severity,
         trend: "rising",
         latestEventAt: c.latestEventAt,
         reason:
           c.sources.length > 0
-            ? `Signals: ${c.sources.slice(0, 3).join(", ")}`
+            ? `Signals: ${formatHotspotSignalLabels(c.sources, 3)}`
             : "Signals: sustained war-like kinetic reporting",
       });
     }
 
-    const sorted = Array.from(merged.values()).sort((a, b) => b.score100 - a.score100);
+    const sorted = Array.from(merged.values()).sort((a, b) => b.rawScore - a.rawScore);
     const prioritized = sorted.filter((x) => priorityTheaters.has(canonicalCountryMatchKey(x.country)));
     const regular = sorted.filter((x) => !priorityTheaters.has(canonicalCountryMatchKey(x.country)));
 
     const manual = [
       {
         country: "South China Sea",
-        score100: 50,
+        rawScore: 42,
         severity: "medium" as const,
         trend: "rising" as const,
         reason: "Baseline tension; maritime standoffs and naval patrol pressure.",
       },
       {
         country: "Taiwan",
-        score100: 50,
+        rawScore: 41,
         severity: "medium" as const,
         trend: "rising" as const,
         reason: "Baseline tension; cross-strait military pressure narratives.",
@@ -1009,12 +1046,12 @@ export default function MapPage() {
       latestEventAt: new Date().toISOString(),
     }));
 
-    const top = [...prioritized, ...regular].slice(0, 10);
+    const pool = [...prioritized, ...regular].slice(0, 10);
     for (const m of manual) {
-      if (top.length >= 10) break;
-      if (!top.some((x) => canonicalCountryMatchKey(x.country) === canonicalCountryMatchKey(m.country))) top.push(m);
+      if (pool.length >= 10) break;
+      if (!pool.some((x) => canonicalCountryMatchKey(x.country) === canonicalCountryMatchKey(m.country))) pool.push(m);
     }
-    return top;
+    return spreadHotspotDisplayScores(pool);
   }, [activeConflictCountries, escalationRiskCountries]);
 
   const relayDigestHealth = useMemo(
@@ -1156,6 +1193,7 @@ export default function MapPage() {
     <div className="map-page min-h-screen text-[#e2e8f0]">
       <main className="relative z-10 map-main-compact">
         <div className="map-content-wrap">
+          <AppRouteNav />
           <AppCommandBar
             title="Interactive Map"
             syncLabel={

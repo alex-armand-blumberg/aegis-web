@@ -6,6 +6,7 @@ import { useEscalationPlot } from "@/contexts/EscalationPlotContext";
 import BackgroundVideo from "@/components/BackgroundVideo";
 import AnimatedMethodWeight from "@/components/AnimatedMethodWeight";
 import { AppCommandBar } from "@/components/ui/AppCommandBar";
+import { AppRouteNav } from "@/components/ui/AppRouteNav";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { ChartFrame } from "@/components/ui/ChartFrame";
 import { TransparencyModule } from "@/components/ui/TransparencyModule";
@@ -639,6 +640,7 @@ User question: ${q}`;
       />
       <main className="relative z-10 pt-4">
         <div className="section !pb-8 !pt-20">
+          <AppRouteNav />
           <AppCommandBar
             title="Escalation Index"
             syncLabel={syncLabel ?? "Run generate to load series"}
@@ -664,7 +666,16 @@ User question: ${q}`;
               className="reveal"
               eyebrow="Demo"
               title="Escalation Index"
-              description="Choose a country and date range. Data: ACLED (2018 to one year ago with research-tier access)."
+              description={
+                <>
+                  Choose a country and date range. Historical series span 2018 through roughly one year before today
+                  (research-tier aggregates). See{" "}
+                  <Link href="/data" className="text-slate-400 underline hover:text-white">
+                    Data &amp; sources
+                  </Link>{" "}
+                  for coverage detail.
+                </>
+              }
             />
           </div>
         </section>
@@ -677,7 +688,7 @@ User question: ${q}`;
               className="reveal"
               eyebrow="Parameters"
               title="Choose country & date range"
-              description="Depending on the date range, computing the index may take several seconds to minutes while hundreds of thousands of ACLED-recorded events are loaded and processed."
+              description="Depending on the date range, computing the index may take several seconds to minutes while large monthly event aggregates are loaded and processed."
               showDivider
             />
             <div className="controls-grid reveal">
@@ -857,8 +868,8 @@ User question: ${q}`;
                       className="mt-4"
                       items={[
                         <>
-                          ACLED researcher tier: monthly country aggregates through the selected end date (typically
-                          one year before today).
+                          Monthly country aggregates through the selected end date (typically one year before today),
+                          from researcher-tier historical conflict data.
                         </>,
                         <>Forecast band reflects a simple trend projection from the last six smoothed points — not a
                           calibrated prediction model.</>,
@@ -917,7 +928,7 @@ User question: ${q}`;
                     <Line
                       type="monotone"
                       dataKey="escalation_index"
-                      name="Raw ACLED Index"
+                      name="Raw index (monthly)"
                       stroke="#60a5fa"
                       strokeOpacity={0.35}
                       strokeWidth={1}

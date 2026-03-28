@@ -28,7 +28,7 @@ const oswald = Oswald({
 export const metadata: Metadata = {
   title: "AEGIS — Advanced Early-Warning & Geostrategic Intelligence System",
   description:
-    "AEGIS is an advanced early-warning and geostrategic intelligence system that surfaces conflict escalation risk using ACLED data and AI.",
+    "AEGIS is an advanced early-warning and geostrategic intelligence system that surfaces conflict escalation risk from multi-source data and AI-assisted analysis.",
   icons: {
     icon: "/icon.png",
   },

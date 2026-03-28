@@ -56,8 +56,10 @@ export default function LimitationsPage() {
               className="reveal mt-6"
               title="At a glance"
               items={[
-                <>Escalation index uses ACLED researcher-tier monthly aggregates through one year before today.</>,
-                <>Interactive map layers can lag ACLED publication by roughly one to two months at this tier.</>,
+                <>
+                  Escalation index uses researcher-tier monthly aggregates through one year before today; the
+                  interactive map can lag publication by about one to two months at this access tier.
+                </>,
                 <>AI summaries are assistive — they do not replace primary sources or professional judgment.</>,
               ]}
             />
