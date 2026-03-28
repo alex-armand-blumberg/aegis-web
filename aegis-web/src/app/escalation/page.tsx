@@ -5,6 +5,13 @@ import Link from "next/link";
 import { useEscalationPlot } from "@/contexts/EscalationPlotContext";
 import BackgroundVideo from "@/components/BackgroundVideo";
 import AnimatedMethodWeight from "@/components/AnimatedMethodWeight";
+import { AppCommandBar } from "@/components/ui/AppCommandBar";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { ChartFrame } from "@/components/ui/ChartFrame";
+import { TransparencyModule } from "@/components/ui/TransparencyModule";
+import { ComparisonLayout } from "@/components/ui/ComparisonLayout";
+import { SiteFooter } from "@/components/ui/SiteFooter";
+import { StatusChip } from "@/components/ui/StatusChip";
 
 function DiamondDot(props: { cx?: number; cy?: number; payload?: { preEscalation?: number | null } }) {
   const { cx = 0, cy = 0, payload } = props;
@@ -158,8 +165,15 @@ export default function EscalationPage() {
   const [sentinelAnswer, setSentinelAnswer] = useState<string | null>(null);
   const [sentinelLoading, setSentinelLoading] = useState(false);
   const [sentinelError, setSentinelError] = useState<string | null>(null);
+  const [syncLabel, setSyncLabel] = useState<string | undefined>();
   const monthDropdownRef = useRef<HTMLDivElement>(null);
   const countryInputRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search).get("country");
+    if (q) setCountry(decodeURIComponent(q));
+  }, []);
 
   useEffect(() => {
     if (savedPlot) {
@@ -301,6 +315,17 @@ export default function EscalationPage() {
               smooth,
               showComponents,
             });
+            setSyncLabel(
+              `Series loaded ${new Date().toLocaleString("en-US", {
+                timeZone: "America/New_York",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: true,
+              })} EST`
+            );
             setProgress(100);
             setLoading(false);
             setShowCompleted(true);
@@ -340,6 +365,17 @@ export default function EscalationPage() {
             setSentinelAnswer(null);
             setSentinelError(null);
             savePlot({ data: json, country: c, startDate, endDate, threshold, smooth, showComponents });
+            setSyncLabel(
+              `Series loaded ${new Date().toLocaleString("en-US", {
+                timeZone: "America/New_York",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: true,
+              })} EST`
+            );
             setProgress(100);
             setLoading(false);
             setShowCompleted(true);
@@ -601,24 +637,35 @@ User question: ${q}`;
         overlayClassName="escalation-page-video-overlay"
         videoClassName="escalation-page-video"
       />
-      <nav>
-        <Link href="/" className="nav-logo">
-          AEG<span>I</span>S<sub className="logo-hq">hq</sub>
-        </Link>
-        <div className="nav-links">
-          <Link href="/">← Back to Home</Link>
-          <Link href="/limitations">Limitations</Link>
+      <main className="relative z-10 pt-4">
+        <div className="section !pb-8 !pt-20">
+          <AppCommandBar
+            title="Escalation Index"
+            syncLabel={syncLabel ?? "Run generate to load series"}
+            onRefresh={() => {
+              if (country.trim()) void loadData();
+            }}
+            onHelp={() =>
+              document.getElementById("escalation-help")?.scrollIntoView({ behavior: "smooth", block: "start" })
+            }
+            trailingSlot={
+              data ? (
+                <StatusChip variant="live">Live</StatusChip>
+              ) : (
+                <StatusChip variant="limited">Awaiting data</StatusChip>
+              )
+            }
+          />
         </div>
-      </nav>
 
-      <main className="relative z-10 pt-24">
         <section>
           <div className="section">
-            <p className="section-tag reveal">Demo</p>
-            <h2 className="reveal">Escalation Index</h2>
-            <p className="section-body reveal escalation-intro-nowrap">
-              Choose a country and date range. Data: ACLED (2018 to one year ago with research-tier access).
-            </p>
+            <SectionHeader
+              className="reveal"
+              eyebrow="Demo"
+              title="Escalation Index"
+              description="Choose a country and date range. Data: ACLED (2018 to one year ago with research-tier access)."
+            />
           </div>
         </section>
 
@@ -626,11 +673,13 @@ User question: ${q}`;
 
         <section>
           <div className="section">
-            <p className="section-tag reveal">Parameters</p>
-            <h2 className="reveal">Choose country & date range</h2>
-            <p className="escalation-control-note reveal">
-              Depending on the date range, computing the index may take several seconds to minutes while hundreds of thousands of ACLED-recorded events are loaded and processed.
-            </p>
+            <SectionHeader
+              className="reveal"
+              eyebrow="Parameters"
+              title="Choose country & date range"
+              description="Depending on the date range, computing the index may take several seconds to minutes while hundreds of thousands of ACLED-recorded events are loaded and processed."
+              showDivider
+            />
             <div className="controls-grid reveal">
               <div className="control-field" ref={countryInputRef}>
                 <label className="control-field-label" htmlFor="escalation-country-input">
@@ -788,15 +837,36 @@ User question: ${q}`;
         {chartData.length > 0 && data && (
           <>
             <section id="escalation-chart">
-              <div className="section escalation-chart-card reveal">
-                <p className="section-tag">Index</p>
-                <h2>AEGIS Escalation Index — {country.trim()}</h2>
-                {data?.dataSource && (
-                  <p className="escalation-meta" style={{ marginBottom: 16 }}>
-                    Data source: {data.dataSource}
-                    {data.series.length > 0 && <> · {data.series.length} country-month rows</>}
-                  </p>
-                )}
+              <div className="section reveal">
+                <ChartFrame
+                  title={
+                    <>
+                      AEGIS Escalation Index — <span className="text-white">{country.trim()}</span>
+                    </>
+                  }
+                  subtitle={
+                    data?.dataSource ? (
+                      <>
+                        Data source: {data.dataSource}
+                        {data.series.length > 0 ? ` · ${data.series.length} country-month rows` : ""}
+                      </>
+                    ) : undefined
+                  }
+                  footer={
+                    <TransparencyModule
+                      className="mt-4"
+                      items={[
+                        <>
+                          ACLED researcher tier: monthly country aggregates through the selected end date (typically
+                          one year before today).
+                        </>,
+                        <>Forecast band reflects a simple trend projection from the last six smoothed points — not a
+                          calibrated prediction model.</>,
+                        <>Alert threshold and smoothing window materially change which months appear flagged.</>,
+                      ]}
+                    />
+                  }
+                >
               <div className="h-[480px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
@@ -920,6 +990,39 @@ User question: ${q}`;
               >
                 View AI Analysis
               </button>
+              {data.series.length >= 2 ? (
+                <ComparisonLayout
+                  className="mt-8"
+                  title="Latest two months in this window"
+                  leftTitle={formatMonthLabel(data.series[data.series.length - 2]!.event_month.slice(0, 7))}
+                  rightTitle={formatMonthLabel(data.series[data.series.length - 1]!.event_month.slice(0, 7))}
+                  left={
+                    <div className="space-y-2 text-sm text-slate-300">
+                      <p>
+                        Smoothed index:{" "}
+                        <strong className="text-white">
+                          {data.series[data.series.length - 2]!.index_smoothed.toFixed(1)}
+                        </strong>
+                      </p>
+                      <p>Events: {data.series[data.series.length - 2]!.total_events.toLocaleString()}</p>
+                      <p>Fatalities: {data.series[data.series.length - 2]!.fatalities.toLocaleString()}</p>
+                    </div>
+                  }
+                  right={
+                    <div className="space-y-2 text-sm text-slate-300">
+                      <p>
+                        Smoothed index:{" "}
+                        <strong className="text-white">
+                          {data.series[data.series.length - 1]!.index_smoothed.toFixed(1)}
+                        </strong>
+                      </p>
+                      <p>Events: {data.series[data.series.length - 1]!.total_events.toLocaleString()}</p>
+                      <p>Fatalities: {data.series[data.series.length - 1]!.fatalities.toLocaleString()}</p>
+                    </div>
+                  }
+                />
+              ) : null}
+                </ChartFrame>
               </div>
             </section>
 
@@ -927,9 +1030,11 @@ User question: ${q}`;
               <>
                 <div className="divider" />
                 <section>
-                  <div className="section escalation-chart-card reveal">
-                    <p className="section-tag">Components</p>
-                    <h2>Index component breakdown (weighted contribution per month)</h2>
+                  <div className="section reveal">
+                    <ChartFrame
+                      title="Index component breakdown"
+                      subtitle="Weighted contribution per month (methodology weights)"
+                    >
                 <div className="h-[280px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
@@ -955,16 +1060,20 @@ User question: ${q}`;
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+                    </ChartFrame>
                   </div>
                 </section>
               </>
             )}
 
             <div className="divider" />
-            <section>
+            <section id="escalation-help">
               <div className="section escalation-how-to-read reveal">
-                <p className="section-tag">Legend</p>
-                <h2>How to read the signals</h2>
+                <SectionHeader
+                  eyebrow="Legend"
+                  title="How to read the signals"
+                  showDivider
+                />
                 <ul className="escalation-signals-list">
                   <li><span className="font-semibold text-[#60a5fa]">Blue line</span> — smoothed escalation index (0–100) combining six conflict indicators.</li>
                   <li><span className="font-semibold text-[#ef4444]">Red dots</span> — months where the index exceeded your alert threshold.</li>
@@ -1243,33 +1352,7 @@ User question: ${q}`;
         )}
       </main>
 
-      <footer>
-        <div className="footer-logo">AEGIS</div>
-        <div className="footer-links">
-          <Link href="/escalation">App</Link>
-          <Link href="/limitations">Limitations</Link>
-          <a
-            href="https://www.linkedin.com/in/alexanderbab/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            LinkedIn
-          </a>
-          <a
-            href="https://github.com/alex-armand-blumberg/aegis-web"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub
-          </a>
-          <a href="https://acleddata.com" target="_blank" rel="noreferrer">
-            Data: ACLED
-          </a>
-        </div>
-        <div className="footer-copy">
-          &copy; 2026 Alexander Armand-Blumberg &middot; AEGIS
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { IntelPoint, ProviderHealth } from "@/lib/intel/types";
+import { StatusChip } from "@/components/ui/StatusChip";
 
 type IntelInfoPanelProps = {
   point: IntelPoint;
@@ -10,19 +11,6 @@ type IntelInfoPanelProps = {
   aiLoading?: boolean;
   onClose: () => void;
 };
-
-function severityColor(severity: IntelPoint["severity"]): string {
-  switch (severity) {
-    case "critical":
-      return "#ef4444";
-    case "high":
-      return "#f97316";
-    case "medium":
-      return "#f59e0b";
-    default:
-      return "#60a5fa";
-  }
-}
 
 /** Human-readable labels for common metadata keys (API still uses snake_case). */
 const METADATA_LABELS: Record<string, string> = {
@@ -347,8 +335,17 @@ export default function IntelInfoPanel({
     "branch_or_unit",
   ]);
 
+  const severityVariant =
+    point.severity === "critical"
+      ? "critical"
+      : point.severity === "high"
+        ? "high"
+        : point.severity === "medium"
+          ? "medium"
+          : "low";
+
   return (
-    <aside className="intel-side-panel">
+    <aside className="intel-side-panel intel-panel-responsive">
       <button type="button" className="intel-side-close" onClick={onClose}>
         x
       </button>
@@ -389,8 +386,8 @@ export default function IntelInfoPanel({
         ) : null}
         <div className="intel-side-item">
           <span>Severity</span>
-          <strong style={{ color: severityColor(point.severity) }}>
-            {point.severity.toUpperCase()}
+          <strong>
+            <StatusChip variant={severityVariant}>{point.severity}</StatusChip>
           </strong>
         </div>
         <div className="intel-side-item">

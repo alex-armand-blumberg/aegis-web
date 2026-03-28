@@ -7,6 +7,11 @@ import AnimatedNumberOnView from "@/components/AnimatedNumberOnView";
 import AnimatedMethodWeight from "@/components/AnimatedMethodWeight";
 import ContactModal from "@/components/ContactModal";
 import BackgroundVideo from "@/components/BackgroundVideo";
+import { MarketingNav } from "@/components/ui/MarketingNav";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { HomePreviewModules } from "@/components/ui/HomePreviewModules";
+import { CtaBand } from "@/components/ui/CtaBand";
+import { SiteFooter } from "@/components/ui/SiteFooter";
 
 export default function Home() {
   const [contactOpen, setContactOpen] = useState(false);
@@ -56,26 +61,7 @@ export default function Home() {
 
   return (
     <>
-      <nav>
-        <Link href="/" className="nav-logo">
-          AEG<span>I</span>S<sub className="logo-hq">hq</sub>
-        </Link>
-        <div className="nav-links">
-          <a href="#features">Features</a>
-          <a href="#about">About</a>
-          <a href="#methodology">Methodology</a>
-          <button
-            type="button"
-            onClick={() => setContactOpen(true)}
-            className="nav-link-btn"
-          >
-            Contact
-          </button>
-          <Link href="/escalation" className="nav-cta">
-            Launch Demo
-          </Link>
-        </div>
-      </nav>
+      <MarketingNav onContactClick={() => setContactOpen(true)} />
 
       <section id="hero" className="hero-with-video">
         <BackgroundVideo
@@ -128,13 +114,12 @@ export default function Home() {
 
       <section id="features">
         <div className="section">
-          <p className="section-tag reveal">Capabilities</p>
-          <h2 className="reveal">What AEGIS Does</h2>
-          <p className="section-body reveal">
-            A global risk intelligence platform that tracks conflict escalation
-            patterns, surfaces early-warning signals, and delivers AI-powered
-            geopolitical analysis — before situations deteriorate.
-          </p>
+          <SectionHeader
+            className="reveal"
+            eyebrow="Capabilities"
+            title="What AEGIS Does"
+            description="A global risk intelligence platform that tracks conflict escalation patterns, surfaces early-warning signals, and delivers AI-powered geopolitical analysis — before situations deteriorate."
+          />
           <div className="features-grid reveal">
             <Link href="/escalation" className="feature-card" style={{ "--accent": "#ef4444" } as React.CSSProperties}>
               <div className="feature-icon">📊</div>
@@ -176,16 +161,35 @@ export default function Home() {
 
       <div className="divider" />
 
+      <section id="product-preview">
+        <div className="section">
+          <SectionHeader
+            className="reveal"
+            eyebrow="Product surface"
+            title="The same UI language as the live app"
+            description="Preview modules mirror map, watchlist, charts, and transparency patterns used inside the demo."
+          />
+          <HomePreviewModules />
+        </div>
+      </section>
+
+      <div className="divider" />
+
       <section id="about">
         <div className="section">
           <div className="inner">
             <div className="about-text">
-              <p className="section-tag reveal">Background</p>
-              <h2 className="reveal">
-                Built by a Student.
-                <br />
-                Serious by Design.
-              </h2>
+              <SectionHeader
+                className="reveal"
+                eyebrow="Background"
+                title={
+                  <>
+                    Built by a Student.
+                    <br />
+                    Serious by Design.
+                  </>
+                }
+              />
               <p className="section-body reveal">
                 AEGIS was built independently by Alexander Armand-Blumberg, a
                 high school student with a lifelong passion for defense policy,
@@ -292,20 +296,23 @@ export default function Home() {
 
       <section id="methodology">
         <div className="section">
-          <p className="section-tag reveal">How It Works</p>
           <div className="methodology-header">
-            <h2 className="reveal">The Index Methodology</h2>
+            <SectionHeader
+              className="reveal flex-1"
+              eyebrow="How It Works"
+              title="The Index Methodology"
+              description={
+                <>
+                  Six components, each normalized globally by percentile rank, combined into a single weighted score.
+                  The design separates <em>intensity</em> (how bad is it now?) from <em>acceleration</em> (is it getting
+                  worse?) — because both matter for different reasons.
+                </>
+              }
+            />
             <div className="methodology-logo reveal">
               <img src="/aegis-logo.png" alt="AEGIS" />
             </div>
           </div>
-          <p className="section-body reveal">
-              Six components, each normalized globally by percentile rank,
-              combined into a single weighted score. The design separates{" "}
-              <em>intensity</em> (how bad is it now?) from{" "}
-              <em>acceleration</em> (is it getting worse?) — because both matter
-              for different reasons.
-            </p>
             <div className="method-grid">
             {[
               { w: 30, name: "Raw Conflict Intensity", desc: "Battles + explosions in absolute terms. Ensures sustained wars like Ukraine score high even with flat month-over-month change.", bar: "30%" },
@@ -333,69 +340,25 @@ export default function Home() {
       <div className="divider" />
 
       <section id="cta">
-        <div className="section" style={{ textAlign: "center" }}>
-          <p
-            className="section-tag reveal"
-            style={{ display: "flex", justifyContent: "center" }}
-          >
-            Get Started
-          </p>
-          <h2 className="reveal">See It Before It Happens.</h2>
-          <p className="section-body reveal">
-            AEGIS is live and currently free to use. Track any country&apos;s escalation
-            index, explore the global conflict map, and generate AI-powered
-            intelligence briefings in seconds.
-          </p>
-          <div
-            className="reveal"
-            style={{
-              display: "flex",
-              gap: "16px",
-              flexWrap: "wrap",
-              justifyContent: "center",
-              marginTop: 0,
-            }}
-          >
-            <Link href="/escalation" className="btn-primary">
-              Launch Demo &rarr;
-            </Link>
-            <button
-              type="button"
-              onClick={() => setContactOpen(true)}
-              className="btn-secondary"
-            >
-              Contact
-            </button>
-          </div>
-        </div>
+        <CtaBand
+          className="reveal"
+          eyebrow="Get Started"
+          title="See It Before It Happens."
+          description="AEGIS is live and currently free to use. Track any country&apos;s escalation index, explore the global conflict map, and generate AI-powered intelligence briefings in seconds."
+          actions={
+            <>
+              <Link href="/escalation" className="btn-primary">
+                Launch Demo &rarr;
+              </Link>
+              <button type="button" onClick={() => setContactOpen(true)} className="btn-secondary">
+                Contact
+              </button>
+            </>
+          }
+        />
       </section>
 
-      <footer>
-        <div className="footer-logo">AEGIS</div>
-        <div className="footer-links">
-          <Link href="/escalation">App</Link>
-          <a
-            href="https://www.linkedin.com/in/alexanderbab/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            LinkedIn
-          </a>
-          <a
-            href="https://github.com/alex-armand-blumberg/aegis-web"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub
-          </a>
-          <a href="https://acleddata.com" target="_blank" rel="noreferrer">
-            Data: ACLED
-          </a>
-        </div>
-        <div className="footer-copy">
-          &copy; 2026 Alexander Armand-Blumberg &middot; AEGIS
-        </div>
-      </footer>
+      <SiteFooter />
 
       <ContactModal isOpen={contactOpen} onClose={() => setContactOpen(false)} />
     </>

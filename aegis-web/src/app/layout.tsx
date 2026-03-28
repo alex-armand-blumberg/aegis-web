@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bebas_Neue, Barlow, Barlow_Condensed, Oswald } from "next/font/google";
 import { EscalationPlotProvider } from "@/contexts/EscalationPlotContext";
+import { UiProviders } from "@/components/ui/UiProviders";
 import "./globals.css";
 
 const bebasNeue = Bebas_Neue({
@@ -63,7 +64,9 @@ export default function RootLayout({
           <span>Latest version</span>
           <strong>{deploymentDisplay} EST</strong>
         </div>
-        <EscalationPlotProvider>{children}</EscalationPlotProvider>
+        <EscalationPlotProvider>
+          <UiProviders>{children}</UiProviders>
+        </EscalationPlotProvider>
       </body>
     </html>
   );

@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import BackgroundVideo from "@/components/BackgroundVideo";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { SiteFooter } from "@/components/ui/SiteFooter";
+import { TransparencyModule } from "@/components/ui/TransparencyModule";
 
 export default function LimitationsPage() {
   useEffect(() => {
@@ -43,8 +46,21 @@ export default function LimitationsPage() {
       <main className="limitations-page-main relative z-10 pt-24">
         <section>
           <div className="section">
-            <p className="section-tag reveal">About</p>
-            <h1 className="reveal limitations-page-title">Limitations</h1>
+            <SectionHeader
+              className="reveal limitations-page-title-wrap"
+              eyebrow="About"
+              title="Limitations"
+              description="AEGIS is transparent about data tier, lag, and model boundaries. This page tracks what is live today and what is planned next."
+            />
+            <TransparencyModule
+              className="reveal mt-6"
+              title="At a glance"
+              items={[
+                <>Escalation index uses ACLED researcher-tier monthly aggregates through one year before today.</>,
+                <>Interactive map layers can lag ACLED publication by roughly one to two months at this tier.</>,
+                <>AI summaries are assistive — they do not replace primary sources or professional judgment.</>,
+              ]}
+            />
           </div>
         </section>
 
@@ -76,18 +92,7 @@ export default function LimitationsPage() {
         </section>
       </main>
 
-      <footer>
-        <div className="footer-logo">AEGIS</div>
-        <div className="footer-links">
-          <Link href="/escalation">App</Link>
-          <a href="https://www.linkedin.com/in/alexanderbab/" target="_blank" rel="noreferrer">LinkedIn</a>
-          <a href="https://github.com/alex-armand-blumberg/aegis-web" target="_blank" rel="noreferrer">GitHub</a>
-          <a href="https://acleddata.com" target="_blank" rel="noreferrer">Data: ACLED</a>
-        </div>
-        <div className="footer-copy">
-          &copy; 2026 Alexander Armand-Blumberg &middot; AEGIS
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

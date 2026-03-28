@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { RegionIntelResponse, RegionMarketQuote } from "@/lib/intel/types";
 import GaugeChart from "@/components/GaugeChart";
+import { IntelPanel } from "@/components/ui/IntelPanel";
+import { StatusChip } from "@/components/ui/StatusChip";
 
 type RegionIntelPanelProps = {
   data: RegionIntelResponse;
@@ -50,12 +52,8 @@ export default function RegionIntelPanel({
     { battles: 0, explosions: 0, civilians: 0, strategic: 0, protests: 0, riots: 0 }
   );
 
-  useEffect(() => {
-    setImageBroken(false);
-  }, [imageUrl]);
-
   return (
-    <aside className="intel-side-panel">
+    <aside className="intel-side-panel intel-panel-responsive">
       <button type="button" className="intel-side-close" onClick={onClose}>
         x
       </button>
@@ -63,7 +61,7 @@ export default function RegionIntelPanel({
       {imageLoading && !imageUrl ? (
         <div className="intel-side-image-loading" />
       ) : imageUrl && !imageBroken ? (
-        <div className="intel-side-image-wrap">
+        <div key={imageUrl} className="intel-side-image-wrap">
           <img
             src={imageUrl}
             alt=""
@@ -73,37 +71,23 @@ export default function RegionIntelPanel({
         </div>
       ) : null}
 
-      <div className="intel-side-header">
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "4px 8px",
-            marginBottom: 8,
-            borderRadius: 999,
-            border: "1px solid rgba(255, 159, 67, 0.45)",
-            background: "rgba(255, 159, 67, 0.14)",
-            fontSize: 11,
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-          }}
-        >
-          Beta - Work in Progress
-        </div>
-        <div className="intel-side-kicker">REGION INTELLIGENCE</div>
-        <h3>{data.selection.name}</h3>
-        <p>{formatRangeLabel(data.range)} operational picture</p>
-      </div>
-
-      <div className="intel-side-metadata">
-        <div className="intel-side-subtitle">Risk gauges</div>
-        <GaugeChart value={data.escalationIndex} label="Escalation Index" />
-        <GaugeChart value={data.conflictIndex} label="Conflict Index" />
-      </div>
-
-      <div className="intel-side-metadata">
-        <div className="intel-side-subtitle">Active signals</div>
+      <IntelPanel
+        titleRow={
+          <div className="w-full">
+            <StatusChip variant="experimental">Beta</StatusChip>
+            <div className="intel-side-kicker mt-2">REGION INTELLIGENCE</div>
+            <h3>{data.selection.name}</h3>
+          </div>
+        }
+        summary={<p>{formatRangeLabel(data.range)} operational picture</p>}
+        metrics={
+          <>
+            <GaugeChart value={data.escalationIndex} label="Escalation Index" />
+            <GaugeChart value={data.conflictIndex} label="Conflict Index" />
+          </>
+        }
+        signals={
+          <>
         <div className="intel-side-item"><span>Live strikes</span><strong>{data.signals.liveStrikes}</strong></div>
         <div className="intel-side-item"><span>Conflicts</span><strong>{data.signals.conflicts}</strong></div>
         <div className="intel-side-item"><span>Battles</span><strong>{conflictSubtypeCounts.battles}</strong></div>
@@ -116,8 +100,10 @@ export default function RegionIntelPanel({
         <div className="intel-side-item"><span>Vessels</span><strong>{data.signals.navalVessels}</strong></div>
         <div className="intel-side-item"><span>Carriers (WIP)</span><strong>{data.signals.carrierSignals}</strong></div>
         <div className="intel-side-item"><span>Infrastructure</span><strong>{data.signals.infrastructure}</strong></div>
-      </div>
-
+          </>
+        }
+        detail={
+          <>
       <div className="intel-side-metadata">
         <div className="intel-side-subtitle">AI geopolitical summary</div>
         {aiLoading ? (
@@ -189,6 +175,9 @@ export default function RegionIntelPanel({
           </div>
         ))}
       </div>
+          </>
+        }
+      />
     </aside>
   );
 }

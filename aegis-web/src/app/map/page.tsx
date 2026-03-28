@@ -18,6 +18,14 @@ import { getCountryBounds } from "@/lib/countryBounds";
 import { getOceanRegionByKey, pointInRegion } from "@/lib/regionGeometry";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
 import RegionIntelPanel from "@/components/RegionIntelPanel";
+import { AppCommandBar } from "@/components/ui/AppCommandBar";
+import { LayerChipGroup, type LayerChipItem } from "@/components/ui/LayerChipGroup";
+import { useRegisterMapHandlers } from "@/components/ui/MapCommandsContext";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { SiteFooter } from "@/components/ui/SiteFooter";
+import { StatusChip } from "@/components/ui/StatusChip";
+import { TransparencyModule } from "@/components/ui/TransparencyModule";
+import { WatchlistCard } from "@/components/ui/WatchlistCard";
 
 const ConflictMap = dynamic(() => import("@/components/ConflictMap"), {
   ssr: false,
@@ -135,6 +143,15 @@ function formatRangeLabel(range: string): string {
   if (range === "7d") return "7 days";
   if (range === "30d") return "30 days";
   return range;
+}
+
+/** Curated labels for provider health rows (raw names stay in API payloads). */
+function providerDisplayLabel(provider: string): string {
+  const map: Record<string, string> = {
+    "Adapter telemetry": "Source telemetry",
+    "Provider telemetry": "Source telemetry",
+  };
+  return map[provider] ?? provider.replace(/\badapters?\b/gi, "sources");
 }
 
 function severityWeight(sev: IntelPoint["severity"]): number {
@@ -1006,10 +1023,13 @@ export default function MapPage() {
   );
   const providerHealthDisplay = useMemo(
     () =>
-      providerHealth.map((p) => ({
-        ...p,
-        message: simplifyProviderMessage(p.message || "No details"),
-      })),
+      providerHealth
+        .filter((p) => p.provider !== "Relay seed digest")
+        .map((p) => ({
+          ...p,
+          displayName: providerDisplayLabel(p.provider),
+          message: simplifyProviderMessage(p.message || "No details"),
+        })),
     [providerHealth]
   );
   const providerSummary = useMemo(() => {
@@ -1074,9 +1094,55 @@ export default function MapPage() {
     }
   }, [apiData, assistantMode, assistantQuestion, layers, range]);
 
-  const toggleLayer = (layer: IntelLayerKey) => {
+  const toggleLayer = useCallback((layer: IntelLayerKey) => {
     setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
-  };
+  }, []);
+
+  const layerGroups = useMemo(() => {
+    const mk = (keys: IntelLayerKey[]): LayerChipItem[] =>
+      keys.map((layer) => ({
+        id: layer,
+        label: LAYER_LABELS[layer],
+        count: layers[layer].length,
+        color: layerColorCss(layer),
+        checked: activeLayers[layer],
+        onChange: () => toggleLayer(layer),
+      }));
+    return [
+      { label: "Conflict sources", layers: mk(CONFLICT_SUBTYPE_LAYERS) },
+      {
+        label: "Live & mobility",
+        layers: mk(["liveStrikes", "flights", "vessels", "carriers"] as IntelLayerKey[]),
+      },
+      { label: "Situational awareness", layers: mk(["news"] as IntelLayerKey[]) },
+      {
+        label: "Risk & infrastructure",
+        layers: mk(["escalationRisk", "hotspots", "infrastructure"] as IntelLayerKey[]),
+      },
+    ];
+  }, [activeLayers, layers, toggleLayer]);
+
+  const mapHandlers = useMemo(
+    () => ({
+      setRange: (r: string) => {
+        if ((TIME_RANGES as readonly string[]).includes(r)) {
+          setRange(r as (typeof TIME_RANGES)[number]);
+        }
+      },
+      toggleLayer: (layer: string) => {
+        if ((ALL_LAYERS as readonly string[]).includes(layer)) {
+          toggleLayer(layer as IntelLayerKey);
+        }
+      },
+      setMode: (m: "2d" | "3d") => setMode(m),
+      refresh: fetchData,
+      recenter: () => recenterRef.current?.(),
+      layerLabels: LAYER_LABELS as unknown as Record<string, string>,
+      currentRange: range,
+    }),
+    [range, fetchData, toggleLayer]
+  );
+  useRegisterMapHandlers(mapHandlers);
 
   const regionPanelData: RegionIntelResponse | null = useMemo(() => {
     if (regionIntel) return regionIntel;
@@ -1088,112 +1154,65 @@ export default function MapPage() {
 
   return (
     <div className="map-page min-h-screen text-[#e2e8f0]">
-      <nav>
-        <Link href="/" className="nav-logo">
-          AEG<span>I</span>S<sub className="logo-hq">hq</sub>
-        </Link>
-        <div className="nav-links">
-          <Link href="/">Back to Home</Link>
-          <Link href="/escalation">App</Link>
-          <Link href="/map" className="nav-cta">
-            Interactive Map
-          </Link>
-        </div>
-      </nav>
-
       <main className="relative z-10 map-main-compact">
-        <div className="map-top-section">
-          <header className="map-page-title map-page-title-inline">
-            <h1 className="map-page-title-heading">AEGIS Interactive Map</h1>
-          </header>
-          <div className="map-controls map-controls-inline" style={{ justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-            <span className="map-chip-label">View</span>
-            <button
-              type="button"
-              className={mode === "2d" ? "btn-primary" : "btn-secondary"}
-              style={{ padding: "8px 14px", fontSize: 12 }}
-              onClick={() => setMode("2d")}
-            >
-              2D Map
-            </button>
-            <button
-              type="button"
-              className={mode === "3d" ? "btn-primary" : "btn-secondary"}
-              style={{ padding: "8px 14px", fontSize: 12 }}
-              onClick={() => setMode("3d")}
-            >
-              3D Globe
-            </button>
-            {mode === "3d" && (
-              <button
-                type="button"
-                className={autoRotate ? "btn-primary" : "btn-secondary"}
-                style={{ padding: "8px 14px", fontSize: 12 }}
-                onClick={() => setAutoRotate((v) => !v)}
-              >
-                Auto-Rotate {autoRotate ? "On" : "Off"}
-              </button>
-            )}
-            <span className="map-chip-label" style={{ marginLeft: 8 }}>Time</span>
-            {TIME_RANGES.map((r) => (
-              <button
-                key={r}
-                type="button"
-                className={range === r ? "btn-primary" : "btn-secondary"}
-                style={{ padding: "8px 10px", fontSize: 11 }}
-                onClick={() => setRange(r)}
-              >
-                {formatRangeLabel(r)}
-              </button>
-            ))}
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ padding: "8px 14px", fontSize: 12 }}
-              onClick={fetchData}
-            >
-              Refresh
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ padding: "8px 14px", fontSize: 12 }}
-              onClick={handleFullscreen}
-            >
-              Fullscreen
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ padding: "8px 14px", fontSize: 12 }}
-              onClick={() => {
-                setSelectedPoint(null);
-                recenterRef.current?.();
-              }}
-            >
-              Recenter
-            </button>
-          </div>
-        </div>
-
         <div className="map-content-wrap">
-          <div className="map-layer-toolbar">
-            {ALL_LAYERS.map((layer) => (
-              <label key={layer} className="map-layer-toggle">
-                <input
-                  type="checkbox"
-                  checked={activeLayers[layer]}
-                  onChange={() => toggleLayer(layer)}
+          <AppCommandBar
+            title="Interactive Map"
+            syncLabel={
+              apiData
+                ? `Feeds synced ${new Date(apiData.updatedAt).toLocaleString()} · ${formatRangeLabel(range)} · ${mode === "2d" ? "2D" : "3D globe"}`
+                : "Loading feed status…"
+            }
+            onRefresh={fetchData}
+            onRecenter={() => {
+              setSelectedPoint(null);
+              recenterRef.current?.();
+            }}
+            onFullscreen={handleFullscreen}
+            onHelp={() => document.getElementById("map-limitations")?.scrollIntoView({ behavior: "smooth" })}
+            statusSlot={
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="map-chip-label shrink-0">View</span>
+                <SegmentedControl
+                  ariaLabel="Map projection"
+                  options={[
+                    { value: "2d", label: "2D" },
+                    { value: "3d", label: "3D" },
+                  ]}
+                  value={mode}
+                  onChange={(v) => setMode(v)}
                 />
-                <span
-                  className="map-layer-dot"
-                  style={{ background: layerColorCss(layer) }}
+                {mode === "3d" ? (
+                  <SegmentedControl
+                    ariaLabel="Globe rotation"
+                    options={[
+                      { value: "off", label: "Rotate off" },
+                      { value: "on", label: "Rotate on" },
+                    ]}
+                    value={autoRotate ? "on" : "off"}
+                    onChange={(v) => setAutoRotate(v === "on")}
+                  />
+                ) : null}
+                <span className="map-chip-label shrink-0">Time</span>
+                <SegmentedControl
+                  ariaLabel="Time range"
+                  options={TIME_RANGES.map((r) => ({ value: r, label: r }))}
+                  value={range}
+                  onChange={(v) => setRange(v)}
                 />
-                <span>{LAYER_LABELS[layer]}</span>
-                <span className="map-layer-count">{layers[layer].length}</span>
-              </label>
-            ))}
-          </div>
+              </div>
+            }
+            trailingSlot={
+              <>
+                <StatusChip variant="live">Live</StatusChip>
+                <Link href="/escalation" className="text-xs uppercase tracking-wider text-slate-400 hover:text-white">
+                  Escalation →
+                </Link>
+              </>
+            }
+          />
+
+          <LayerChipGroup groups={layerGroups} />
           <div className="map-status-caption">
             Requested conflict source adapters run automatically; use layer toggles above only for visualization
             filtering. <strong>Vessels</strong> are maritime AIS (ships), not aircraft—enable <strong>flights</strong>{" "}
@@ -1208,7 +1227,7 @@ export default function MapPage() {
               Updated: {apiData ? new Date(apiData.updatedAt).toLocaleTimeString() : "--"}
             </span>
             <span>Range: {formatRangeLabel(range)}</span>
-            <span>Adapters: core + requested-source live feeds</span>
+            <span>Sources: core + on-demand live feeds</span>
           </div>
           <div className="map-status-caption">Zoom in for more points to become visible.</div>
 
@@ -1320,14 +1339,14 @@ export default function MapPage() {
 
           <details className="map-provider-accordion">
             <summary>
-              Adapter status: {providerSummary.ok}/{providerSummary.total} OK
+              Source health: {providerSummary.ok}/{providerSummary.total} OK
               {providerSummary.degraded > 0 ? `, ${providerSummary.degraded} degraded` : ""}
             </summary>
             <div className="map-provider-grid">
               {providerHealthDisplay.map((p) => (
                 <div key={p.provider} className="map-provider-card">
                   <div>
-                    <div className="map-provider-name">{p.provider}</div>
+                    <div className="map-provider-name">{(p as { displayName: string }).displayName}</div>
                     <div className="map-provider-note">{p.message}</div>
                   </div>
                   <div className={p.ok ? "provider-ok" : "provider-bad"}>
@@ -1339,7 +1358,7 @@ export default function MapPage() {
           </details>
           {relayDigestHealth && !relayDigestHealth.ok && (
             <div className="map-relay-note">
-              Relay seed digest is optional. If it is degraded, core map adapters still run; this usually means the relay endpoint timed out or aborted upstream.
+              Optional relay digest is degraded — core map sources still run. This usually means an upstream relay timed out (see diagnostics for &quot;Relay seed digest&quot;).
             </div>
           )}
 
@@ -1392,34 +1411,34 @@ export default function MapPage() {
             <p>Likely near-term escalation zones based on trend and multi-source activity.</p>
             <div className="map-hotspot-grid">
               {hotspotSummary.length > 0 ? (
-                hotspotSummary.map((h) => (
-                  <div key={`${h.country}-${h.latestEventAt}`} className="map-hotspot-card">
-                    <div className="map-hotspot-top">
-                      <strong>{h.country}</strong>
-                      <span>{h.score100} / 100</span>
-                    </div>
-                    <div className="map-hotspot-meta">
-                      Trend: {h.trend} · Severity:{" "}
-                      <span className={`map-hotspot-severity map-hotspot-severity-${h.severity}`}>
-                        {h.severity}
-                      </span>
-                    </div>
-                    <div className="map-hotspot-reason">{h.reason}</div>
-                  </div>
-                ))
+                hotspotSummary.map((h, idx) => {
+                  const sevRaw = String(h.severity).toLowerCase();
+                  const sev =
+                    sevRaw === "critical" || sevRaw === "high" || sevRaw === "medium" || sevRaw === "low"
+                      ? sevRaw
+                      : "medium";
+                  return (
+                    <WatchlistCard
+                      key={`${h.country}-${h.latestEventAt}`}
+                      rank={idx + 1}
+                      name={h.country}
+                      scoreLabel={`${h.score100} / 100`}
+                      severity={sev}
+                      trend={h.trend}
+                      reason={h.reason}
+                      barPercent={h.score100}
+                    />
+                  );
+                })
               ) : (
                 <div className="map-hotspot-empty">No hotspot signals available yet.</div>
               )}
             </div>
           </div>
 
-          <div className="map-limitations">
+          <div className="map-limitations" id="map-limitations">
             <h3>Current limitations</h3>
             <ul>
-              <li>
-                ACLED is maintained as historical context and can lag real-world events by
-                weeks, so live strike urgency depends on the real-time feeds.
-              </li>
               <li>
                 <strong>Carriers (WIP):</strong> the carriers layer lists only contacts that match strict
                 carrier naming rules (CVN/CV-, known hull names, or explicit &quot;aircraft carrier&quot; text).
@@ -1440,18 +1459,28 @@ export default function MapPage() {
                 vary by region, censorship, and language.
               </li>
             </ul>
+            <TransparencyModule
+              className="mt-4"
+              title="Transparency"
+              items={[
+                <>
+                  Layer toggles only change what you see on the map; upstream source jobs still run for operational
+                  completeness.
+                </>,
+                <>
+                  For methodology, data tier, and lag details, see the{" "}
+                  <Link href="/limitations" className="text-sky-300 underline hover:text-sky-200">
+                    limitations
+                  </Link>{" "}
+                  page.
+                </>,
+              ]}
+            />
           </div>
         </div>
       </main>
 
-      <footer>
-        <div className="footer-logo">AEGIS</div>
-        <div className="footer-links">
-          <Link href="/escalation">App</Link>
-          <Link href="/map">Map</Link>
-        </div>
-        <div className="footer-copy">&copy; 2026 Alexander Armand-Blumberg · AEGIS</div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
