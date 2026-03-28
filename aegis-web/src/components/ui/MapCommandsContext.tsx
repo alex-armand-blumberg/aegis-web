@@ -14,8 +14,12 @@ export type MapCommandHandlers = {
   setMode?: (mode: "2d" | "3d") => void;
   refresh?: () => void;
   recenter?: () => void;
+  applyPreset?: (presetId: string) => void;
+  flyToCountry?: (country: string) => void;
+  openDiagnostics?: (tab?: "health" | "coverage" | "diagnostics" | "limitations" | "analysis") => void;
   layerLabels?: Record<string, string>;
   currentRange?: string;
+  hotspotCountries?: string[];
 };
 
 const HandlersCtx = createContext<MapCommandHandlers>({});
@@ -39,6 +43,7 @@ export function useMapHandlers() {
 export function useRegisterMapHandlers(handlers: MapCommandHandlers) {
   const setHandlers = useContext(SetHandlersCtx);
   const layerKey = handlers.layerLabels ? JSON.stringify(handlers.layerLabels) : "";
+  const hotspotsKey = handlers.hotspotCountries?.join("|") ?? "";
   useEffect(() => {
     setHandlers(handlers);
     return () => setHandlers({});
@@ -51,6 +56,10 @@ export function useRegisterMapHandlers(handlers: MapCommandHandlers) {
     handlers.setMode,
     handlers.refresh,
     handlers.recenter,
+    handlers.applyPreset,
+    handlers.flyToCountry,
+    handlers.openDiagnostics,
+    hotspotsKey,
     handlers.currentRange,
     layerKey,
   ]);

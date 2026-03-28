@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { LAYER_PRESETS } from "@/components/map/mapLayerPresets";
 import { COUNTRY_NAMES } from "@/lib/countries";
 import { useCommandPalette } from "./CommandPaletteContext";
 import { useMapHandlers } from "./MapCommandsContext";
@@ -146,11 +147,58 @@ export function CommandPalette() {
           setOpen(false);
         },
       });
+      for (const p of LAYER_PRESETS) {
+        const hay = `preset ${p.label}`.toLowerCase();
+        if (!ql || hay.includes(ql) || "preset".includes(ql)) {
+          list.push({
+            id: `preset-${p.id}`,
+            label: `Preset: ${p.label}`,
+            meta: "Map",
+            onSelect: () => {
+              mapHandlers.applyPreset?.(p.id);
+              setOpen(false);
+            },
+          });
+        }
+      }
+      list.push({
+        id: "map-diag",
+        label: "Open system drawer (sources & limits)",
+        meta: "Map",
+        onSelect: () => {
+          mapHandlers.openDiagnostics?.("health");
+          setOpen(false);
+        },
+      });
+      for (const c of mapHandlers.hotspotCountries ?? []) {
+        if (!ql || c.toLowerCase().includes(ql) || "watchlist".includes(ql) || "hotspot".includes(ql)) {
+          list.push({
+            id: `map-hot-${c}`,
+            label: `Watchlist: focus ${c}`,
+            meta: "Map",
+            onSelect: () => {
+              mapHandlers.flyToCountry?.(c);
+              setOpen(false);
+            },
+          });
+        }
+      }
     }
 
     if (ql.length >= 1) {
       for (const c of COUNTRY_NAMES) {
         if (c.toLowerCase().includes(ql)) {
+          if (pathname === "/map" && mapHandlers.flyToCountry) {
+            list.push({
+              id: `map-focus-${c}`,
+              label: `Map: focus ${c}`,
+              meta: "Map",
+              onSelect: () => {
+                mapHandlers.flyToCountry?.(c);
+                setOpen(false);
+              },
+            });
+          }
           list.push({
             id: `country-${c}`,
             label: `Open escalation for ${c}`,
@@ -173,14 +221,16 @@ export function CommandPalette() {
   }, [q, pathname, router, setOpen, mapHandlers]);
 
   const filtered = useMemo(() => {
-    if (!q.trim()) return items;
+    if (!q.trim()) return items.slice(0, 80);
     const ql = q.trim().toLowerCase();
-    return items.filter(
-      (i) =>
-        i.label.toLowerCase().includes(ql) ||
-        (i.meta?.toLowerCase().includes(ql) ?? false) ||
-        i.id.toLowerCase().includes(ql)
-    );
+    return items
+      .filter(
+        (i) =>
+          i.label.toLowerCase().includes(ql) ||
+          (i.meta?.toLowerCase().includes(ql) ?? false) ||
+          i.id.toLowerCase().includes(ql)
+      )
+      .slice(0, 80);
   }, [items, q]);
 
   const run = useCallback(

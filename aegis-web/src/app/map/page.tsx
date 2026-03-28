@@ -12,21 +12,25 @@ import type {
   RegionMarketQuote,
   RegionSelection,
 } from "@/lib/intel/types";
-import { layerColorCss } from "@/lib/intel/colors";
 import { canonicalCountryMatchKey, countriesMatch, formatCountryDisplayName } from "@/lib/countryDisplay";
-import { getCountryBounds } from "@/lib/countryBounds";
+import { getCountryBounds, getCountryCenter } from "@/lib/countryBounds";
 import { getOceanRegionByKey, pointInRegion } from "@/lib/regionGeometry";
+import { INTEL_LAYER_LABELS } from "@/lib/intel/layerLabels";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
 import RegionIntelPanel from "@/components/RegionIntelPanel";
+import type { ConflictMapHandle } from "@/components/ConflictMap";
+import { MapDiagnosticsDrawer, type DiagnosticsTab } from "@/components/map/MapDiagnosticsDrawer";
+import { MapEventPreview } from "@/components/map/MapEventPreview";
+import { MapHotspotStrip } from "@/components/map/MapHotspotStrip";
+import { MapLayerControlRail } from "@/components/map/MapLayerControlRail";
+import { LAYER_PRESETS, allLayersOff, mergePreset } from "@/components/map/mapLayerPresets";
+import { WorldStabilityCompact } from "@/components/map/WorldStabilityCompact";
 import { AppCommandBar } from "@/components/ui/AppCommandBar";
 import { AppRouteNav } from "@/components/ui/AppRouteNav";
-import { LayerChipGroup, type LayerChipItem } from "@/components/ui/LayerChipGroup";
 import { useRegisterMapHandlers } from "@/components/ui/MapCommandsContext";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
-import { SiteFooter } from "@/components/ui/SiteFooter";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { TransparencyModule } from "@/components/ui/TransparencyModule";
-import { WatchlistCard } from "@/components/ui/WatchlistCard";
 
 const ConflictMap = dynamic(() => import("@/components/ConflictMap"), {
   ssr: false,
@@ -55,25 +59,6 @@ const ALL_LAYERS: IntelLayerKey[] = [
   "hotspots",
   "infrastructure",
 ];
-const LAYER_LABELS: Record<IntelLayerKey, string> = {
-  conflicts: "Conflicts (all)",
-  conflictsBattles: "Battles",
-  conflictsExplosions: "Explosions",
-  conflictsCivilians: "Attack on Civilians",
-  conflictsStrategic: "Strat. Dev.",
-  conflictsProtests: "Protests",
-  conflictsRiots: "Riots",
-  liveStrikes: "Live Strikes",
-  flights: "Flights",
-  vessels: "Vessels",
-  troopMovements: "Troop Movements",
-  carriers: "Carriers (WIP)",
-  news: "News",
-  escalationRisk: "Escalation Risk",
-  hotspots: "Hotspots",
-  infrastructure: "Infrastructure",
-};
-
 function formatHotspotSignalLabels(signals: string[], max = 3): string {
   const cleaned = signals.slice(0, max).map((s) =>
     s
@@ -550,9 +535,17 @@ export default function MapPage() {
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState<string | null>(null);
   const [syncElapsedSec, setSyncElapsedSec] = useState(0);
+  const [layersMobileOpen, setLayersMobileOpen] = useState(false);
+  const [diagSnap, setDiagSnap] = useState<0 | 1 | 2>(0);
+  const [diagTab, setDiagTab] = useState<DiagnosticsTab>("health");
+  const [hotspotSort, setHotspotSort] = useState<"score" | "name">("score");
+  const [hoverPreview, setHoverPreview] = useState<{ point: IntelPoint; x: number; y: number } | null>(null);
+  const [riskDeltaLabel, setRiskDeltaLabel] = useState<string | null>(null);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<ConflictMapHandle>(null);
   const recenterRef = useRef<(() => void) | null>(null);
+  const lastRangeRiskRef = useRef<{ range: string; pct: number } | null>(null);
   const aiSummaryCacheRef = useRef<Record<string, string>>({});
   const usedRegionImagesRef = useRef<Set<string>>(new Set());
   const regionIntelCacheRef = useRef<Record<string, RegionIntelResponse>>({});
@@ -936,7 +929,26 @@ export default function MapPage() {
           : "Signal intensity is mixed, with fewer high-severity kinetic spikes in the current window.";
     const explanation =
       `${bandExplanation} Based on weighted counts of live strikes, conflict reports, and news in the selected time window, plus flight and vessel activity. High-90s now require exceptional multi-theater, high-severity escalation; 96–99% is reserved for near-global-war conditions, with 100% reserved for active global conflict.`;
-    return { percent: displayPercent, status, explanation };
+    return { percent: displayPercent, status, explanation, shortLine: bandExplanation };
+  }, [layers]);
+
+  useEffect(() => {
+    const prev = lastRangeRiskRef.current;
+    if (prev && prev.range !== range) {
+      const d = worldStateRisk.percent - prev.pct;
+      setRiskDeltaLabel(
+        d === 0 ? null : `Δ ${d > 0 ? "+" : ""}${d} from ${formatRangeLabel(prev.range)}`
+      );
+    } else {
+      setRiskDeltaLabel(null);
+    }
+    lastRangeRiskRef.current = { range, pct: worldStateRisk.percent };
+  }, [range, worldStateRisk.percent]);
+
+  const layerCounts = useMemo(() => {
+    const c = {} as Record<IntelLayerKey, number>;
+    for (const k of ALL_LAYERS) c[k] = layers[k]?.length ?? 0;
+    return c;
   }, [layers]);
 
   const hotspotSummary = useMemo(() => {
@@ -1135,29 +1147,38 @@ export default function MapPage() {
     setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
   }, []);
 
-  const layerGroups = useMemo(() => {
-    const mk = (keys: IntelLayerKey[]): LayerChipItem[] =>
-      keys.map((layer) => ({
-        id: layer,
-        label: LAYER_LABELS[layer],
-        count: layers[layer].length,
-        color: layerColorCss(layer),
-        checked: activeLayers[layer],
-        onChange: () => toggleLayer(layer),
-      }));
-    return [
-      { label: "Conflict sources", layers: mk(CONFLICT_SUBTYPE_LAYERS) },
-      {
-        label: "Live & mobility",
-        layers: mk(["liveStrikes", "flights", "vessels", "carriers"] as IntelLayerKey[]),
-      },
-      { label: "Situational awareness", layers: mk(["news"] as IntelLayerKey[]) },
-      {
-        label: "Risk & infrastructure",
-        layers: mk(["escalationRisk", "hotspots", "infrastructure"] as IntelLayerKey[]),
-      },
-    ];
-  }, [activeLayers, layers, toggleLayer]);
+  const applyLayerPreset = useCallback((presetId: string) => {
+    const preset = LAYER_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    const merged = mergePreset(preset, allLayersOff());
+    setActiveLayers((prev) => ({ ...prev, ...merged }));
+  }, []);
+
+  const focusCountryOnMap = useCallback(
+    (country: string) => {
+      if (mode !== "2d") return;
+      const bounds = getCountryBounds(country);
+      if (bounds && mapRef.current) mapRef.current.fitLatLngBounds(bounds);
+      else {
+        const c = getCountryCenter(country);
+        if (c && mapRef.current) mapRef.current.flyTo({ longitude: c.lon, latitude: c.lat, zoom: 5.2 });
+      }
+      setSelectedPoint(null);
+      setHoverPreview(null);
+      setSelectedRegion({
+        kind: "country",
+        key: country.toLowerCase(),
+        name: country,
+        country,
+      });
+    },
+    [mode]
+  );
+
+  const openDiagnostics = useCallback((tab?: DiagnosticsTab) => {
+    setDiagSnap(1);
+    if (tab) setDiagTab(tab);
+  }, []);
 
   const mapHandlers = useMemo(
     () => ({
@@ -1173,13 +1194,36 @@ export default function MapPage() {
       },
       setMode: (m: "2d" | "3d") => setMode(m),
       refresh: fetchData,
-      recenter: () => recenterRef.current?.(),
-      layerLabels: LAYER_LABELS as unknown as Record<string, string>,
+      recenter: () => {
+        setSelectedPoint(null);
+        recenterRef.current?.();
+      },
+      layerLabels: INTEL_LAYER_LABELS as unknown as Record<string, string>,
       currentRange: range,
+      applyPreset: applyLayerPreset,
+      flyToCountry: focusCountryOnMap,
+      openDiagnostics,
+      hotspotCountries: hotspotSummary.map((h) => h.country),
     }),
-    [range, fetchData, toggleLayer]
+    [range, fetchData, toggleLayer, applyLayerPreset, focusCountryOnMap, openDiagnostics, hotspotSummary]
   );
   useRegisterMapHandlers(mapHandlers);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      setHoverPreview(null);
+      if (layersMobileOpen) setLayersMobileOpen(false);
+      else if (diagSnap > 0) setDiagSnap(0);
+      else if (selectedPoint) setSelectedPoint(null);
+      else if (selectedRegion) {
+        setSelectedRegion(null);
+        setRegionIntel(null);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [layersMobileOpen, diagSnap, selectedPoint, selectedRegion]);
 
   const regionPanelData: RegionIntelResponse | null = useMemo(() => {
     if (regionIntel) return regionIntel;
@@ -1189,336 +1233,371 @@ export default function MapPage() {
     return cached ?? null;
   }, [apiData, regionIntel, selectedRegion, range]);
 
+  const diagSummaryLine = `Sources ${providerSummary.ok}/${providerSummary.total} OK${
+    providerSummary.degraded > 0 ? ` · ${providerSummary.degraded} degraded` : ""
+  }`;
+
+  const healthPanel = (
+    <div className="map-provider-grid map-diag-inner">
+      {providerHealthDisplay.map((p) => (
+        <div key={p.provider} className="map-provider-card">
+          <div>
+            <div className="map-provider-name">{(p as { displayName: string }).displayName}</div>
+            <div className="map-provider-note">{p.message}</div>
+          </div>
+          <div className={p.ok ? "provider-ok" : "provider-bad"}>{p.ok ? "OK" : "DEGRADED"}</div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const coveragePanel = (
+    <div className="map-diag-inner map-diag-prose">
+      <p>
+        Coverage is strongest across Europe, the Middle East, and the Americas for open-source conflict and mobility
+        feeds. Some regions have thinner publisher density; signals may appear after corroboration lag.
+      </p>
+      <p className="text-slate-500 text-sm">
+        Layer visibility does not pause ingestion—pipelines keep running for operational completeness.
+      </p>
+    </div>
+  );
+
+  const diagnosticsPanel = (
+    <div className="map-diag-inner map-diag-prose">
+      {relayDigestHealth && !relayDigestHealth.ok ? (
+        <div className="map-relay-note map-relay-note-inline">
+          Relay digest is degraded. Core map sources still run; upstream relay may have timed out (
+          <strong>Relay seed digest</strong>).
+        </div>
+      ) : (
+        <p>No active pipeline faults beyond source health rows.</p>
+      )}
+    </div>
+  );
+
+  const limitationsPanel = (
+    <div className="map-diag-inner">
+      <ul className="map-limitations-list">
+        <li>
+          <strong>Carriers:</strong> strict naming rules (CVN/CV-, known hulls, explicit carrier wording). Many units
+          do not broadcast reliable AIS.
+        </li>
+        <li>
+          <strong>Maritime / air:</strong> AIS and ADS-B can be disabled or spoofed during sensitive operations.
+        </li>
+        <li>
+          <strong>News geolocation:</strong> city/country extraction with corroboration; weak matches stay suppressed.
+        </li>
+        <li>
+          <strong>Regional bias:</strong> open-source density varies by censorship, language, and media access.
+        </li>
+      </ul>
+      <TransparencyModule
+        className="mt-4"
+        title="Transparency"
+        items={[
+          <>Layer toggles only affect map display; upstream jobs continue.</>,
+          <>
+            Methodology:{" "}
+            <Link href="/limitations" className="text-sky-300 underline hover:text-sky-200">
+              limitations
+            </Link>
+            .
+          </>,
+        ]}
+      />
+    </div>
+  );
+
+  const analysisPanel = (
+    <div className="map-ai-assistant map-ai-assistant-drawer">
+      <div className="map-ai-assistant-header">
+        <h3>Analysis assistant</h3>
+        <p>Uses mapped feeds plus online corroboration.</p>
+      </div>
+      <div className="map-ai-assistant-actions">
+        <button
+          type="button"
+          className={assistantMode === "summary" ? "btn-primary" : "btn-secondary"}
+          style={{ padding: "8px 12px", fontSize: 12 }}
+          onClick={() => setAssistantMode("summary")}
+        >
+          Summarize global picture
+        </button>
+        <button
+          type="button"
+          className={assistantMode === "ask" ? "btn-primary" : "btn-secondary"}
+          style={{ padding: "8px 12px", fontSize: 12 }}
+          onClick={() => setAssistantMode("ask")}
+        >
+          Ask a question
+        </button>
+      </div>
+      {assistantMode === "ask" ? (
+        <textarea
+          className="map-ai-question"
+          placeholder="Ask about conflicts, mobility, escalation, or a region…"
+          value={assistantQuestion}
+          onChange={(e) => setAssistantQuestion(e.target.value)}
+        />
+      ) : null}
+      <button
+        type="button"
+        className="btn-secondary"
+        style={{ padding: "8px 12px", fontSize: 12, marginTop: 10 }}
+        onClick={handleAssistantRun}
+        disabled={assistantLoading || (assistantMode === "ask" && !assistantQuestion.trim())}
+      >
+        {assistantLoading ? "Running…" : "Run analysis"}
+      </button>
+      {assistantError ? <div className="map-error-banner mt-2">{assistantError}</div> : null}
+      {assistantAnswer ? <pre className="map-ai-answer">{assistantAnswer}</pre> : null}
+    </div>
+  );
+
   return (
-    <div className="map-page min-h-screen text-[#e2e8f0]">
-      <main className="relative z-10 map-main-compact">
-        <div className="map-content-wrap">
-          <AppRouteNav />
-          <AppCommandBar
-            title="Interactive Map"
-            syncLabel={
-              apiData
-                ? `Feeds synced ${new Date(apiData.updatedAt).toLocaleString()} · ${formatRangeLabel(range)} · ${mode === "2d" ? "2D" : "3D globe"}`
-                : "Loading feed status…"
-            }
-            onRefresh={fetchData}
-            onRecenter={() => {
-              setSelectedPoint(null);
-              recenterRef.current?.();
-            }}
-            onFullscreen={handleFullscreen}
-            onHelp={() => document.getElementById("map-limitations")?.scrollIntoView({ behavior: "smooth" })}
-            statusSlot={
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="map-chip-label shrink-0">View</span>
-                <SegmentedControl
-                  ariaLabel="Map projection"
-                  options={[
-                    { value: "2d", label: "2D" },
-                    { value: "3d", label: "3D" },
-                  ]}
-                  value={mode}
-                  onChange={(v) => setMode(v)}
-                />
-                {mode === "3d" ? (
-                  <SegmentedControl
-                    ariaLabel="Globe rotation"
-                    options={[
-                      { value: "off", label: "Rotate off" },
-                      { value: "on", label: "Rotate on" },
-                    ]}
-                    value={autoRotate ? "on" : "off"}
-                    onChange={(v) => setAutoRotate(v === "on")}
-                  />
-                ) : null}
-                <span className="map-chip-label shrink-0">Time</span>
-                <SegmentedControl
-                  ariaLabel="Time range"
-                  options={TIME_RANGES.map((r) => ({ value: r, label: r }))}
-                  value={range}
-                  onChange={(v) => setRange(v)}
-                />
-              </div>
-            }
-            trailingSlot={
-              <>
-                <StatusChip variant="live">Live</StatusChip>
-                <Link href="/escalation" className="text-xs uppercase tracking-wider text-slate-400 hover:text-white">
-                  Escalation →
-                </Link>
-              </>
-            }
-          />
-
-          <LayerChipGroup groups={layerGroups} />
-          <div className="map-status-caption">
-            Requested conflict source adapters run automatically; use layer toggles above only for visualization
-            filtering. <strong>Vessels</strong> are maritime AIS (ships), not aircraft—enable <strong>flights</strong>{" "}
-            for ADS-B military aircraft tracks. <strong>Carriers</strong> is work in progress: only hulls matching
-            known carrier names, CVN/CV- hull numbers, or explicit &quot;aircraft carrier&quot; wording are shown—
-            not general cargo or bulk carriers.
-          </div>
-
-          <div className="map-status-bar">
-            <span>Visible points: {totalVisible.toLocaleString()}</span>
-            <span>
-              Updated: {apiData ? new Date(apiData.updatedAt).toLocaleTimeString() : "--"}
-            </span>
-            <span>Range: {formatRangeLabel(range)}</span>
-            <span>Sources: core + on-demand live feeds</span>
-          </div>
-          <div className="map-status-caption">Zoom in for more points to become visible.</div>
-
-          <div className="map-world-gauge">
-            <div className="map-world-gauge-header">
-              <span>World Stability Gauge</span>
-              <strong>{worldStateRisk.percent}% risk</strong>
-            </div>
-            <div className="map-world-gauge-track">
-              <div
-                className="map-world-gauge-fill"
-                style={{ width: `${worldStateRisk.percent}%` }}
-              />
-            </div>
-            <div className="map-world-gauge-note">
-              Status: <strong>{worldStateRisk.status}</strong>
-            </div>
-            <div className="map-world-gauge-explain">{worldStateRisk.explanation}</div>
-          </div>
-
-          {error && <div className="map-error-banner">{error}</div>}
-
-          <div ref={mapContainerRef} className="map-container" style={{ position: "relative" }}>
-            <div className="map-title-overlay">■ {formatRangeLabel(range).toUpperCase()} AEGIS MAP BETA</div>
-
-            {selectedPoint && (
-              <IntelInfoPanel
-                point={selectedPoint}
-                providerHealth={providerHealth}
-                aiSummary={pointAiSummary}
-                aiLoading={pointAiLoading}
-                onClose={() => setSelectedPoint(null)}
-              />
-            )}
-
-            {loading && (
-              <div className="map-loading-pill">
-                <span className="map-loading-pill-label">
-                  Syncing feeds…
-                  {` ${Math.max(0, syncElapsedSec)}s / ~1mn`}
-                </span>
-                <div
-                  className="map-loading-pill-bar"
-                  role="progressbar"
-                  aria-valuetext="Syncing map feeds"
-                />
-              </div>
-            )}
-
-            {!mapReady && !loading && (
-              <div className="map-loading-screen">Initializing map renderer...</div>
-            )}
-
-            {mode === "2d" ? (
-              <ConflictMap
-                layers={layers}
-                activeLayers={activeLayers}
-                recenterRef={recenterRef}
-                onReady={() => setMapReady(true)}
-                onError={(m) => setError(m)}
-                onPointSelect={setSelectedPoint}
-                onCountrySelect={(country) => {
-                  setSelectedPoint(null);
-                  setSelectedRegion({
-                    kind: "country",
-                    key: country.toLowerCase(),
-                    name: country,
-                    country,
-                  });
-                }}
-                onRegionSelect={(selection) => {
-                  setSelectedPoint(null);
-                  setSelectedRegion(selection);
-                }}
-                activeConflictCountries={activeConflictCountries}
-                escalationRiskCountries={escalationRiskCountries}
-                frontlineOverlays={apiData?.frontlineOverlays ?? []}
-              />
-            ) : (
-              <ConflictGlobe
-                layers={layers}
-                activeLayers={activeLayers}
-                frontlineOverlays={apiData?.frontlineOverlays ?? []}
-                recenterRef={recenterRef}
-                onReady={() => setMapReady(true)}
-                onError={(m) => setError(m)}
-                onPointSelect={setSelectedPoint}
-                autoRotate={autoRotate}
-              />
-            )}
-
-            {selectedRegion && regionPanelData && (
-              <RegionIntelPanel
-                data={regionPanelData}
-                imageUrl={regionHeroImage}
-                imageLoading={regionHeroLoading}
-                aiSummary={regionAiSummary}
-                aiError={regionAiError}
-                aiLoading={regionAiLoading}
-                markets={regionMarkets}
-                marketsLoading={regionMarketsLoading}
-                onClose={() => {
-                  setSelectedRegion(null);
-                  setRegionIntel(null);
-                }}
-              />
-            )}
-          </div>
-
-          <details className="map-provider-accordion">
-            <summary>
-              Source health: {providerSummary.ok}/{providerSummary.total} OK
-              {providerSummary.degraded > 0 ? `, ${providerSummary.degraded} degraded` : ""}
-            </summary>
-            <div className="map-provider-grid">
-              {providerHealthDisplay.map((p) => (
-                <div key={p.provider} className="map-provider-card">
-                  <div>
-                    <div className="map-provider-name">{(p as { displayName: string }).displayName}</div>
-                    <div className="map-provider-note">{p.message}</div>
-                  </div>
-                  <div className={p.ok ? "provider-ok" : "provider-bad"}>
-                    {p.ok ? "OK" : "DEGRADED"}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </details>
-          {relayDigestHealth && !relayDigestHealth.ok && (
-            <div className="map-relay-note">
-              Optional relay digest is degraded — core map sources still run. This usually means an upstream relay timed out (see diagnostics for &quot;Relay seed digest&quot;).
-            </div>
-          )}
-
-          <div className="map-ai-assistant">
-            <div className="map-ai-assistant-header">
-              <h3>Map AI Assistant</h3>
-              <p>Uses mapped feeds plus online corroboration.</p>
-            </div>
-            <div className="map-ai-assistant-actions">
-              <button
-                type="button"
-                className={assistantMode === "summary" ? "btn-primary" : "btn-secondary"}
-                style={{ padding: "8px 12px", fontSize: 12 }}
-                onClick={() => setAssistantMode("summary")}
-              >
-                Summarize Global Events
-              </button>
-              <button
-                type="button"
-                className={assistantMode === "ask" ? "btn-primary" : "btn-secondary"}
-                style={{ padding: "8px 12px", fontSize: 12 }}
-                onClick={() => setAssistantMode("ask")}
-              >
-                Ask Map Question
-              </button>
-            </div>
-            {assistantMode === "ask" && (
-              <textarea
-                className="map-ai-question"
-                placeholder="Ask a question about current conflicts, military moves, escalation risk, or a region..."
-                value={assistantQuestion}
-                onChange={(e) => setAssistantQuestion(e.target.value)}
-              />
-            )}
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ padding: "8px 12px", fontSize: 12, marginTop: 10 }}
-              onClick={handleAssistantRun}
-              disabled={assistantLoading || (assistantMode === "ask" && !assistantQuestion.trim())}
-            >
-              {assistantLoading ? "Thinking..." : "Run AI"}
-            </button>
-            {assistantError && <div className="map-error-banner" style={{ marginTop: 10 }}>{assistantError}</div>}
-            {assistantAnswer && <pre className="map-ai-answer">{assistantAnswer}</pre>}
-          </div>
-
-          <div className="map-hotspot-panel">
-            <h3>Geographic Escalation Risk Hotspots</h3>
-            <p>Likely near-term escalation zones based on trend and multi-source activity.</p>
-            <div className="map-hotspot-grid">
-              {hotspotSummary.length > 0 ? (
-                hotspotSummary.map((h, idx) => {
-                  const sevRaw = String(h.severity).toLowerCase();
-                  const sev =
-                    sevRaw === "critical" || sevRaw === "high" || sevRaw === "medium" || sevRaw === "low"
-                      ? sevRaw
-                      : "medium";
-                  return (
-                    <WatchlistCard
-                      key={`${h.country}-${h.latestEventAt}`}
-                      rank={idx + 1}
-                      name={h.country}
-                      scoreLabel={`${h.score100} / 100`}
-                      severity={sev}
-                      trend={h.trend}
-                      reason={h.reason}
-                      barPercent={h.score100}
-                    />
-                  );
-                })
-              ) : (
-                <div className="map-hotspot-empty">No hotspot signals available yet.</div>
-              )}
-            </div>
-          </div>
-
-          <div className="map-limitations" id="map-limitations">
-            <h3>Current limitations</h3>
-            <ul>
-              <li>
-                <strong>Carriers (WIP):</strong> the carriers layer lists only contacts that match strict
-                carrier naming rules (CVN/CV-, known hull names, or explicit &quot;aircraft carrier&quot; text).
-                Many carriers do not broadcast reliable AIS; positions can be approximate theater estimates
-                from open-source fleet trackers, not verified hull coordinates.
-              </li>
-              <li>
-                Military ships and carrier groups can disable or spoof AIS/ADS-B, which can
-                hide active deployments during sensitive missions.
-              </li>
-              <li>
-                News-derived event geolocation uses city/country extraction and
-                corroboration; some events are intentionally suppressed until multiple
-                credible publishers confirm them.
-              </li>
-              <li>
-                Open-source feeds are strongest for Europe/Middle East; coverage quality can
-                vary by region, censorship, and language.
-              </li>
-            </ul>
-            <TransparencyModule
-              className="mt-4"
-              title="Transparency"
-              items={[
-                <>
-                  Layer toggles only change what you see on the map; upstream source jobs still run for operational
-                  completeness.
-                </>,
-                <>
-                  For methodology, data tier, and lag details, see the{" "}
-                  <Link href="/limitations" className="text-sky-300 underline hover:text-sky-200">
-                    limitations
-                  </Link>{" "}
-                  page.
-                </>,
+    <div className="map-page map-page-workspace min-h-screen text-[#e2e8f0]">
+      <AppRouteNav variant="map" />
+      <AppCommandBar
+        className="map-command-bar-tight"
+        title="Interactive Map"
+        syncLabel={
+          apiData
+            ? `Last sync ${new Date(apiData.updatedAt).toLocaleString()} · ${formatRangeLabel(range)} · ${
+                mode === "2d" ? "2D" : "3D"
+              }`
+            : "Loading feeds…"
+        }
+        onRefresh={fetchData}
+        onRecenter={() => {
+          setSelectedPoint(null);
+          recenterRef.current?.();
+        }}
+        onFullscreen={handleFullscreen}
+        onHelp={() => openDiagnostics("limitations")}
+        statusSlot={
+          <div className="map-command-controls flex flex-wrap items-center gap-2">
+            <span className="map-chip-label shrink-0">View</span>
+            <SegmentedControl
+              ariaLabel="Map projection"
+              options={[
+                { value: "2d", label: "2D" },
+                { value: "3d", label: "3D" },
               ]}
+              value={mode}
+              onChange={(v) => setMode(v)}
+            />
+            {mode === "3d" ? (
+              <SegmentedControl
+                ariaLabel="Globe rotation"
+                options={[
+                  { value: "off", label: "Rotate off" },
+                  { value: "on", label: "Rotate on" },
+                ]}
+                value={autoRotate ? "on" : "off"}
+                onChange={(v) => setAutoRotate(v === "on")}
+              />
+            ) : null}
+            <span className="map-chip-label shrink-0">Range</span>
+            <SegmentedControl
+              ariaLabel="Time range"
+              options={TIME_RANGES.map((r) => ({ value: r, label: r }))}
+              value={range}
+              onChange={(v) => setRange(v)}
             />
           </div>
-        </div>
-      </main>
+        }
+        trailingSlot={
+          <>
+            <button
+              type="button"
+              className="map-sources-chip-trigger"
+              onClick={() => openDiagnostics("health")}
+              title="Open source health"
+            >
+              <StatusChip variant={providerSummary.degraded > 0 ? "degraded" : "ok"}>
+                {providerSummary.degraded > 0 ? "Sources degraded" : "Sources nominal"}
+              </StatusChip>
+            </button>
+            <StatusChip variant="live">Live</StatusChip>
+            <Link href="/escalation" className="map-escalation-link">
+              Index →
+            </Link>
+          </>
+        }
+      />
 
-      <SiteFooter />
+      <div className="map-workspace">
+        {error ? <div className="map-error-banner map-workspace-error">{error}</div> : null}
+
+        <div ref={mapContainerRef} className="map-canvas-wrap">
+          <div className="map-ambient-badge">{formatRangeLabel(range)} · AEGIS</div>
+
+          <WorldStabilityCompact
+            percent={worldStateRisk.percent}
+            status={worldStateRisk.status}
+            explanationShort={worldStateRisk.shortLine}
+            deltaLabel={riskDeltaLabel}
+          />
+
+          <MapLayerControlRail
+            activeLayers={activeLayers}
+            counts={layerCounts}
+            onChange={setActiveLayers}
+            layerLabel={(k) => INTEL_LAYER_LABELS[k]}
+            mobileOpen={layersMobileOpen}
+            onMobileOpenChange={setLayersMobileOpen}
+          />
+
+          <div className="map-hud-chip" title="Zoom in to load finer point batches">
+            <span>{totalVisible.toLocaleString()} pts</span>
+            <span className="map-hud-dot" />
+            <span>{apiData ? new Date(apiData.updatedAt).toLocaleTimeString() : "—"}</span>
+          </div>
+
+          <MapHotspotStrip
+            items={hotspotSummary.map((h) => {
+              const sevRaw = String(h.severity).toLowerCase();
+              const sev =
+                sevRaw === "critical" || sevRaw === "high" || sevRaw === "medium" || sevRaw === "low"
+                  ? sevRaw
+                  : "medium";
+              return {
+                country: h.country,
+                score100: h.score100,
+                severity: sev,
+                trend: h.trend,
+                reason: h.reason,
+                latestEventAt: h.latestEventAt,
+              };
+            })}
+            sort={hotspotSort}
+            onSortChange={setHotspotSort}
+            onFocus={focusCountryOnMap}
+          />
+
+          {loading ? (
+            <div className="map-loading-pill">
+              <span className="map-loading-pill-label">
+                Syncing… {Math.max(0, syncElapsedSec)}s
+              </span>
+              <div className="map-loading-pill-bar" role="progressbar" aria-valuetext="Syncing map feeds" />
+            </div>
+          ) : null}
+
+          {!mapReady && !loading ? <div className="map-loading-screen">Initializing map…</div> : null}
+
+          {mode === "2d" ? (
+            <ConflictMap
+              ref={mapRef}
+              layers={layers}
+              activeLayers={activeLayers}
+              recenterRef={recenterRef}
+              selectedPointId={selectedPoint?.id ?? null}
+              onReady={() => setMapReady(true)}
+              onError={(m) => setError(m)}
+              onPointSelect={(p) => {
+                setHoverPreview(null);
+                setSelectedPoint(p);
+              }}
+              onCountrySelect={(country) => {
+                setSelectedPoint(null);
+                setHoverPreview(null);
+                setSelectedRegion({
+                  kind: "country",
+                  key: country.toLowerCase(),
+                  name: country,
+                  country,
+                });
+              }}
+              onRegionSelect={(selection) => {
+                setSelectedPoint(null);
+                setHoverPreview(null);
+                setSelectedRegion(selection);
+              }}
+              onHoverIntel={(info) => {
+                if (!info) {
+                  setHoverPreview(null);
+                  return;
+                }
+                if (selectedPoint?.id === info.point.id) return;
+                setHoverPreview(info);
+              }}
+              activeConflictCountries={activeConflictCountries}
+              escalationRiskCountries={escalationRiskCountries}
+              frontlineOverlays={apiData?.frontlineOverlays ?? []}
+            />
+          ) : (
+            <ConflictGlobe
+              layers={layers}
+              activeLayers={activeLayers}
+              frontlineOverlays={apiData?.frontlineOverlays ?? []}
+              recenterRef={recenterRef}
+              onReady={() => setMapReady(true)}
+              onError={(m) => setError(m)}
+              onPointSelect={(p) => {
+                setHoverPreview(null);
+                setSelectedPoint(p);
+              }}
+              autoRotate={autoRotate}
+            />
+          )}
+
+          {hoverPreview && mode === "2d" && selectedPoint?.id !== hoverPreview.point.id ? (
+            <MapEventPreview
+              point={hoverPreview.point}
+              x={hoverPreview.x}
+              y={hoverPreview.y}
+              onDismiss={() => setHoverPreview(null)}
+              onOpenBrief={() => {
+                setSelectedPoint(hoverPreview.point);
+                setHoverPreview(null);
+              }}
+            />
+          ) : null}
+
+          {selectedPoint ? (
+            <IntelInfoPanel
+              point={selectedPoint}
+              providerHealth={providerHealth}
+              aiSummary={pointAiSummary}
+              aiLoading={pointAiLoading}
+              onClose={() => setSelectedPoint(null)}
+            />
+          ) : null}
+
+          {selectedRegion && regionPanelData ? (
+            <RegionIntelPanel
+              data={regionPanelData}
+              imageUrl={regionHeroImage}
+              imageLoading={regionHeroLoading}
+              aiSummary={regionAiSummary}
+              aiError={regionAiError}
+              aiLoading={regionAiLoading}
+              markets={regionMarkets}
+              marketsLoading={regionMarketsLoading}
+              onClose={() => {
+                setSelectedRegion(null);
+                setRegionIntel(null);
+              }}
+            />
+          ) : null}
+        </div>
+
+        <MapDiagnosticsDrawer
+          snap={diagSnap}
+          onSnapChange={setDiagSnap}
+          tab={diagTab}
+          onTabChange={setDiagTab}
+          summaryLine={diagSummaryLine}
+          healthPanel={healthPanel}
+          coveragePanel={coveragePanel}
+          diagnosticsPanel={diagnosticsPanel}
+          limitationsPanel={limitationsPanel}
+          analysisPanel={analysisPanel}
+        />
+      </div>
     </div>
   );
 }
