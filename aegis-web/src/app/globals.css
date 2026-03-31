@@ -74,6 +74,18 @@ body {
   letter-spacing: 0.03em;
   backdrop-filter: blur(4px);
   pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.32s ease-out;
+}
+
+.global-deploy-banner.global-deploy-banner--exiting {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .global-deploy-banner {
+    transition: none;
+  }
 }
 
 .global-deploy-banner strong {

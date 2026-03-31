@@ -1,3 +1,5 @@
+import { readFile } from "fs/promises";
+import path from "path";
 import { NextResponse } from "next/server";
 import { COUNTRY_BBOX } from "@/lib/countryBounds";
 import { countriesMatch, formatCountryDisplayName, normalizeCountryKey } from "@/lib/countryDisplay";
@@ -43,8 +45,10 @@ const HOTSPOT_CENTER_ALIAS_TO_NORMALIZED: Record<string, string> = {
   "republic of the congo": "congo",
   "czech republic": "czechia",
 };
-const ISW_UKRAINE_FRONTLINE_GEOJSON_URL =
-  "https://services-eu1.arcgis.com/fppoCYaq7HfVFbIV/ArcGIS/rest/services/UKR_Frontline_27072025/FeatureServer/0/query?where=1%3D1&outFields=Date,Source&f=geojson";
+/** ArcGIS FeatureServer GeoJSON queries (WGS84). ISW may retire services; bundled fallback + env override cover gaps. */
+const UKRAINE_FRONTLINE_ARCGIS_QUERY_URLS = [
+  "https://services-eu1.arcgis.com/fppoCYaq7HfVFbIV/ArcGIS/rest/services/UKR_Frontline_27072025/FeatureServer/0/query?where=1%3D1&outFields=Date%2CSource%2C*&outSR=4326&returnGeometry=true&returnExceededLimitFeatures=true&resultRecordCount=2000&f=geojson",
+] as const;
 
 function rangeToHours(range: string): number {
   switch ((range || "").toLowerCase()) {
@@ -5120,6 +5124,80 @@ function buildHotspots(
     });
 }
 
+type GeoJsonFeatureLike = {
+  type?: string;
+  properties?: Record<string, unknown>;
+  geometry?: { type?: string; coordinates?: unknown };
+};
+
+async function loadPublicGeoJsonFile(relPath: string): Promise<Record<string, unknown> | null> {
+  const candidates = [
+    path.join(process.cwd(), "public", "geojson", relPath),
+    path.join(process.cwd(), "aegis-web", "public", "geojson", relPath),
+  ];
+  for (const p of candidates) {
+    try {
+      const text = await readFile(p, "utf8");
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      /* try next path */
+    }
+  }
+  return null;
+}
+
+/** ArcGIS GeoJSON export: paginate when properties.exceededTransferLimit is true. */
+async function fetchArcgisGeoJsonAllPages(firstPageUrl: string): Promise<{
+  ok: boolean;
+  features: GeoJsonFeatureLike[];
+  message?: string;
+}> {
+  const collected: GeoJsonFeatureLike[] = [];
+  let offset = 0;
+  const pageSize = 2000;
+  const maxPages = 50;
+  for (let page = 0; page < maxPages; page += 1) {
+    const u = new URL(firstPageUrl);
+    u.searchParams.set("resultOffset", String(offset));
+    u.searchParams.set("resultRecordCount", String(pageSize));
+    u.searchParams.set("outSR", "4326");
+    u.searchParams.set("f", "geojson");
+    u.searchParams.set("returnGeometry", "true");
+    const res = await timedJsonFetch<{
+      type?: string;
+      features?: GeoJsonFeatureLike[];
+      exceededTransferLimit?: boolean;
+      properties?: { exceededTransferLimit?: boolean };
+    }>(u.toString(), undefined, 25000);
+
+    if (!res.ok || !res.data) {
+      if (page === 0) return { ok: false, features: [], message: res.message };
+      break;
+    }
+    const data = res.data;
+    if (data.type !== "FeatureCollection" || !Array.isArray(data.features)) {
+      if (page === 0) return { ok: false, features: [], message: "Invalid GeoJSON" };
+      break;
+    }
+    const feats = data.features;
+    if (feats.length === 0) break;
+    collected.push(...feats);
+    const exceeded =
+      data.exceededTransferLimit === true || data.properties?.exceededTransferLimit === true;
+    if (!exceeded || feats.length < pageSize) break;
+    offset += feats.length;
+  }
+  return { ok: collected.length > 0, features: collected };
+}
+
+function filterLineFeatures(features: GeoJsonFeatureLike[]): GeoJsonFeatureLike[] {
+  return features.filter((f) => {
+    const t = String(f?.geometry?.type ?? "");
+    return t === "LineString" || t === "MultiLineString";
+  });
+}
+
+/** Minimal embedded fallback if disk + network both fail. */
 function fallbackUkraineFrontlineFeatureCollection(): Record<string, unknown> {
   return {
     type: "FeatureCollection",
@@ -5159,35 +5237,82 @@ async function fetchUkraineFrontlineOverlay(nowIso: string): Promise<{
   overlay: FrontlineOverlay;
   sourceState: "live" | "fallback";
 }> {
-  const live = await timedJsonFetch<{
-    type?: string;
-    features?: Array<{
-      type?: string;
-      properties?: Record<string, unknown>;
-      geometry?: { type?: string; coordinates?: unknown };
-    }>;
-  }>(ISW_UKRAINE_FRONTLINE_GEOJSON_URL, undefined, 12000);
+  const tryBuildLive = (
+    lineFeatures: GeoJsonFeatureLike[],
+    sourceLabel: string
+  ): { overlay: FrontlineOverlay; sourceState: "live" } | null => {
+    if (lineFeatures.length === 0) return null;
+    const latestEpoch = lineFeatures.reduce((max, f) => {
+      const v = Number(f?.properties?.Date ?? 0);
+      return Number.isFinite(v) && v > max ? v : max;
+    }, 0);
+    const updatedAt = latestEpoch > 0 ? new Date(latestEpoch).toISOString() : nowIso;
+    return {
+      sourceState: "live",
+      overlay: {
+        id: "ukraine-frontline-isw-live",
+        name: "Ukraine frontline (ISW/CTP)",
+        theater: "Ukraine-Russia",
+        updatedAt,
+        confidence: 92,
+        source: sourceLabel,
+        geojson: {
+          type: "FeatureCollection",
+          features: lineFeatures,
+        },
+      },
+    };
+  };
 
-  if (live.ok && live.data?.type === "FeatureCollection" && Array.isArray(live.data.features)) {
-    const lineFeatures = live.data.features.filter((f) => {
-      const t = String(f?.geometry?.type ?? "");
-      return t === "LineString" || t === "MultiLineString";
-    });
+  const envUrl = process.env.UKRAINE_FRONTLINE_GEOJSON_URL?.trim();
+  if (envUrl) {
+    if (envUrl.includes("FeatureServer") && envUrl.includes("/query")) {
+      const result = await fetchArcgisGeoJsonAllPages(envUrl);
+      const live = tryBuildLive(
+        filterLineFeatures(result.features),
+        "Custom ArcGIS query (UKRAINE_FRONTLINE_GEOJSON_URL)"
+      );
+      if (live) return live;
+    } else {
+      const single = await timedJsonFetch<{
+        type?: string;
+        features?: GeoJsonFeatureLike[];
+      }>(envUrl, undefined, 25000);
+      if (single.ok && single.data?.type === "FeatureCollection" && Array.isArray(single.data.features)) {
+        const live = tryBuildLive(
+          filterLineFeatures(single.data.features),
+          "Custom GeoJSON URL (UKRAINE_FRONTLINE_GEOJSON_URL)"
+        );
+        if (live) return live;
+      }
+    }
+  }
+
+  for (const baseUrl of UKRAINE_FRONTLINE_ARCGIS_QUERY_URLS) {
+    const { ok, features } = await fetchArcgisGeoJsonAllPages(baseUrl);
+    if (!ok) continue;
+    const lineFeatures = filterLineFeatures(features);
+    const live = tryBuildLive(
+      lineFeatures,
+      "ISW/CTP ArcGIS frontline layer (WGS84, paginated)"
+    );
+    if (live) return live;
+  }
+
+  const disk = await loadPublicGeoJsonFile("ukraine-line-of-contact-fallback.geojson");
+  if (disk && disk.type === "FeatureCollection" && Array.isArray(disk.features)) {
+    const lineFeatures = filterLineFeatures(disk.features as GeoJsonFeatureLike[]);
     if (lineFeatures.length > 0) {
-      const latestEpoch = lineFeatures.reduce((max, f) => {
-        const v = Number(f?.properties?.Date ?? 0);
-        return Number.isFinite(v) && v > max ? v : max;
-      }, 0);
-      const updatedAt = latestEpoch > 0 ? new Date(latestEpoch).toISOString() : nowIso;
       return {
-        sourceState: "live",
+        sourceState: "fallback",
         overlay: {
-          id: "ukraine-frontline-isw-live",
-          name: "Ukraine frontline (ISW/CTP)",
+          id: "ukraine-frontline-fallback-bundle",
+          name: "Ukraine line of contact (bundled fallback)",
           theater: "Ukraine-Russia",
-          updatedAt,
-          confidence: 92,
-          source: "ISW/CTP ArcGIS frontline layer",
+          updatedAt: nowIso,
+          confidence: 58,
+          source:
+            "Bundled approximate line-of-contact segments (used when live ISW ArcGIS feeds are unavailable).",
           geojson: {
             type: "FeatureCollection",
             features: lineFeatures,
@@ -5201,11 +5326,11 @@ async function fetchUkraineFrontlineOverlay(nowIso: string): Promise<{
     sourceState: "fallback",
     overlay: {
       id: "ukraine-frontline-fallback",
-      name: "Ukraine frontline (fallback linework)",
+      name: "Ukraine frontline (minimal fallback)",
       theater: "Ukraine-Russia",
       updatedAt: nowIso,
-      confidence: 68,
-      source: "Fallback linework (used when ISW/CTP feed is unavailable)",
+      confidence: 48,
+      source: "Minimal fallback linework (used when bundled GeoJSON could not be read)",
       geojson: fallbackUkraineFrontlineFeatureCollection(),
     },
   };
@@ -5217,55 +5342,9 @@ async function buildFrontlineOverlays(): Promise<{
 }> {
   const nowIso = new Date().toISOString();
   const ukraine = await fetchUkraineFrontlineOverlay(nowIso);
+  const sudanGeo = await loadPublicGeoJsonFile("sudan-conflict-overview.geojson");
+  const koreaGeo = await loadPublicGeoJsonFile("korea-dmz-line.geojson");
 
-  // Densify sparse linework so it renders smoothly as a boundary line.
-  // (If upstream linework has few vertices, filled geometry can look "dotty".)
-  const densifyLineCoords = (
-    coords: Array<[number, number]>,
-    pointsPerSegment: number
-  ): Array<[number, number]> => {
-    if (coords.length < 2) return coords;
-    const out: Array<[number, number]> = [coords[0]];
-    for (let i = 0; i < coords.length - 1; i += 1) {
-      const [x1, y1] = coords[i];
-      const [x2, y2] = coords[i + 1];
-      for (let j = 1; j <= pointsPerSegment; j += 1) {
-        const t = j / (pointsPerSegment + 1);
-        out.push([x1 + (x2 - x1) * t, y1 + (y2 - y1) * t]);
-      }
-      out.push([x2, y2]);
-    }
-    return out;
-  };
-
-  const sudanRawLines: Array<Array<[number, number]>> = [
-    [
-      [22.5, 13.5],
-      [23.5, 13.8],
-      [24.4, 13.7],
-      [25.2, 13.2],
-      [25.0, 12.4],
-      [24.2, 11.9],
-      [23.3, 11.8],
-    ],
-    [
-      [31.1, 15.3],
-      [31.6, 15.0],
-      [32.1, 14.8],
-      [32.7, 14.5],
-      [33.1, 14.0],
-    ],
-    [
-      [32.9, 12.8],
-      [33.3, 12.3],
-      [33.8, 11.9],
-      [34.4, 11.7],
-    ],
-  ];
-
-  const sudanDensifiedLines = sudanRawLines.map((line) =>
-    densifyLineCoords(line, 10)
-  );
   const overlays: FrontlineOverlay[] = [
     ukraine.overlay,
     {
@@ -5275,7 +5354,7 @@ async function buildFrontlineOverlays(): Promise<{
       updatedAt: nowIso,
       confidence: 86,
       source:
-        "Afghanistan-Pakistan shared border geometry (country-adjacent edge extraction)",
+        "Simplified Afghanistan–Pakistan international boundary (WGS84), derived from administrative linework.",
       geojson: {
         type: "Feature",
         geometry: {
@@ -5471,59 +5550,32 @@ async function buildFrontlineOverlays(): Promise<{
         },
       },
     },
-    {
-      id: "sudan-frontline-liveuamap-style",
-      name: "Sudan conflict frontlines",
+  ];
+  if (sudanGeo?.type === "FeatureCollection") {
+    overlays.push({
+      id: "sudan-conflict-overview",
+      name: "Sudan conflict-affected zones (broad)",
       theater: "Sudan-South Sudan",
       updatedAt: nowIso,
-      confidence: 72,
-      source: "Open-source frontline synthesis (LiveUAmap-style)",
-      geojson: {
-        type: "Feature",
-        geometry: {
-          type: "MultiLineString",
-          coordinates: sudanDensifiedLines,
-        },
-        properties: {
-          theater: "Sudan-South Sudan",
-          overlay_type: "active_frontline_synthesis",
-        },
-      },
-    },
-    {
+      confidence: 46,
+      source:
+        "Approximate conflict-affected zones (humanitarian-style regions, not tactical frontlines).",
+      geojson: sudanGeo,
+    });
+  }
+  if (koreaGeo?.type === "FeatureCollection") {
+    overlays.push({
       id: "korea-dmz-line",
-      name: "Korean Peninsula DMZ (illustrative)",
+      name: "Korean Peninsula DMZ (approximate MDL)",
       theater: "Korea",
       updatedAt: nowIso,
-      confidence: 55,
+      confidence: 62,
       source:
-        "Approximate Korean DMZ corridor (~38°N), west–east; illustrative only—not a surveyed boundary.",
-      geojson: {
-        type: "Feature",
-        geometry: {
-          type: "LineString",
-          coordinates: densifyLineCoords(
-            [
-              [124.72, 37.9],
-              [125.35, 37.96],
-              [126.05, 38.0],
-              [126.75, 38.04],
-              [127.35, 38.08],
-              [127.95, 38.12],
-              [128.55, 38.2],
-              [129.05, 38.28],
-              [129.42, 38.38],
-            ],
-            8
-          ),
-        },
-        properties: {
-          theater: "Korea",
-          overlay_type: "dmz_corridor",
-        },
-      },
-    },
-    {
+        "Approximate Military Demarcation Line (densified polyline, WGS84); not a surveyed boundary.",
+      geojson: koreaGeo,
+    });
+  }
+  overlays.push({
       id: "south-china-sea-maritime-escalation",
       name: "South China Sea maritime risk tint",
       theater: "Indo-Pacific",
@@ -5550,8 +5602,7 @@ async function buildFrontlineOverlays(): Promise<{
           overlay_type: "maritime_escalation",
         },
       },
-    },
-  ];
+  });
 
   return {
     overlays,
@@ -5559,7 +5610,7 @@ async function buildFrontlineOverlays(): Promise<{
       provider: "Land-war frontier overlays",
       ok: overlays.length > 0,
       updatedAt: nowIso,
-      message: `Loaded ${overlays.length} frontier layers [ukraine=${ukraine.sourceState}; afpak=afpak_border; sudan=line_synthesis; korea=dmz_corridor; scs=maritime_escalation]`,
+      message: `Loaded ${overlays.length} frontier layers [ukraine=${ukraine.sourceState}; afpak=afpak_border; sudan=${sudanGeo?.type === "FeatureCollection" ? "zones" : "off"}; korea=${koreaGeo?.type === "FeatureCollection" ? "dmz_mdl" : "off"}; scs=maritime_escalation]`,
     },
   };
 }
