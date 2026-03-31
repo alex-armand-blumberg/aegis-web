@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { LAYER_PRESETS } from "@/components/map/mapLayerPresets";
 import { COUNTRY_NAMES } from "@/lib/countries";
 import { useCommandPalette } from "./CommandPaletteContext";
 import { useMapHandlers } from "./MapCommandsContext";
@@ -147,20 +146,6 @@ export function CommandPalette() {
           setOpen(false);
         },
       });
-      for (const p of LAYER_PRESETS) {
-        const hay = `preset ${p.label}`.toLowerCase();
-        if (!ql || hay.includes(ql) || "preset".includes(ql)) {
-          list.push({
-            id: `preset-${p.id}`,
-            label: `Preset: ${p.label}`,
-            meta: "Map",
-            onSelect: () => {
-              mapHandlers.applyPreset?.(p.id);
-              setOpen(false);
-            },
-          });
-        }
-      }
       list.push({
         id: "map-diag",
         label: "Open system drawer (sources & limits)",

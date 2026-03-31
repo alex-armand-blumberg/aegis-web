@@ -25,7 +25,7 @@ function updateBoundsFromCoord(
   bounds.maxLon = Math.max(bounds.maxLon, lon);
 }
 
-function computeBoundsFromGeometry(geometry: any): {
+function computeBoundsFromGeometry(geometry: unknown): {
   minLat: number;
   maxLat: number;
   minLon: number;
@@ -73,7 +73,9 @@ async function loadNaturalEarthCountryCenters(): Promise<Map<string, LatLon>> {
         headers: { "user-agent": "AEGIS-NaturalEarthCenters/1.0" },
       });
       if (!res.ok) return new Map<string, LatLon>();
-      const json = (await res.json()) as { features?: any[] };
+      const json = (await res.json()) as {
+        features?: Array<{ properties?: { name?: string }; geometry?: unknown }>;
+      };
       const centers = new Map<string, LatLon>();
 
       for (const f of json.features ?? []) {

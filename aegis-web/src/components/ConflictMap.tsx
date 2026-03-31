@@ -1,7 +1,6 @@
 "use client";
 
-import { WebMercatorViewport } from "@deck.gl/core";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import DeckGL from "@deck.gl/react";
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import Map, { NavigationControl } from "react-map-gl/maplibre";
@@ -14,18 +13,11 @@ import type {
   FrontlineOverlay,
   IntelLayerKey,
   IntelPoint,
-  RegionSelection,
 } from "@/lib/intel/types";
 import { LAYER_COLORS } from "@/lib/intel/colors";
 import { formatCountryMapLabelShort } from "@/lib/countryDisplay";
 import { getOceanRegionFeatures } from "@/lib/regionGeometry";
-
-export type ConflictMapHandle = {
-  flyTo: (opts: { longitude: number; latitude: number; zoom?: number }) => void;
-  /** Bounds from getCountryBounds: [[latMin, lonMin], [latMax, lonMax]] */
-  fitLatLngBounds: (bounds: [[number, number], [number, number]]) => void;
-  recenter: () => void;
-};
+import type { RegionSelection } from "@/lib/intel/types";
 
 export type ConflictMapProps = {
   layers: Record<IntelLayerKey, IntelPoint[]>;
@@ -34,13 +26,11 @@ export type ConflictMapProps = {
   escalationRiskCountries?: EscalationRiskCountry[];
   frontlineOverlays?: FrontlineOverlay[];
   recenterRef?: React.MutableRefObject<(() => void) | null>;
-  selectedPointId?: string | null;
   onReady?: () => void;
   onError?: (message: string) => void;
   onPointSelect?: (point: IntelPoint) => void;
   onCountrySelect?: (country: string) => void;
   onRegionSelect?: (selection: RegionSelection) => void;
-  onHoverIntel?: (info: { point: IntelPoint; x: number; y: number } | null) => void;
 };
 
 const DEFAULT_VIEW_STATE = {
@@ -75,7 +65,8 @@ const COUNTRY_NAME_ALIASES: Record<string, string> = {
   "viet nam": "vietnam",
   "korea republic of": "south korea",
   "korea democratic peoples republic of": "north korea",
-  turkiye: "turkey",
+  "turkiye": "turkey",
+  // GeoJSON often uses “Palestine”; API canonical name is the full label below.
   palestine: "judea & samaria / palestine",
 };
 const COUNTRY_HIGHLIGHT_DENYLIST = new Set([
@@ -83,8 +74,6 @@ const COUNTRY_HIGHLIGHT_DENYLIST = new Set([
   "democratic republic of the congo",
   "mexico",
   "chad",
-  "united kingdom",
-  "great britain",
 ]);
 const CONFLICT_LAYER_KEYS = new Set<IntelLayerKey>([
   "conflicts",
@@ -158,126 +147,39 @@ function isGeoJsonFeatureCollection(
   );
 }
 
-function isIntelPoint(o: unknown): o is IntelPoint {
-  if (typeof o !== "object" || o === null) return false;
-  const p = o as IntelPoint;
-  return typeof p.id === "string" && typeof p.layer === "string" && typeof p.title === "string";
-}
-
-function refineBasemap(map: maplibregl.Map) {
-  try {
-    const styleLayers = map.getStyle().layers ?? [];
-    for (const layer of styleLayers) {
-      const id = layer.id.toLowerCase();
-      if (layer.type === "line" && (id.includes("boundary") || id.includes("admin"))) {
-        try {
-          map.setPaintProperty(layer.id, "line-color", "rgba(148,163,184,0.5)");
-          map.setPaintProperty(layer.id, "line-width", 0.75);
-        } catch {
-          /* layer may not support */
-        }
-      }
-      if (layer.type === "symbol") {
-        try {
-          map.setPaintProperty(layer.id, "text-color", "rgba(226,232,240,0.88)");
-          map.setPaintProperty(layer.id, "text-halo-color", "rgba(2,6,18,0.82)");
-          map.setPaintProperty(layer.id, "text-halo-width", 1.1);
-        } catch {
-          /* optional */
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
-const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function ConflictMap(
-  {
-    layers,
-    activeLayers,
-    activeConflictCountries = [],
-    escalationRiskCountries = [],
-    frontlineOverlays = [],
-    recenterRef,
-    selectedPointId = null,
-    onReady,
-    onError,
-    onPointSelect,
-    onCountrySelect,
-    onRegionSelect,
-    onHoverIntel,
-  },
-  ref
-) {
+export default function ConflictMap({
+  layers,
+  activeLayers,
+  activeConflictCountries = [],
+  escalationRiskCountries = [],
+  frontlineOverlays = [],
+  recenterRef,
+  onReady,
+  onError,
+  onPointSelect,
+  onCountrySelect,
+  onRegionSelect,
+}: ConflictMapProps) {
   const [viewState, setViewState] = useState(DEFAULT_VIEW_STATE);
-  const viewStateRef = useRef(viewState);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    viewStateRef.current = viewState;
-  }, [viewState]);
-
-  const recenter = useCallback(() => setViewState(DEFAULT_VIEW_STATE), []);
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      flyTo: ({ longitude, latitude, zoom }) => {
-        setViewState((v) => ({
-          ...v,
-          longitude,
-          latitude,
-          zoom: typeof zoom === "number" ? zoom : v.zoom,
-        }));
-      },
-      fitLatLngBounds: (bounds) => {
-        const el = containerRef.current;
-        if (!el) return;
-        const w = el.clientWidth || 800;
-        const h = el.clientHeight || 600;
-        const [[lat0, lon0], [lat1, lon1]] = bounds;
-        const minLng = Math.min(lon0, lon1);
-        const maxLng = Math.max(lon0, lon1);
-        const minLat = Math.min(lat0, lat1);
-        const maxLat = Math.max(lat0, lat1);
-        const vs = viewStateRef.current;
-        try {
-          const viewport = new WebMercatorViewport({
-            width: w,
-            height: h,
-            ...vs,
-          });
-          const { longitude, latitude, zoom } = viewport.fitBounds(
-            [
-              [minLng, minLat],
-              [maxLng, maxLat],
-            ],
-            { padding: 48 }
-          );
-          setViewState((v) => ({ ...v, longitude, latitude, zoom, pitch: v.pitch, bearing: v.bearing }));
-        } catch {
-          const cx = (minLng + maxLng) / 2;
-          const cy = (minLat + maxLat) / 2;
-          setViewState((v) => ({ ...v, longitude: cx, latitude: cy, zoom: Math.max(v.zoom, 4) }));
-        }
-      },
-      recenter,
-    }),
-    [recenter]
-  );
+    onReady?.();
+  }, [onReady]);
 
   useEffect(() => {
     if (!recenterRef) return;
-    recenterRef.current = recenter;
+    recenterRef.current = () => setViewState(DEFAULT_VIEW_STATE);
     return () => {
       recenterRef.current = null;
     };
-  }, [recenter, recenterRef]);
+  }, [recenterRef]);
 
   const visiblePoints = useMemo(() => {
     const out: IntelPoint[] = [];
-    for (const [layer, enabled] of Object.entries(activeLayers) as [IntelLayerKey, boolean][]) {
+    for (const [layer, enabled] of Object.entries(activeLayers) as [
+      IntelLayerKey,
+      boolean,
+    ][]) {
       if (!enabled) continue;
       out.push(...layers[layer]);
     }
@@ -311,7 +213,7 @@ const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function Con
           filled: true,
           stroked: true,
           lineWidthMinPixels: 1,
-          getLineColor: [148, 163, 184, 100],
+          getLineColor: [148, 163, 184, 110],
           getFillColor: (f) => {
             const rawName = getFeatureCountryName(f);
             if (isCountryHighlightDenied(rawName)) return [0, 0, 0, 0];
@@ -319,13 +221,15 @@ const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function Con
             const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
             const score = countryScore.get(key) ?? 0;
             if (score < 1) return [0, 0, 0, 0];
-            if (score >= 12) return [185, 28, 28, 118];
-            if (score >= 7) return [220, 38, 38, 98];
-            if (score >= 3.5) return [239, 68, 68, 78];
-            return [248, 113, 113, 58];
+            if (score >= 12) return [185, 28, 28, 145];
+            if (score >= 7) return [220, 38, 38, 120];
+            if (score >= 3.5) return [239, 68, 68, 95];
+            return [248, 113, 113, 70];
           },
           updateTriggers: {
-            getFillColor: [activeConflictCountries.map((c) => `${c.country}:${c.score}`).join("|")],
+            getFillColor: [
+              activeConflictCountries.map((c) => `${c.country}:${c.score}`).join("|"),
+            ],
           },
         })
       );
@@ -343,7 +247,9 @@ const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function Con
         stroked: false,
         getFillColor: [0, 0, 0, 1],
         onClick: ({ object }) => {
-          const feature = object as { properties?: { regionKey?: string; name?: string } } | null;
+          const feature = object as {
+            properties?: { regionKey?: string; name?: string };
+          } | null;
           const regionKey = feature?.properties?.regionKey?.trim();
           const name = feature?.properties?.name?.trim();
           if (!regionKey || !name) return;
@@ -356,6 +262,7 @@ const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function Con
       })
     );
 
+    // Keep this layer after ocean picking so country clicks win on land.
     built.push(
       new GeoJsonLayer({
         id: "country-picking-only",
@@ -393,12 +300,14 @@ const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function Con
             const key = COUNTRY_NAME_ALIASES[normalized] ?? normalized;
             const score = riskScore.get(key) ?? 0;
             if (score <= 0) return [0, 0, 0, 0];
-            if (score >= 14) return [219, 39, 119, 98];
-            if (score >= 8) return [236, 72, 153, 78];
-            return [244, 114, 182, 58];
+            if (score >= 14) return [219, 39, 119, 120];
+            if (score >= 8) return [236, 72, 153, 95];
+            return [244, 114, 182, 70];
           },
           updateTriggers: {
-            getFillColor: [escalationRiskCountries.map((c) => `${c.country}:${c.riskScore}`).join("|")],
+            getFillColor: [
+              escalationRiskCountries.map((c) => `${c.country}:${c.riskScore}`).join("|"),
+            ],
           },
         })
       );
@@ -444,8 +353,8 @@ const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function Con
             getLineWidth: 1,
             lineWidthMinPixels: 1,
             lineWidthMaxPixels: 2,
-            getLineColor: [248, 113, 113, 160],
-            getFillColor: [220, 38, 38, 72],
+            getLineColor: [248, 113, 113, 180],
+            getFillColor: [220, 38, 38, 95],
           })
         );
       }
@@ -466,7 +375,7 @@ const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function Con
             getLineWidth: 2,
             lineWidthMinPixels: 2,
             lineWidthMaxPixels: 2,
-            getLineColor: [253, 186, 116, 200],
+            getLineColor: [253, 186, 116, 220],
           })
         );
       }
@@ -474,81 +383,59 @@ const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function Con
 
     built.push(
       ...(Object.keys(activeLayers) as IntelLayerKey[])
-        .filter((k) => activeLayers[k])
-        .map((layerKey) => {
-          const color = LAYER_COLORS[layerKey];
-          const layerPoints = layers[layerKey] || [];
+      .filter((k) => activeLayers[k])
+      .map((layerKey) => {
+        const color = LAYER_COLORS[layerKey];
+        const layerPoints = layers[layerKey] || [];
 
-          return new ScatterplotLayer<IntelPoint>({
-            id: `scatter-${layerKey}`,
-            data: layerPoints,
-            getPosition: (d) => jitteredPosition(d, layerKey),
-            getRadius: (d) => {
-              const base =
-                layerKey === "hotspots"
-                  ? 15000
-                  : layerKey === "liveStrikes"
-                    ? 25000
-                    : layerKey === "news"
-                      ? 15500
-                      : CONFLICT_LAYER_KEYS.has(layerKey)
-                        ? 23000
-                        : 18500;
-              const magnitude = Math.max(0.6, Math.min(2, (d.magnitude ?? 1) / 20));
-              let r = base * magnitude * severityRadiusMultiplier(d.severity);
-              if (selectedPointId && d.id === selectedPointId) r *= 1.2;
-              return r;
-            },
-            getFillColor: (d) => {
-              const sel = selectedPointId && d.id === selectedPointId;
-              const alpha =
-                layerKey === "hotspots"
-                  ? sel
-                    ? 245
-                    : 210
-                  : layerKey === "news"
-                    ? sel
-                      ? 200
-                      : 140
-                    : layerKey === "liveStrikes"
-                      ? sel
-                        ? 210
-                        : 160
-                      : sel
-                        ? 220
-                        : 170;
-              return [...color, alpha];
-            },
-            getLineColor: (d) => {
-              const sel = selectedPointId && d.id === selectedPointId;
-              if (sel) return [125, 211, 252, 255];
-              return [255, 255, 255, layerKey === "news" ? 70 : 90];
-            },
-            lineWidthMinPixels: selectedPointId ? 2 : 1.25,
-            stroked: true,
-            filled: true,
-            pickable: true,
-            radiusMinPixels:
-              layerKey === "hotspots" ? 3 : layerKey === "news" ? 2.5 : 3,
-            radiusMaxPixels:
+        return new ScatterplotLayer<IntelPoint>({
+          id: `scatter-${layerKey}`,
+          data: layerPoints,
+          getPosition: (d) => jitteredPosition(d, layerKey),
+          getRadius: (d) => {
+            const base =
               layerKey === "hotspots"
-                ? 16
-                : layerKey === "news"
+                ? 15000
+                : layerKey === "liveStrikes"
+                  ? 25000
+                  : layerKey === "news"
+                    ? 15500
+                  : CONFLICT_LAYER_KEYS.has(layerKey)
+                    ? 23000
+                    : 18500;
+            const magnitude = Math.max(0.6, Math.min(2, (d.magnitude ?? 1) / 20));
+            return base * magnitude * severityRadiusMultiplier(d.severity);
+          },
+          getFillColor: [
+            ...color,
+            layerKey === "hotspots"
+              ? 210
+              : layerKey === "news"
+                ? 140
+                : layerKey === "liveStrikes"
+                  ? 160
+                  : 170,
+          ],
+          getLineColor: [255, 255, 255, layerKey === "news" ? 70 : 90],
+          lineWidthMinPixels: 1,
+          stroked: true,
+          filled: true,
+          pickable: true,
+          radiusMinPixels:
+            layerKey === "hotspots" ? 3 : layerKey === "news" ? 2 : 3,
+          radiusMaxPixels:
+            layerKey === "hotspots"
+              ? 14
+              : layerKey === "news"
+                ? 10
+                : layerKey === "liveStrikes"
                   ? 12
-                  : layerKey === "liveStrikes"
-                    ? 14
-                    : 16,
-            onClick: ({ object }) => {
-              if (object) onPointSelect?.(object);
-            },
-            updateTriggers: {
-              getFillColor: [selectedPointId],
-              getLineColor: [selectedPointId],
-              getRadius: [selectedPointId],
-              lineWidthMinPixels: [selectedPointId],
-            },
-          });
-        })
+                  : 14,
+          onClick: ({ object }) => {
+            if (object) onPointSelect?.(object);
+          },
+        });
+      })
     );
 
     if (activeLayers.hotspots) {
@@ -582,72 +469,65 @@ const ConflictMap = forwardRef<ConflictMapHandle, ConflictMapProps>(function Con
     onCountrySelect,
     onRegionSelect,
     onPointSelect,
-    selectedPointId,
   ]);
 
-  const onDeckHover = useCallback(
-    (info: { object?: unknown; x: number; y: number }) => {
-      if (!onHoverIntel) return;
-      const o = info.object;
-      if (isIntelPoint(o)) {
-        const el = containerRef.current;
-        if (!el) return;
-        const r = el.getBoundingClientRect();
-        onHoverIntel({ point: o, x: r.left + info.x, y: r.top + info.y });
-      } else {
-        onHoverIntel(null);
-      }
-    },
-    [onHoverIntel]
-  );
-
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative" }}>
-      <DeckGL
-        layers={deckLayers}
-        initialViewState={DEFAULT_VIEW_STATE}
-        controller={true}
-        viewState={viewState}
-        onViewStateChange={({ viewState: next }) =>
-          setViewState((prev) => {
-            const candidate = next as Partial<typeof DEFAULT_VIEW_STATE>;
-            return {
-              longitude: typeof candidate.longitude === "number" ? candidate.longitude : prev.longitude,
-              latitude: typeof candidate.latitude === "number" ? candidate.latitude : prev.latitude,
-              zoom: typeof candidate.zoom === "number" ? candidate.zoom : prev.zoom,
-              pitch: typeof candidate.pitch === "number" ? candidate.pitch : prev.pitch,
-              bearing: typeof candidate.bearing === "number" ? candidate.bearing : prev.bearing,
-            };
-          })
-        }
-        onHover={onHoverIntel ? onDeckHover : undefined}
-        getCursor={({ isHovering }) => (isHovering ? "pointer" : "grab")}
+    <DeckGL
+      layers={deckLayers}
+      initialViewState={DEFAULT_VIEW_STATE}
+      controller={true}
+      viewState={viewState}
+      onViewStateChange={({ viewState: next }) =>
+        setViewState((prev) => {
+          const candidate = next as Partial<typeof DEFAULT_VIEW_STATE>;
+          return {
+            longitude: typeof candidate.longitude === "number" ? candidate.longitude : prev.longitude,
+            latitude: typeof candidate.latitude === "number" ? candidate.latitude : prev.latitude,
+            zoom: typeof candidate.zoom === "number" ? candidate.zoom : prev.zoom,
+            pitch: typeof candidate.pitch === "number" ? candidate.pitch : prev.pitch,
+            bearing: typeof candidate.bearing === "number" ? candidate.bearing : prev.bearing,
+          };
+        })
+      }
+      getCursor={({ isHovering }) => (isHovering ? "pointer" : "grab")}
+    >
+      <Map
+        mapLib={maplibregl}
+        mapStyle={BASEMAP_STYLE}
+        attributionControl={false}
+        reuseMaps
+        onLoad={() => onReady?.()}
+        onError={(e) => {
+          const msg =
+            typeof (e as { error?: { message?: string } }).error?.message ===
+            "string"
+              ? (e as { error: { message: string } }).error.message
+              : "Map error";
+          onError?.(msg);
+        }}
       >
-        <Map
-          mapLib={maplibregl}
-          mapStyle={BASEMAP_STYLE}
-          attributionControl={false}
-          reuseMaps
-          onLoad={(e) => {
-            refineBasemap(e.target);
-            onReady?.();
-          }}
-          onError={(e) => {
-            const msg =
-              typeof (e as { error?: { message?: string } }).error?.message === "string"
-                ? (e as { error: { message: string } }).error.message
-                : "Map error";
-            onError?.(msg);
+        <NavigationControl position="top-left" visualizePitch={true} />
+      </Map>
+      {visiblePoints.length === 0 && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: 90,
+            transform: "translateX(-50%)",
+            zIndex: 20,
+            padding: "8px 12px",
+            borderRadius: 6,
+            border: "1px solid rgba(96,165,250,0.3)",
+            background: "rgba(2,8,20,0.8)",
+            color: "rgba(226,232,240,0.85)",
+            fontSize: 12,
+            letterSpacing: "0.04em",
           }}
         >
-          <NavigationControl position="top-left" visualizePitch={true} />
-        </Map>
-        {visiblePoints.length === 0 && (
-          <div className="map-empty-overlay">No active points for selected layers and time range.</div>
-        )}
-      </DeckGL>
-    </div>
+          No active points for selected layers and time range.
+        </div>
+      )}
+    </DeckGL>
   );
-});
-
-export default ConflictMap;
+}

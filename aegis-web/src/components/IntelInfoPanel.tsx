@@ -1,10 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { IntelBriefTabPanel, IntelBriefTabs, type IntelBriefTabId } from "@/components/map/IntelBriefTabs";
 import type { IntelPoint, ProviderHealth } from "@/lib/intel/types";
-import { INTEL_LAYER_LABELS } from "@/lib/intel/layerLabels";
-import { StatusChip } from "@/components/ui/StatusChip";
 
 type IntelInfoPanelProps = {
   point: IntelPoint;
@@ -13,6 +10,19 @@ type IntelInfoPanelProps = {
   aiLoading?: boolean;
   onClose: () => void;
 };
+
+function severityColor(severity: IntelPoint["severity"]): string {
+  switch (severity) {
+    case "critical":
+      return "#ef4444";
+    case "high":
+      return "#f97316";
+    case "medium":
+      return "#f59e0b";
+    default:
+      return "#60a5fa";
+  }
+}
 
 /** Human-readable labels for common metadata keys (API still uses snake_case). */
 const METADATA_LABELS: Record<string, string> = {
@@ -132,14 +142,13 @@ export default function IntelInfoPanel({
     [point.id, sourceUrl]
   );
 
+  /* eslint-disable react-hooks/set-state-in-effect -- reset derived article image state when cache key changes */
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- reset image pipeline when point / URL changes */
     setArticleImageLookupDone(false);
     setResolvedArticleImage(null);
     setArticleImageLoading(false);
     setResolvedEventImage(null);
     setEventHeroImageLoading(false);
-    /* eslint-enable react-hooks/set-state-in-effect */
 
     if (fromPointImage) {
       setArticleImageLookupDone(true);
@@ -192,17 +201,17 @@ export default function IntelInfoPanel({
       window.clearTimeout(debounce);
     };
   }, [cacheKey, fromPointImage, sourceUrl]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const eventCacheKey = useMemo(
     () => `${point.layer}|${point.id}`.slice(0, 220),
     [point.layer, point.id]
   );
 
+  /* eslint-disable react-hooks/set-state-in-effect -- reset event hero when event identity changes */
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- reset event hero when dependencies change */
     setResolvedEventImage(null);
     setEventHeroImageLoading(false);
-    /* eslint-enable react-hooks/set-state-in-effect */
 
     // Only try "event-hero-image" when:
     // - we don't already have a direct image from the point
@@ -280,6 +289,7 @@ export default function IntelInfoPanel({
     sourceUrl,
     articleImageLookupDone,
   ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const imageUrl = fromPointImage || resolvedArticleImage || resolvedEventImage || null;
 
@@ -341,146 +351,111 @@ export default function IntelInfoPanel({
     "branch_or_unit",
   ]);
 
-  const severityVariant =
-    point.severity === "critical"
-      ? "critical"
-      : point.severity === "high"
-        ? "high"
-        : point.severity === "medium"
-          ? "medium"
-          : "low";
-
-  const [tab, setTab] = useState<IntelBriefTabId>("overview");
-  const signalRows = metadataEntries.filter(([k]) => !hiddenMetadataKeys.has(k));
-
-  const pointTabs = useMemo(() => {
-    const t: { id: IntelBriefTabId; label: string }[] = [
-      { id: "overview", label: "Overview" },
-      { id: "signals", label: "Signals" },
-      { id: "sources", label: "Sources" },
-      { id: "summary", label: "Summary" },
-    ];
-    return t;
-  }, []);
-
-  const layerKicker =
-    point.layer === "carriers"
-      ? "Carriers (preview)"
-      : INTEL_LAYER_LABELS[point.layer] ?? point.layer;
-
   return (
-    <aside className="intel-side-panel intel-brief-panel intel-panel-responsive">
-      <div className="intel-brief-sticky">
-        <button type="button" className="intel-side-close intel-brief-close" aria-label="Close brief" onClick={onClose}>
-          ×
-        </button>
-        <div className="intel-brief-title-block">
-          <div className="intel-side-kicker">{layerKicker}</div>
-          <h3 className="intel-brief-title">{point.title}</h3>
-          <p className="intel-brief-subtitle">{point.subtitle || point.country || "Global signal"}</p>
+    <aside className="intel-side-panel">
+      <button type="button" className="intel-side-close" onClick={onClose}>
+        x
+      </button>
+      <div className="intel-side-header">
+        {(articleImageLoading || eventHeroImageLoading) && !fromPointImage ? (
+          <div className="intel-side-image intel-side-image-loading" aria-hidden />
+        ) : null}
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={point.title}
+            className="intel-side-image"
+          />
+        ) : null}
+        <div className="intel-side-kicker">
+          {point.layer === "carriers" ? "CARRIERS · WIP" : point.layer.toUpperCase()}
         </div>
-        <IntelBriefTabs tabs={pointTabs} active={tab} onChange={setTab} />
+        <h3>{point.title}</h3>
+        <p>{point.subtitle || point.country || "Global signal"}</p>
       </div>
 
-      <div className="intel-brief-scroll">
-        <IntelBriefTabPanel id="overview" active={tab}>
-          <div className="intel-brief-section">
-            {(articleImageLoading || eventHeroImageLoading) && !fromPointImage ? (
-              <div className="intel-side-image intel-side-image-loading intel-brief-hero-skel" aria-hidden />
-            ) : null}
-            {imageUrl ? (
-              <img src={imageUrl} alt={point.title} className="intel-side-image intel-brief-hero" />
-            ) : !articleImageLoading && !eventHeroImageLoading ? (
-              <img src={heroPlaceholderForPoint(point)} alt="" className="intel-side-image intel-brief-hero" />
-            ) : null}
-            <div className="intel-brief-chips">
-              <StatusChip variant={severityVariant}>{point.severity}</StatusChip>
-              {typeof point.confidence === "number" ? (
-                <StatusChip variant="medium">{`${Math.round(point.confidence * 100)}% confidence`}</StatusChip>
-              ) : null}
-            </div>
-            <div className="intel-side-grid intel-brief-pad">
-              <div className="intel-side-item">
-                <span>Country</span>
-                <strong>{displayCountry ?? "Unknown"}</strong>
-              </div>
-              {platformSummary ? (
-                <div className="intel-side-item">
-                  <span>
-                    {point.layer === "flights"
-                      ? "Aircraft type"
-                      : point.layer === "vessels" || point.layer === "carriers"
-                        ? "Vessel type"
-                        : "Unit / branch"}
-                  </span>
-                  <strong>{platformSummary}</strong>
-                </div>
-              ) : null}
-              <div className="intel-side-item">
-                <span>Source</span>
-                <strong>{point.source}</strong>
-              </div>
-              <div className="intel-side-item">
-                <span>Updated</span>
-                <strong>{new Date(point.timestamp).toLocaleString()}</strong>
-              </div>
-            </div>
-            {sourceUrl ? (
-              <a href={sourceUrl} className="intel-brief-link" target="_blank" rel="noreferrer">
-                Open primary article
-              </a>
-            ) : null}
+      <div className="intel-side-grid">
+        <div className="intel-side-item">
+          <span>Country</span>
+          <strong>{displayCountry ?? "Unknown / not resolved"}</strong>
+        </div>
+        {platformSummary ? (
+          <div className="intel-side-item">
+            <span>
+              {point.layer === "flights"
+                ? "Aircraft type"
+                : point.layer === "vessels" || point.layer === "carriers"
+                  ? "Vessel type"
+                  : "Unit / branch"}
+            </span>
+            <strong>{platformSummary}</strong>
           </div>
-        </IntelBriefTabPanel>
+        ) : null}
+        <div className="intel-side-item">
+          <span>Severity</span>
+          <strong style={{ color: severityColor(point.severity) }}>
+            {point.severity.toUpperCase()}
+          </strong>
+        </div>
+        <div className="intel-side-item">
+          <span>Source</span>
+          <strong>{point.source}</strong>
+        </div>
+        <div className="intel-side-item">
+          <span>Updated</span>
+          <strong>{new Date(point.timestamp).toLocaleString()}</strong>
+        </div>
+        <div className="intel-side-item">
+          <span>Confidence</span>
+          <strong>
+            {typeof point.confidence === "number"
+              ? `${Math.round(point.confidence * 100)}%`
+              : "N/A"}
+          </strong>
+        </div>
+      </div>
 
-        <IntelBriefTabPanel id="signals" active={tab}>
-          <div className="intel-brief-pad">
-            {signalRows.length > 0 ? (
-              signalRows.map(([k, v]) => (
-                <div key={k} className="intel-side-item">
-                  <span>{formatMetadataLabel(k)}</span>
-                  <strong>{String(v)}</strong>
-                </div>
-              ))
-            ) : (
-              <p className="intel-brief-muted">No extra signal fields for this point.</p>
-            )}
-          </div>
-        </IntelBriefTabPanel>
-
-        <IntelBriefTabPanel id="sources" active={tab}>
-          <div className="intel-brief-pad">
-            <div className="intel-side-subtitle">Feed line match</div>
-            <div className="intel-side-item">
-              <span>This event</span>
-              <strong>{point.source}</strong>
-            </div>
-            {health?.message ? <p className="intel-side-note">{health.message}</p> : null}
-            <div className="intel-side-subtitle intel-brief-mt">Pipeline status</div>
-            {providerHealth.map((h) => (
-              <div key={h.provider} className="intel-side-item">
-                <span>{h.provider}</span>
-                <strong style={{ color: h.ok ? "#34d399" : "#f87171" }}>{h.ok ? "OK" : "Degraded"}</strong>
+      {metadataEntries.length > 0 && (
+        <div className="intel-side-metadata">
+          <div className="intel-side-subtitle">Signal data</div>
+          {metadataEntries
+            .filter(([k]) => !hiddenMetadataKeys.has(k))
+            .map(([k, v]) => (
+              <div key={k} className="intel-side-item">
+                <span>{formatMetadataLabel(k)}</span>
+                <strong>{String(v)}</strong>
               </div>
             ))}
-          </div>
-        </IntelBriefTabPanel>
+        </div>
+      )}
 
-        <IntelBriefTabPanel id="summary" active={tab}>
-          <div className="intel-brief-pad">
-            {aiLoading ? (
-              <div className="map-skeleton map-skeleton-text" />
-            ) : aiBulletLines.length > 0 ? (
-              <ul className="intel-side-note-list">
-                {aiBulletLines.map((line, idx) => (
-                  <li key={`${point.id}-ai-${idx}`}>{line}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="intel-brief-muted">No AI summary yet.</p>
-            )}
+      <div className="intel-side-metadata">
+        <div className="intel-side-subtitle">Provider status</div>
+        {providerHealth.map((h) => (
+          <div key={h.provider} className="intel-side-item">
+            <span>{h.provider}</span>
+            <strong style={{ color: h.ok ? "#22c55e" : "#ef4444" }}>
+              {h.ok ? "OK" : "DEGRADED"}
+            </strong>
           </div>
-        </IntelBriefTabPanel>
+        ))}
+      </div>
+
+      {health?.message && <p className="intel-side-note">{health.message}</p>}
+
+      <div className="intel-side-metadata">
+        <div className="intel-side-subtitle">AI event briefing</div>
+        {aiLoading ? (
+          <p className="intel-side-note">Generating AI summary...</p>
+        ) : aiBulletLines.length > 0 ? (
+          <ul className="intel-side-note-list">
+            {aiBulletLines.map((line, idx) => (
+              <li key={`${point.id}-ai-${idx}`}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="intel-side-note">No AI summary yet.</p>
+        )}
       </div>
     </aside>
   );
