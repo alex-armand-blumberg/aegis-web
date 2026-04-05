@@ -17,9 +17,7 @@ export default function Reveal({
     if (!el) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
-          setVisible(true);
-        }
+        setVisible(entries[0].isIntersecting);
       },
       { threshold: 0.12 }
     );

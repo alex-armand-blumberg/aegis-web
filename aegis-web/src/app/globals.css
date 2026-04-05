@@ -935,8 +935,8 @@ nav {
   padding: 120px 48px;
   position: relative;
   background-image: linear-gradient(
-      rgba(2, 6, 17, 0.35),
-      rgba(2, 6, 17, 0.55)
+      rgba(2, 6, 17, 0.45),
+      rgba(2, 6, 17, 0.68)
     ),
     url("/satellite-earth.png");
   background-size: cover;
@@ -946,7 +946,7 @@ nav {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse 70% 50% at 50% 40%, rgba(0, 0, 0, 0.15) 0%, transparent 65%);
+  background: radial-gradient(ellipse 70% 50% at 50% 40%, rgba(0, 0, 0, 0.24) 0%, transparent 65%);
   pointer-events: none;
 }
 #cta .ui-cta-band {

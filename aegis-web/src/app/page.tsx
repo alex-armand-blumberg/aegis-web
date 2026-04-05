@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
-import AnimatedNumber from "@/components/AnimatedNumber";
 import AnimatedNumberOnView from "@/components/AnimatedNumberOnView";
 import AnimatedMethodWeight from "@/components/AnimatedMethodWeight";
 import BackgroundVideo from "@/components/BackgroundVideo";
@@ -86,19 +85,19 @@ export default function Home() {
         <div className="hero-stats">
           <div className="stat">
             <div className="stat-num">
-              <AnimatedNumber value={180} suffix="+" suffixClassName="stat-plus-accent" />
+              <AnimatedNumberOnView value={180} suffix="+" suffixClassName="stat-plus-accent" />
             </div>
             <div className="stat-label">Countries &amp; regions</div>
           </div>
           <div className="stat">
             <div className="stat-num">
-              <AnimatedNumber value={16} />
+              <AnimatedNumberOnView value={16} />
             </div>
             <div className="stat-label">Intel layer types</div>
           </div>
           <div className="stat">
             <div className="stat-num">
-              <AnimatedNumber value={8} suffix="+" suffixClassName="stat-plus-accent" />
+              <AnimatedNumberOnView value={8} suffix="+" suffixClassName="stat-plus-accent" />
             </div>
             <div className="stat-label">Years of history</div>
           </div>
