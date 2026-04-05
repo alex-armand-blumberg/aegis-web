@@ -50,6 +50,33 @@ const UKRAINE_FRONTLINE_ARCGIS_QUERY_URLS = [
   "https://services-eu1.arcgis.com/fppoCYaq7HfVFbIV/ArcGIS/rest/services/UKR_Frontline_27072025/FeatureServer/0/query?where=1%3D1&outFields=Date%2CSource%2C*&outSR=4326&returnGeometry=true&returnExceededLimitFeatures=true&resultRecordCount=2000&f=geojson",
 ] as const;
 
+/** ISW-related timelapse FeatureServer (polygons); boundaries are converted to polylines for the map line layer. */
+const UKRAINE_TIMELAPSE_ARCGIS_BASE =
+  "https://services5.arcgis.com/SaBe5HMtmnbqSWlu/ArcGIS/rest/services/Russo_Ukraine_War_November_2025_Timelapse/FeatureServer";
+const UKRAINE_TIMELAPSE_OUTLINE_LAYERS = [30, 33] as const;
+
+/** In-memory cache to limit ArcGIS quota / 429s on busy /api/map traffic (serverless instances each have their own cache). */
+const UKRAINE_FRONTLINE_CACHE_TTL_MS = 45 * 60 * 1000;
+type UkraineFrontlineFetchResult = {
+  overlay: FrontlineOverlay;
+  sourceState: "live" | "fallback";
+};
+let ukraineFrontlineCache: { result: UkraineFrontlineFetchResult; fetchedAt: number } | null = null;
+
+function ukTimelapseOutlineQueryUrl(layerId: number): string {
+  const q = new URLSearchParams({
+    where: "1=1",
+    outFields: "*",
+    outSR: "4326",
+    returnGeometry: "true",
+    returnExceededLimitFeatures: "true",
+    resultRecordCount: "2000",
+    maxAllowableOffset: "0.003",
+    f: "geojson",
+  });
+  return `${UKRAINE_TIMELAPSE_ARCGIS_BASE}/${layerId}/query?${q.toString()}`;
+}
+
 function rangeToHours(range: string): number {
   switch ((range || "").toLowerCase()) {
     case "1h":
@@ -5163,6 +5190,7 @@ async function fetchArcgisGeoJsonAllPages(firstPageUrl: string): Promise<{
     u.searchParams.set("outSR", "4326");
     u.searchParams.set("f", "geojson");
     u.searchParams.set("returnGeometry", "true");
+    u.searchParams.set("returnExceededLimitFeatures", "true");
     const res = await timedJsonFetch<{
       type?: string;
       features?: GeoJsonFeatureLike[];
@@ -5195,6 +5223,96 @@ function filterLineFeatures(features: GeoJsonFeatureLike[]): GeoJsonFeatureLike[
     const t = String(f?.geometry?.type ?? "");
     return t === "LineString" || t === "MultiLineString";
   });
+}
+
+function ringToLineStringFeature(
+  ring: unknown,
+  baseProps: Record<string, unknown> | undefined
+): GeoJsonFeatureLike | null {
+  if (!Array.isArray(ring) || ring.length < 2) return null;
+  const coords = ring as [number, number][];
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  let out = coords.slice();
+  if (
+    first &&
+    last &&
+    coords.length > 2 &&
+    first[0] === last[0] &&
+    first[1] === last[1]
+  ) {
+    out = coords.slice(0, -1);
+  }
+  if (out.length < 2) return null;
+  return {
+    type: "Feature",
+    properties: {
+      ...(baseProps ?? {}),
+      overlay_type: "assessed_polygon_outline",
+    },
+    geometry: { type: "LineString", coordinates: out },
+  };
+}
+
+/** Convert Polygon / MultiPolygon features to LineString boundaries for the frontline line layer. */
+function polygonFeaturesToOutlineLines(features: GeoJsonFeatureLike[]): GeoJsonFeatureLike[] {
+  const out: GeoJsonFeatureLike[] = [];
+  for (const f of features) {
+    const g = f.geometry;
+    if (!g || typeof g !== "object") continue;
+    const t = String((g as { type?: string }).type ?? "");
+    const props = f.properties ?? {};
+    if (t === "Polygon") {
+      const coords = (g as { coordinates?: unknown }).coordinates;
+      if (!Array.isArray(coords) || coords.length === 0) continue;
+      const line = ringToLineStringFeature(coords[0], props);
+      if (line) out.push(line);
+    } else if (t === "MultiPolygon") {
+      const multi = (g as { coordinates?: unknown }).coordinates;
+      if (!Array.isArray(multi)) continue;
+      for (const poly of multi) {
+        if (Array.isArray(poly) && poly.length > 0) {
+          const line = ringToLineStringFeature(poly[0], props);
+          if (line) out.push(line);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function tryBuildUkraineTimelapseOutlineOverlay(
+  lineFeatures: GeoJsonFeatureLike[],
+  nowIso: string,
+  layerId: number
+): UkraineFrontlineFetchResult | null {
+  if (lineFeatures.length === 0) return null;
+  const latestEpoch = lineFeatures.reduce((max, f) => {
+    const p = f.properties ?? {};
+    const v = Number(p.datetime ?? p.EditDate ?? p.Date ?? p.CreationDa ?? 0);
+    return Number.isFinite(v) && v > max ? v : max;
+  }, 0);
+  const updatedAt =
+    latestEpoch > 0 ? new Date(latestEpoch).toISOString() : nowIso;
+  const layerName =
+    layerId === 30
+      ? "assessed Russian advances (Nov 2025 timelapse)"
+      : "assessed Russian-controlled territory";
+  return {
+    sourceState: "live",
+    overlay: {
+      id: `ukraine-timelapse-layer-${layerId}-outlines`,
+      name: "Ukraine assessed areas (boundary lines)",
+      theater: "Ukraine-Russia",
+      updatedAt,
+      confidence: 78,
+      source: `ArcGIS FeatureServer layer ${layerId} (${layerName}): polygon rings exported as polylines for display. Not a single tactical front line; see ISW / publisher attribution on source data.`,
+      geojson: {
+        type: "FeatureCollection",
+        features: lineFeatures,
+      },
+    },
+  };
 }
 
 /** Minimal embedded fallback if disk + network both fail. */
@@ -5233,14 +5351,13 @@ function fallbackUkraineFrontlineFeatureCollection(): Record<string, unknown> {
   };
 }
 
-async function fetchUkraineFrontlineOverlay(nowIso: string): Promise<{
-  overlay: FrontlineOverlay;
-  sourceState: "live" | "fallback";
-}> {
+async function fetchUkraineFrontlineOverlayUncached(
+  nowIso: string
+): Promise<UkraineFrontlineFetchResult> {
   const tryBuildLive = (
     lineFeatures: GeoJsonFeatureLike[],
     sourceLabel: string
-  ): { overlay: FrontlineOverlay; sourceState: "live" } | null => {
+  ): UkraineFrontlineFetchResult | null => {
     if (lineFeatures.length === 0) return null;
     const latestEpoch = lineFeatures.reduce((max, f) => {
       const v = Number(f?.properties?.Date ?? 0);
@@ -5299,6 +5416,19 @@ async function fetchUkraineFrontlineOverlay(nowIso: string): Promise<{
     if (live) return live;
   }
 
+  for (const layerId of UKRAINE_TIMELAPSE_OUTLINE_LAYERS) {
+    const url = ukTimelapseOutlineQueryUrl(layerId);
+    const { ok, features } = await fetchArcgisGeoJsonAllPages(url);
+    if (!ok || features.length === 0) continue;
+    const outlineLines = polygonFeaturesToOutlineLines(features);
+    const fromTimelapse = tryBuildUkraineTimelapseOutlineOverlay(
+      outlineLines,
+      nowIso,
+      layerId
+    );
+    if (fromTimelapse) return fromTimelapse;
+  }
+
   const disk = await loadPublicGeoJsonFile("ukraine-line-of-contact-fallback.geojson");
   if (disk && disk.type === "FeatureCollection" && Array.isArray(disk.features)) {
     const lineFeatures = filterLineFeatures(disk.features as GeoJsonFeatureLike[]);
@@ -5334,6 +5464,21 @@ async function fetchUkraineFrontlineOverlay(nowIso: string): Promise<{
       geojson: fallbackUkraineFrontlineFeatureCollection(),
     },
   };
+}
+
+async function fetchUkraineFrontlineOverlay(
+  nowIso: string
+): Promise<UkraineFrontlineFetchResult> {
+  const t = Date.now();
+  if (
+    ukraineFrontlineCache &&
+    t - ukraineFrontlineCache.fetchedAt < UKRAINE_FRONTLINE_CACHE_TTL_MS
+  ) {
+    return ukraineFrontlineCache.result;
+  }
+  const result = await fetchUkraineFrontlineOverlayUncached(nowIso);
+  ukraineFrontlineCache = { result, fetchedAt: t };
+  return result;
 }
 
 async function buildFrontlineOverlays(): Promise<{
