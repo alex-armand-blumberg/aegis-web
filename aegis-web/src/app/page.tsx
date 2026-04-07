@@ -85,7 +85,7 @@ export default function Home() {
         <div className="hero-stats">
           <div className="stat">
             <div className="stat-num">
-              <AnimatedNumberOnView value={180} suffix="+" suffixClassName="stat-plus-accent" />
+              <AnimatedNumberOnView value={190} suffix="+" suffixClassName="stat-plus-accent" />
             </div>
             <div className="stat-label">Countries &amp; regions</div>
           </div>
