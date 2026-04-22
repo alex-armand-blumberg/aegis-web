@@ -16,6 +16,38 @@ function extractPromptField(prompt: string, label: string): string {
 
 const DISALLOWED_MAP_INSIGHT_RE =
   /\b(unavailable|insufficient information|not enough information|i don't know|cannot determine|unknown|not reported)\b/i;
+const NUMERIC_RECAP_RE =
+  /\b(signals?|counts?|index|indices|score|scores|total|totals|liveStrikes|conflicts|flights|vessels|carriers)\b/i;
+const CAUSAL_LANGUAGE_RE =
+  /\b(because|driven by|trigger|catalyst|after|following|amid|due to|in response to|resulting in|linked to|as tensions)\b/i;
+const ACTOR_LANGUAGE_RE =
+  /\b(government|military|forces|army|navy|air force|rebels?|militia|alliance|nato|state|officials?|ministry)\b/i;
+
+function countBulletLikeLines(text: string): number {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("- ")).length;
+}
+
+function looksCountHeavyLowContext(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean);
+  const bulletCount = countBulletLikeLines(trimmed);
+  const numericHits = (trimmed.match(/\b\d+(?:\.\d+)?(?:\/100|%)?\b/g) || []).length;
+  const recapHits = (trimmed.match(new RegExp(NUMERIC_RECAP_RE.source, "gi")) || []).length;
+  const hasCausal = CAUSAL_LANGUAGE_RE.test(trimmed);
+  const hasActor = ACTOR_LANGUAGE_RE.test(trimmed);
+  const shortLines = lines.filter((l) => l.length < 38).length;
+  const mostlyShort = lines.length > 0 && shortLines / lines.length > 0.6;
+  return (
+    (bulletCount > 0 && bulletCount <= 2) ||
+    (numericHits >= 4 && recapHits >= 3 && !hasCausal) ||
+    (recapHits >= 4 && !hasCausal && !hasActor) ||
+    mostlyShort
+  );
+}
 
 function stripHtml(html: string): string {
   return html
@@ -143,8 +175,12 @@ async function fetchRelatedHeadlines(
 function extractQueryFromPrompt(prompt: string): string {
   const userQ = extractPromptField(prompt, "User question");
   if (userQ) return userQ;
+  const region = extractPromptField(prompt, "Region");
+  if (region) return region;
   const headline = extractPromptField(prompt, "Headline");
   if (headline) return headline;
+  const locationCountry = extractPromptField(prompt, "Location country");
+  if (locationCountry) return locationCountry;
   const trimmed = prompt.replace(/\s+/g, " ").trim();
   return trimmed.slice(0, 220);
 }
@@ -219,9 +255,49 @@ function buildWebSearchQuery(prompt: string, mode: Mode): string {
   if (mode === "map_insight") {
     const headline = extractPromptField(prompt, "Headline");
     const loc = extractPromptField(prompt, "Location country");
-    return [headline, loc, base].filter(Boolean).join(" ").trim().slice(0, 400);
+    const eventType = extractPromptField(prompt, "Event type");
+    return [
+      headline,
+      eventType,
+      loc,
+      base,
+      "trigger",
+      "why now",
+      "actors",
+      "context",
+      "latest developments",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 400);
   }
-  return `${base} geopolitics conflict military`.replace(/\s+/g, " ").trim().slice(0, 400);
+  if (mode === "sentinel_qa") {
+    const region = extractPromptField(prompt, "Region");
+    const range = extractPromptField(prompt, "Range");
+    return [
+      region,
+      range,
+      base,
+      "geopolitics",
+      "escalation drivers",
+      "military posture",
+      "alliance moves",
+      "sanctions",
+      "timeline",
+      "latest developments",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 400);
+  }
+  return `${base} geopolitics conflict military actors causes timeline latest developments`
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 400);
 }
 
 async function fetchOnlineContextForPrompt(prompt: string): Promise<string[]> {
@@ -229,7 +305,7 @@ async function fetchOnlineContextForPrompt(prompt: string): Promise<string[]> {
   if (!query) return [];
   try {
     const encoded = encodeURIComponent(
-      `${query} (conflict OR strike OR missile OR battle OR naval OR escalation)`
+      `${query} (conflict OR strike OR missile OR battle OR naval OR escalation OR trigger OR catalyst OR sanctions OR deployment OR alliance)`
     );
     const urls = [
       `https://news.google.com/rss/search?q=${encoded}&hl=en-US&gl=US&ceid=US:en`,
@@ -262,14 +338,14 @@ function systemPromptForMode(mode: Mode): string {
     case "map_insight":
       return (
         "You are AEGIS, an analytical assistant for a geopolitical early-warning system. " +
-        "You receive one mapped event and must write a concise, event-specific intelligence brief focused on what happened, where, when, actors, and immediate trigger/background. " +
+        "You receive one mapped event and must write a concise, event-specific intelligence brief focused on what happened and why it happened now. " +
         "Output exactly 4 bullet points. Every bullet must start with '- '. " +
         "Label each bullet with either 'Confirmed:' (directly supported by evidence) or 'Inferred:' (best-effort synthesis from context). " +
         "If direct details are sparse, infer the most plausible explanation from article text, nearby same-event context, and external corroboration headlines; do not reply with 'unknown', 'not reported', or 'insufficient information'. " +
-        "If the event is plotted, explain why it is plotted and what likely happened at that location and time. " +
+        "Prioritize causal structure: trigger/catalyst, key actors, and immediate implications for the selected place/time. " +
         "Include concrete numbers/statistics when available (casualties, interceptions, units, strikes, dates, distances, counts). " +
         "Reject unrelated context that does not match the event type, place, and timeframe. " +
-        "Never describe confidence scores, magnitude scores, model behavior, or generic 'why flagged' explanations unless directly tied to factual event evidence. " +
+        "Never describe confidence scores, magnitude scores, model behavior, plotting logic, or generic 'why flagged' explanations. " +
         "Do not give policy advice. Keep a neutral, analytical tone. " +
         TEMPORAL_SCOPE
       );
@@ -291,10 +367,10 @@ function systemPromptForMode(mode: Mode): string {
       );
     case "sentinel_qa":
       return (
-        "You are the Aegis Sentinel, an AI that answers questions about escalation index plots. " +
-        "You receive the plot data (country, date range, flagged months, pre-escalation warnings, peaks, forecast) and a user question. " +
-        "Answer concisely and ground your response in the provided data and real-world events. " +
-        "Reference specific events, actors, and dates when relevant. Be explicit about uncertainty. " +
+        "You are the Aegis Sentinel, an AI that explains selected country/region context for geopolitical escalation. " +
+        "Ground your answer in provided signals and corroborating current events, but do not just restate index/signal counts. " +
+        "Prioritize why this is happening: key actors, catalyst events, structural drivers, and what changed recently. " +
+        "Use concise bullets with concrete events/dates when possible, and be explicit about uncertainty. " +
         TEMPORAL_SCOPE
       );
     case "country_trend":
@@ -437,7 +513,10 @@ export async function POST(req: NextRequest) {
     let content = firstPass.content ?? "";
 
     // One-pass quality guard for map point summaries.
-    if (mode === "map_insight" && DISALLOWED_MAP_INSIGHT_RE.test(content)) {
+    if (
+      mode === "map_insight" &&
+      (DISALLOWED_MAP_INSIGHT_RE.test(content) || looksCountHeavyLowContext(content))
+    ) {
       const strictRetryPrompt = [
         enrichedPrompt,
         "",
@@ -445,7 +524,24 @@ export async function POST(req: NextRequest) {
         "- Do not use 'unavailable', 'unknown', 'not reported', 'cannot determine', or similar phrases.",
         "- The point exists; provide the most likely event-causal explanation from available evidence.",
         "- Keep exactly 4 bullets with Confirmed/Inferred prefixes.",
+        "- Explain trigger/catalyst and key actors; avoid count-only recap.",
         "- Add at least one concrete number/date/statistic if present in evidence.",
+      ].join("\n");
+      const retry = await runGroqCompletion(apiKey, mode, strictRetryPrompt, maxTokens);
+      if (retry.ok && (retry.content?.trim() ?? "").length > 0) {
+        content = retry.content ?? content;
+      }
+    }
+
+    if (mode === "sentinel_qa" && looksCountHeavyLowContext(content)) {
+      const strictRetryPrompt = [
+        enrichedPrompt,
+        "",
+        "CRITICAL RETRY RULES:",
+        "- Do not just restate signal/index counts.",
+        "- Explain mechanisms: actors, triggers, and structural drivers.",
+        "- Include recent turning points and what changed most recently.",
+        "- Keep concise bullet style with evidence-based context.",
       ].join("\n");
       const retry = await runGroqCompletion(apiKey, mode, strictRetryPrompt, maxTokens);
       if (retry.ok && (retry.content?.trim() ?? "").length > 0) {

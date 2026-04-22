@@ -69,7 +69,7 @@ export async function GET(request: Request) {
       .map((p) => `${p.timestamp} | ${p.layer} | ${p.title} | ${p.source}`)
       .join("\n");
     const prompt = [
-      "Task: Summarize current geopolitical tension for this region with current developments.",
+      "Task: Explain why tension is happening in this selected area and what changed recently.",
       `Region: ${intel.selection.name} (${intel.selection.kind})`,
       `Range: ${intel.range}`,
       `Escalation index: ${intel.escalationIndex}/100`,
@@ -77,10 +77,18 @@ export async function GET(request: Request) {
       `Signals: liveStrikes=${intel.signals.liveStrikes}; conflicts=${intel.signals.conflicts}; flights=${intel.signals.militaryFlights}; vessels=${intel.signals.navalVessels}; carriers=${intel.signals.carrierSignals}`,
       "Recent mapped signals:",
       topSignals || "None",
-      "Write 6 concise bullet points.",
-      "Include latest geopolitical moves by relevant governments and military actors.",
-      "Include at least two quantitative facts/statistics if available from current public reporting.",
-      "Use broad current context even beyond mapped points when needed.",
+      "Write exactly 6 concise bullet points.",
+      "Bullet requirements:",
+      "- 1) Core situation and key actors.",
+      "- 2) Immediate trigger(s) in the latest period.",
+      "- 3) Underlying drivers (political/military/alliance/economic).",
+      "- 4) Timeline turning points from recent weeks.",
+      "- 5) What changed most recently and why it matters.",
+      "- 6) Near-term outlook grounded in evidence.",
+      "Use mapped signals as supporting evidence, not the main story.",
+      "Do not simply restate signal counts or index values; explain mechanisms and context.",
+      "Include at least two concrete facts (dates, named events, units, sanctions, agreements, deployments) when available.",
+      "Use broad current context beyond mapped points when needed, with source-attributed caution.",
     ].join("\n");
 
     try {
