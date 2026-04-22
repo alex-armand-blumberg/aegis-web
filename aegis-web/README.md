@@ -28,8 +28,28 @@ Copy `.env.example` to `.env.local` and set:
 - `ACLED_EMAIL` — ACLED account email (for research-tier API).
 - `ACLED_PASSWORD` — ACLED account password (for research-tier API).
 - `RESEND_API_KEY` — Resend API key for contact form (emails to alex.armandblumberg@gmail.com). Get at resend.com.
+- `SAM_GOV_API_KEY` — optional free API key for strategic procurement signals from SAM.gov opportunities.
+- `ENABLE_STRATEGIC_PACK` — optional toggle (`true`/`false`) for the strategic escalation source pack (defaults to enabled through source packs).
 
 **ACLED (full-history data):** If `ACLED_EMAIL` and `ACLED_PASSWORD` are set, the escalation index uses ACLED’s authenticated API for data from 2018 up to one year ago. If missing, the app falls back to the public ArcGIS layer (limited history).
+
+### Strategic escalation source pack (free/open + free-key)
+
+The map API now includes a strategic source pack that augments `news` and escalation-risk modeling with:
+
+- OFAC Sanctions List Service (open XML)
+- UN Security Council consolidated sanctions XML
+- DoD / UK MOD official release feeds (with resilient Google News RSS fallback)
+- USAspending DoD contract pulse (open API)
+- SAM.gov opportunities (optional free API key)
+
+To enable SAM.gov ingestion:
+
+1. Create a free account at [SAM.gov](https://sam.gov/).
+2. Generate a personal API key in your profile.
+3. Set `SAM_GOV_API_KEY` in `.env.local`.
+
+If the key is missing, the adapter degrades gracefully and the rest of the map pipeline still runs.
 
 ## Deployment
 

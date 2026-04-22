@@ -61,7 +61,15 @@ export const MAP_SOURCE_FAMILY_MATRIX: Array<{
   {
     family: "economic-signals",
     layers: ["news"],
-    sources: ["WTO/BIS/FRED/Yahoo-derived feeds"],
+    sources: [
+      "WTO/BIS/FRED/Yahoo-derived feeds",
+      "OFAC Sanctions List Service",
+      "UN SC Consolidated List",
+      "USAspending (DoD awards)",
+      "SAM.gov opportunities",
+      "DoD official releases",
+      "UK MOD official feed",
+    ],
   },
 ];
 
@@ -277,6 +285,14 @@ export const WORLDMONITOR_RSS_NETWORK: MapSourceDescriptor[] = [
     tier: "tier1",
     layers: ["news", "liveStrikes"],
     domain: "gov.uk",
+  },
+  {
+    id: "dod-official",
+    name: "US Department of Defense",
+    family: "news-network",
+    tier: "tier1",
+    layers: ["news"],
+    domain: "defense.gov",
   },
   {
     id: "un-news",
@@ -608,5 +624,35 @@ export const REQUESTED_SOURCE_ACCESS_MATRIX: Array<{
   { source: "Lawfare deployments", mode: "public_rss_or_page", fallback: "Dedicated parser for domestic deployment markers" },
   { source: "InSight Crime", mode: "public_rss_or_page", fallback: "Domain RSS/site query + parser for gang events" },
   { source: "Starboard Intelligence", mode: "credentialed_or_licensed", fallback: "AIS/open maritime sources only" },
+  {
+    source: "DoD official releases",
+    mode: "public_rss_or_page",
+    fallback: "Google News RSS site:defense.gov strategic query",
+  },
+  {
+    source: "UK MOD official feed",
+    mode: "public_rss_or_page",
+    fallback: "Google News RSS site:gov.uk MOD strategic query",
+  },
+  {
+    source: "OFAC Sanctions List Service",
+    mode: "direct_api",
+    fallback: "Static SDN XML snapshot parsing",
+  },
+  {
+    source: "UN SC Consolidated List",
+    mode: "public_rss_or_page",
+    fallback: "Consolidated sanctions XML parsing",
+  },
+  {
+    source: "USAspending",
+    mode: "direct_api",
+    fallback: "Agency awards count endpoint (DoD aggregate)",
+  },
+  {
+    source: "SAM.gov opportunities",
+    mode: "credentialed_or_licensed",
+    fallback: "Free-key API optional; skip when SAM_GOV_API_KEY absent",
+  },
 ];
 

@@ -121,19 +121,26 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
   return out.length ? out : defaults;
 }
 
-type SourcePackKey = "core" | "openSourceIntel" | "lawfareTroops" | "experimentalTrackers";
+type SourcePackKey =
+  | "core"
+  | "openSourceIntel"
+  | "lawfareTroops"
+  | "experimentalTrackers"
+  | "strategicEscalation";
 
 const DEFAULT_SOURCE_PACKS: SourcePackKey[] = [
   "core",
   "openSourceIntel",
   "lawfareTroops",
   "experimentalTrackers",
+  "strategicEscalation",
 ];
 const AVAILABLE_SOURCE_PACKS: SourcePackKey[] = [
   "core",
   "openSourceIntel",
   "lawfareTroops",
   "experimentalTrackers",
+  "strategicEscalation",
 ];
 
 function parseSourcePacks(raw: string | null): SourcePackKey[] {
@@ -1643,6 +1650,47 @@ const TRUSTED_CONFLICT_RSS_FEEDS: Array<{
   tier: s.tier,
 }));
 
+const STRATEGIC_ESCALATION_TERMS = [
+  "mobilization",
+  "troop buildup",
+  "troop deployment",
+  "military exercise",
+  "naval exercise",
+  "air defense package",
+  "contract award",
+  "procurement",
+  "sources sought",
+  "arms deal",
+  "sanctions",
+  "export controls",
+  "readiness",
+  "deterrence",
+  "carrier strike group",
+  "missile defense",
+];
+
+const STRATEGIC_DOD_RELEASES_URL = "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=400&Site=945&max=80";
+const STRATEGIC_UK_MOD_FEED_URL =
+  "https://www.gov.uk/search/news-and-communications.atom?organisations%5B%5D=ministry-of-defence";
+const STRATEGIC_OFAC_SDN_XML_URL = "https://sanctionslist.ofac.treas.gov/Home/static/sdn.xml";
+const STRATEGIC_UN_SC_XML_URL = "https://scsanctions.un.org/resources/xml/en/consolidated.xml";
+const STRATEGIC_USASPENDING_AGENCY_COUNT_URL = "https://api.usaspending.gov/api/v2/agency/awards/count/";
+
+const STRATEGIC_REGIME_CODE_TO_COUNTRY: Record<string, string> = {
+  IQ: "Iraq",
+  CD: "Democratic Republic of the Congo",
+  SD: "Sudan",
+  KP: "North Korea",
+  IR: "Iran",
+  LY: "Libya",
+  GB: "Guinea-Bissau",
+  YE: "Yemen",
+  SS: "South Sudan",
+  HT: "Haiti",
+  SO: "Somalia",
+  CF: "Central African Republic",
+};
+
 const GDELT_CACHE_TTL_MS = 8 * 60 * 1000;
 const GDELT_COOLDOWN_MS = 15 * 60 * 1000;
 let gdeltCache: { fetchedAt: number; points: IntelPoint[] } | null = null;
@@ -2264,6 +2312,577 @@ function parseRssConflictPoints(
     totalItems: itemBlocks.length,
     conflictCandidates,
     geoMapped,
+  };
+}
+
+function isStrategicEscalationText(text: string): boolean {
+  const t = text.toLowerCase();
+  return STRATEGIC_ESCALATION_TERMS.some((term) => t.includes(term));
+}
+
+function classifyStrategicSubtype(text: string): {
+  subtype: "sanctions_action" | "defense_procurement_notice" | "defense_contract_award" | "alliance_posture_statement";
+  label: string;
+  severity: IntelPoint["severity"];
+} {
+  const t = text.toLowerCase();
+  if (/\b(sanction|sanctions|designated|blocked property|export control|asset freeze)\b/.test(t)) {
+    return { subtype: "sanctions_action", label: "Sanctions action", severity: "high" };
+  }
+  if (/\b(contract award|awarded|award notice|obligation|funding)\b/.test(t)) {
+    return { subtype: "defense_contract_award", label: "Defense contract award", severity: "medium" };
+  }
+  if (/\b(sources sought|solicitation|tender|procurement|acquisition)\b/.test(t)) {
+    return { subtype: "defense_procurement_notice", label: "Defense procurement notice", severity: "medium" };
+  }
+  if (
+    /\b(nato|alliance|exercise|deterrence|force posture|readiness|deployment|mobilization|carrier strike group)\b/.test(
+      t
+    )
+  ) {
+    const high = /\b(mobilization|force deployment|carrier strike group|emergency)\b/.test(t);
+    return {
+      subtype: "alliance_posture_statement",
+      label: "Alliance posture signal",
+      severity: high ? "high" : "medium",
+    };
+  }
+  return { subtype: "alliance_posture_statement", label: "Strategic development", severity: "medium" };
+}
+
+function strategicLocationFromCountry(country: string): { lat: number; lon: number; country: string } | null {
+  const bbox = resolveCountryBbox(country);
+  if (!bbox) return null;
+  const display = formatCountryDisplayName(country);
+  return { lat: bbox[4], lon: bbox[5], country: display };
+}
+
+function strategicLocationsFromText(
+  text: string,
+  fallbackCountry: string | null,
+  maxCount = 2
+): Array<{ lat: number; lon: number; country: string; city: string | null }> {
+  const out: Array<{ lat: number; lon: number; country: string; city: string | null }> = [];
+  const cities = extractAllMentionedCities(text).slice(0, maxCount);
+  for (const c of cities) {
+    out.push({ lat: c.lat, lon: c.lon, country: c.country, city: c.city });
+  }
+  if (out.length > 0) return out;
+  const mentionedCountry = extractMentionedCountry(text);
+  const resolvedCountry = mentionedCountry || fallbackCountry;
+  if (!resolvedCountry) return out;
+  const fallback = strategicLocationFromCountry(resolvedCountry);
+  if (!fallback) return out;
+  out.push({
+    lat: fallback.lat,
+    lon: fallback.lon,
+    country: fallback.country,
+    city: null,
+  });
+  return out;
+}
+
+function parseStrategicRssPoints(params: {
+  rssText: string;
+  cutoff: number;
+  sourceLabel: string;
+  seen: Set<string>;
+  fallbackCountry: string | null;
+}): {
+  points: IntelPoint[];
+  totalItems: number;
+  strategicCandidates: number;
+  geoMapped: number;
+} {
+  const { rssText, cutoff, sourceLabel, seen, fallbackCountry } = params;
+  const itemBlocks = rssText.split("<item>").slice(1, 2400);
+  const points: IntelPoint[] = [];
+  let strategicCandidates = 0;
+  let geoMapped = 0;
+
+  for (let i = 0; i < itemBlocks.length; i += 1) {
+    const block = itemBlocks[i];
+    const title = extractRssTag(block, "title");
+    const description = extractRssTag(block, "description") ?? "";
+    if (!title) continue;
+    const text = `${title} ${description}`;
+    if (!isStrategicEscalationText(text)) continue;
+    strategicCandidates += 1;
+
+    const pubRaw = extractRssTag(block, "pubDate");
+    const ts = pubRaw ? Date.parse(pubRaw) : Date.now();
+    if (!Number.isFinite(ts) || ts < cutoff) continue;
+
+    const sourceUrl = extractRssTag(block, "link");
+    const imageUrl = extractRssImageUrl(block);
+    const locations = strategicLocationsFromText(text, fallbackCountry, 2);
+    if (locations.length === 0) continue;
+    geoMapped += locations.length;
+
+    const subtype = classifyStrategicSubtype(text);
+    const publisher = extractPublisherFromTitle(title);
+    const sourceSnippet = description
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 320);
+    const bucket = Math.floor(ts / 3600_000);
+    for (let locIdx = 0; locIdx < locations.length; locIdx += 1) {
+      const loc = locations[locIdx];
+      const dedupeKey = `${normalizeHeadlineForCluster(title)}|${loc.country}|${loc.city ?? ""}|${bucket}|${subtype.subtype}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      points.push({
+        id: `strategic-rss-${sourceLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${bucket}-${i}-${locIdx}`,
+        layer: "news",
+        title: loc.city ? `${subtype.label} near ${loc.city}` : `${subtype.label} in ${loc.country}`,
+        subtitle: `${sourceLabel}${publisher ? ` | ${publisher}` : ""}`,
+        lat: loc.lat,
+        lon: loc.lon,
+        country: loc.country,
+        severity: subtype.severity,
+        source: sourceLabel,
+        timestamp: new Date(ts).toISOString(),
+        magnitude: subtype.severity === "high" ? 10 : 7,
+        confidence: 0.62,
+        imageUrl: imageUrl || undefined,
+        metadata: {
+          event_type: "strategic_development",
+          strategic_subtype: subtype.subtype,
+          strategic_label: subtype.label,
+          source_url: sourceUrl || null,
+          image_url: imageUrl || null,
+          original_headline: title,
+          source_snippet: sourceSnippet || null,
+        },
+      });
+    }
+  }
+
+  return {
+    points,
+    totalItems: itemBlocks.length,
+    strategicCandidates,
+    geoMapped,
+  };
+}
+
+function parseOfacSanctionsCountryCounts(xmlText: string): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const match of xmlText.matchAll(/<country>([\s\S]*?)<\/country>/gi)) {
+    const raw = decodeHtmlEntities(String(match[1] ?? ""))
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!raw) continue;
+    const country = extractMentionedCountry(raw) || raw;
+    const loc = strategicLocationFromCountry(country);
+    if (!loc) continue;
+    const key = loc.country;
+    out.set(key, (out.get(key) ?? 0) + 1);
+  }
+  return out;
+}
+
+function parseUnSanctionsCountryCounts(xmlText: string): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const match of xmlText.matchAll(/<DATAID>([A-Z]{2})[ie]\.[0-9]+<\/DATAID>/g)) {
+    const code = String(match[1] ?? "").toUpperCase();
+    const country = STRATEGIC_REGIME_CODE_TO_COUNTRY[code];
+    if (!country) continue;
+    const loc = strategicLocationFromCountry(country);
+    if (!loc) continue;
+    out.set(loc.country, (out.get(loc.country) ?? 0) + 1);
+  }
+  return out;
+}
+
+async function fetchStrategicEscalationSignals(
+  rangeHours: number,
+  enabled: boolean
+): Promise<{
+  points: IntelPoint[];
+  health: ProviderHealth;
+  providerHealth: ProviderHealth[];
+}> {
+  const started = Date.now();
+  if (!enabled) {
+    return {
+      points: [],
+      health: {
+        provider: "Strategic escalation pack",
+        ok: true,
+        updatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - started,
+        message: "Strategic escalation source pack disabled by sourcePacks selection [reason=pack_disabled]",
+      },
+      providerHealth: [],
+    };
+  }
+
+  const cutoff = Date.now() - rangeHours * 3600_000;
+  const points: IntelPoint[] = [];
+  const providerHealth: ProviderHealth[] = [];
+  const seen = new Set<string>();
+  const nowIso = new Date().toISOString();
+  const pushHealth = (h: ProviderHealth) => providerHealth.push(h);
+
+  {
+    const providerStarted = Date.now();
+    const query = encodeURIComponent(
+      `site:defense.gov (deployment OR mobilization OR procurement OR contract OR sanctions OR exercise OR deterrence OR alliance)`
+    );
+    const fetchRes = await fetchTextWithRetries(
+      [STRATEGIC_DOD_RELEASES_URL, ...buildGoogleNewsRssUrls(query)],
+      12000,
+      2
+    );
+    if (!fetchRes.ok || !fetchRes.text) {
+      pushHealth({
+        provider: "DoD official releases",
+        ok: false,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: `${fetchRes.message ?? "Fetch failed"} [reason=upstream_error]`,
+      });
+    } else {
+      const parsed = parseStrategicRssPoints({
+        rssText: fetchRes.text,
+        cutoff,
+        sourceLabel: "DoD official releases",
+        seen,
+        fallbackCountry: "United States",
+      });
+      points.push(...parsed.points);
+      pushHealth({
+        provider: "DoD official releases",
+        ok: parsed.points.length > 0,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: `Mapped ${parsed.points.length} points (items ${parsed.totalItems}, strategic candidates ${parsed.strategicCandidates}, geocoded ${parsed.geoMapped})`,
+      });
+    }
+  }
+
+  {
+    const providerStarted = Date.now();
+    const query = encodeURIComponent(
+      `site:gov.uk ministry of defence (deployment OR mobilization OR procurement OR contract OR sanctions OR exercise OR deterrence OR alliance)`
+    );
+    const fetchRes = await fetchTextWithRetries(
+      [STRATEGIC_UK_MOD_FEED_URL, ...buildGoogleNewsRssUrls(query)],
+      12000,
+      2
+    );
+    if (!fetchRes.ok || !fetchRes.text) {
+      pushHealth({
+        provider: "UK MOD official feed",
+        ok: false,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: `${fetchRes.message ?? "Fetch failed"} [reason=upstream_error]`,
+      });
+    } else {
+      const parsed = parseStrategicRssPoints({
+        rssText: fetchRes.text,
+        cutoff,
+        sourceLabel: "UK MOD official feed",
+        seen,
+        fallbackCountry: "United Kingdom",
+      });
+      points.push(...parsed.points);
+      pushHealth({
+        provider: "UK MOD official feed",
+        ok: parsed.points.length > 0,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: `Mapped ${parsed.points.length} points (items ${parsed.totalItems}, strategic candidates ${parsed.strategicCandidates}, geocoded ${parsed.geoMapped})`,
+      });
+    }
+  }
+
+  {
+    const providerStarted = Date.now();
+    const fetchRes = await fetchTextWithRetries([STRATEGIC_OFAC_SDN_XML_URL], 18000, 1);
+    if (!fetchRes.ok || !fetchRes.text) {
+      pushHealth({
+        provider: "OFAC sanctions list",
+        ok: false,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: `${fetchRes.message ?? "Fetch failed"} [reason=upstream_error]`,
+      });
+    } else {
+      const counts = parseOfacSanctionsCountryCounts(fetchRes.text);
+      const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14);
+      for (const [country, count] of top) {
+        const loc = strategicLocationFromCountry(country);
+        if (!loc) continue;
+        points.push({
+          id: `strategic-ofac-${normalizeCountryKey(country)}-${count}`,
+          layer: "news",
+          title: `Sanctions action concentration in ${country}`,
+          subtitle: "OFAC SDN list country-linked entries",
+          lat: loc.lat,
+          lon: loc.lon,
+          country,
+          severity: count >= 40 ? "high" : "medium",
+          source: "OFAC sanctions list",
+          timestamp: nowIso,
+          magnitude: Math.min(18, Math.max(5, Math.round(count / 5))),
+          confidence: 0.55,
+          metadata: {
+            event_type: "strategic_development",
+            strategic_subtype: "sanctions_action",
+            source_url: STRATEGIC_OFAC_SDN_XML_URL,
+            country_mentions: count,
+          },
+        });
+      }
+      pushHealth({
+        provider: "OFAC sanctions list",
+        ok: top.length > 0,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: `Mapped ${top.length} country-level sanctions pressure points from SDN XML`,
+      });
+    }
+  }
+
+  {
+    const providerStarted = Date.now();
+    const fetchRes = await fetchTextWithRetries([STRATEGIC_UN_SC_XML_URL], 18000, 1);
+    if (!fetchRes.ok || !fetchRes.text) {
+      pushHealth({
+        provider: "UN SC consolidated sanctions",
+        ok: false,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: `${fetchRes.message ?? "Fetch failed"} [reason=upstream_error]`,
+      });
+    } else {
+      const counts = parseUnSanctionsCountryCounts(fetchRes.text);
+      const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14);
+      for (const [country, count] of top) {
+        const loc = strategicLocationFromCountry(country);
+        if (!loc) continue;
+        points.push({
+          id: `strategic-unsc-${normalizeCountryKey(country)}-${count}`,
+          layer: "news",
+          title: `UN sanctions regime pressure: ${country}`,
+          subtitle: "UN Security Council consolidated list regime coverage",
+          lat: loc.lat,
+          lon: loc.lon,
+          country,
+          severity: "medium",
+          source: "UN SC consolidated sanctions",
+          timestamp: nowIso,
+          magnitude: Math.min(14, Math.max(4, count + 3)),
+          confidence: 0.57,
+          metadata: {
+            event_type: "strategic_development",
+            strategic_subtype: "sanctions_action",
+            source_url: STRATEGIC_UN_SC_XML_URL,
+            regime_entries: count,
+          },
+        });
+      }
+      pushHealth({
+        provider: "UN SC consolidated sanctions",
+        ok: top.length > 0,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: `Mapped ${top.length} country-level sanctions regime points from consolidated XML`,
+      });
+    }
+  }
+
+  {
+    const providerStarted = Date.now();
+    const res = await timedJsonFetch<{
+      results?: Array<
+        | {
+            awarding_toptier_agency_name?: string;
+            awarding_toptier_agency_code?: string;
+            contracts?: number;
+            idvs?: number;
+          }
+        | Array<{
+            awarding_toptier_agency_name?: string;
+            awarding_toptier_agency_code?: string;
+            contracts?: number;
+            idvs?: number;
+          }>
+      >;
+    }>(STRATEGIC_USASPENDING_AGENCY_COUNT_URL, undefined, 12000);
+    if (!res.ok || !res.data) {
+      pushHealth({
+        provider: "USAspending DoD contracts",
+        ok: false,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: `${res.message ?? "Fetch failed"} [reason=upstream_error]`,
+      });
+    } else {
+      const rowsRaw = res.data.results ?? [];
+      const flattened: Array<{
+        awarding_toptier_agency_name?: string;
+        awarding_toptier_agency_code?: string;
+        contracts?: number;
+        idvs?: number;
+      }> = [];
+      for (const row of rowsRaw) {
+        if (Array.isArray(row)) flattened.push(...row);
+        else flattened.push(row);
+      }
+      const dod = flattened.find(
+        (r) =>
+          String(r.awarding_toptier_agency_code ?? "") === "097" ||
+          /department of defense/i.test(String(r.awarding_toptier_agency_name ?? ""))
+      );
+      if (dod) {
+        const us = strategicLocationFromCountry("United States");
+        if (us) {
+          const contracts = Number(dod.contracts ?? 0);
+          const idvs = Number(dod.idvs ?? 0);
+          points.push({
+            id: `strategic-usaspending-dod-${contracts}-${idvs}`,
+            layer: "news",
+            title: "DoD contract activity pulse",
+            subtitle: `USAspending totals: contracts=${contracts}, idvs=${idvs}`,
+            lat: us.lat,
+            lon: us.lon,
+            country: us.country,
+            severity: contracts > 900000 ? "high" : "medium",
+            source: "USAspending DoD contracts",
+            timestamp: nowIso,
+            magnitude: Math.min(18, Math.max(5, Math.round(contracts / 120000))),
+            confidence: 0.52,
+            metadata: {
+              event_type: "strategic_development",
+              strategic_subtype: "defense_contract_award",
+              source_url: STRATEGIC_USASPENDING_AGENCY_COUNT_URL,
+              contracts,
+              idvs,
+            },
+          });
+        }
+      }
+      pushHealth({
+        provider: "USAspending DoD contracts",
+        ok: !!dod,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: dod
+          ? "Mapped DoD procurement aggregate pulse from USAspending"
+          : "No DoD aggregate row found in USAspending response",
+      });
+    }
+  }
+
+  {
+    const providerStarted = Date.now();
+    const samApiKey = process.env.SAM_GOV_API_KEY?.trim();
+    if (!samApiKey) {
+      pushHealth({
+        provider: "SAM.gov opportunities",
+        ok: true,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message: "SAM_GOV_API_KEY not configured (optional free-key source) [reason=missing_env]",
+      });
+    } else {
+      const endDate = new Date();
+      const startDate = new Date(endDate.getTime() - Math.min(rangeHours, 24 * 30) * 3600_000);
+      const formatSamDate = (d: Date) =>
+        `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}/${d.getUTCFullYear()}`;
+      const ptypes = ["a", "o", "s"];
+      let samMapped = 0;
+      let samSeen = 0;
+      for (const ptype of ptypes) {
+        const params = new URLSearchParams({
+          api_key: samApiKey,
+          postedFrom: formatSamDate(startDate),
+          postedTo: formatSamDate(endDate),
+          ptype,
+          limit: "250",
+        });
+        const url = `https://api.sam.gov/opportunities/v2/search?${params.toString()}`;
+        const res = await timedJsonFetch<{
+          opportunitiesData?: Array<Record<string, unknown>>;
+          data?: Array<Record<string, unknown>>;
+        }>(url, undefined, 14000);
+        if (!res.ok || !res.data) continue;
+        const rows = res.data.opportunitiesData ?? res.data.data ?? [];
+        samSeen += rows.length;
+        for (const row of rows.slice(0, 240)) {
+          const title = String(
+            row.title ?? row.noticeTitle ?? row.synopsis ?? row.description ?? row.solTitle ?? "SAM opportunity"
+          ).trim();
+          const description = String(row.description ?? row.synopsis ?? "").trim();
+          const text = `${title} ${description}`;
+          if (!isStrategicEscalationText(text)) continue;
+          const posted = String(row.postedDate ?? row.archiveDate ?? row.responseDeadLine ?? nowIso);
+          const ts = Date.parse(posted);
+          const timestamp = Number.isFinite(ts) ? new Date(ts).toISOString() : nowIso;
+          if (Date.parse(timestamp) < cutoff) continue;
+          const subtype = classifyStrategicSubtype(text);
+          const locations = strategicLocationsFromText(text, "United States", 1);
+          if (!locations.length) continue;
+          const noticeId = String(row.noticeId ?? row.noticeid ?? row.id ?? row.solnum ?? `${ptype}-${samMapped + 1}`);
+          const loc = locations[0];
+          points.push({
+            id: `strategic-sam-${noticeId}-${ptype}`,
+            layer: "news",
+            title: loc.city ? `${subtype.label} near ${loc.city}` : `${subtype.label} in ${loc.country}`,
+            subtitle: "SAM.gov opportunities",
+            lat: loc.lat,
+            lon: loc.lon,
+            country: loc.country,
+            severity: subtype.severity,
+            source: "SAM.gov opportunities",
+            timestamp,
+            magnitude: subtype.severity === "high" ? 10 : 7,
+            confidence: 0.6,
+            metadata: {
+              event_type: "strategic_development",
+              strategic_subtype:
+                subtype.subtype === "defense_contract_award" ? "defense_procurement_notice" : subtype.subtype,
+              sam_ptype: ptype,
+              notice_id: noticeId,
+              source_url: `https://sam.gov/opp/${noticeId}/view`,
+              original_headline: title || null,
+            },
+          });
+          samMapped += 1;
+          if (samMapped >= 120) break;
+        }
+        if (samMapped >= 120) break;
+      }
+      pushHealth({
+        provider: "SAM.gov opportunities",
+        ok: samMapped > 0,
+        updatedAt: nowIso,
+        latencyMs: Date.now() - providerStarted,
+        message:
+          samMapped > 0
+            ? `Mapped ${samMapped} strategic procurement notice signals from ${samSeen} SAM rows`
+            : `No strategic SAM rows mapped from ${samSeen} rows`,
+      });
+    }
+  }
+
+  const deduped = dedupeEventPoints(points, 0.8).slice(0, 2200);
+  const okProviders = providerHealth.filter((h) => h.ok).length;
+  return {
+    points: deduped,
+    health: {
+      provider: "Strategic escalation pack",
+      ok: deduped.length > 0,
+      updatedAt: nowIso,
+      latencyMs: Date.now() - started,
+      message: `strategic_points=${deduped.length}; providers_ok=${okProviders}/${providerHealth.length} [reason=${deduped.length > 0 ? "ok" : "empty"}]`,
+    },
+    providerHealth,
   };
 }
 
@@ -5887,6 +6506,8 @@ export async function GET(request: Request) {
     const requestedLayers = parseLayers(searchParams.get("layers"));
     const sourcePacks = parseSourcePacks(searchParams.get("sourcePacks"));
     const rangeHours = rangeToHours(range);
+    const strategicPackEnv = (process.env.ENABLE_STRATEGIC_PACK ?? "true").toLowerCase();
+    const strategicPackEnabledByEnv = strategicPackEnv !== "0" && strategicPackEnv !== "false" && strategicPackEnv !== "off";
 
     const [
       acledRes,
@@ -5906,6 +6527,7 @@ export async function GET(request: Request) {
       lawfareDeployRes,
       experimentalTrackersRes,
       requestedDomainLiveRes,
+      strategicRes,
     ] =
       await Promise.all([
       fetchAcledConflicts(rangeHours),
@@ -5925,6 +6547,10 @@ export async function GET(request: Request) {
       fetchLawfareDomesticDeployments(rangeHours),
       fetchExperimentalTrackerSignals(rangeHours),
       fetchRequestedDomainLiveSignals(rangeHours),
+      fetchStrategicEscalationSignals(
+        rangeHours,
+        sourcePacks.includes("strategicEscalation") && strategicPackEnabledByEnv
+      ),
     ]);
 
     const mergedConflicts = [...ucdpRes.points, ...acledRes.points]
@@ -5990,6 +6616,7 @@ export async function GET(request: Request) {
       ...openSourceIntelRes.points.filter((p) => p.layer === "news"),
       ...experimentalTrackersRes.points.filter((p) => p.layer === "news"),
       ...requestedDomainLiveRes.points.filter((p) => p.layer === "news"),
+      ...strategicRes.points,
       ...gdeltRes.points.map((p, idx) => ({
         ...p,
         id: `gdelt-news-${p.id}-${idx}`,
@@ -6165,7 +6792,7 @@ export async function GET(request: Request) {
           provider: "Adapter telemetry",
           ok: true,
           updatedAt: new Date().toISOString(),
-          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; troop_movements=0; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
+          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; strategic=${strategicRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; troop_movements=0; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
         },
         buildSourceAccessTelemetry(),
         buildConflictAdapterTelemetry({
@@ -6195,6 +6822,8 @@ export async function GET(request: Request) {
         lawfareDeployRes.health,
         experimentalTrackersRes.health,
         requestedDomainLiveRes.health,
+        strategicRes.health,
+        ...strategicRes.providerHealth,
         {
           provider: "Carrier groups",
           ok: carrierGroups.length > 0,
