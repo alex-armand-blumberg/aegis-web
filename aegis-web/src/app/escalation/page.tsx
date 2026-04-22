@@ -637,6 +637,7 @@ User question: ${q}`;
         containerClassName="escalation-page-video-wrap"
         overlayClassName="escalation-page-video-overlay"
         videoClassName="escalation-page-video"
+        posterSrc="/satellite-earth.png"
       />
       <main className="relative z-10 pt-4">
         <div className="section !pb-8 !pt-20">

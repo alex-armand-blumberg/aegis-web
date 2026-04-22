@@ -65,6 +65,7 @@ export default function Home() {
         <BackgroundVideo
           src="/hero-bg.mp4"
           containerClassName="hero-video-bg"
+          posterSrc="/earth-bg.png"
         />
         <div className="hero-tag">Palantir demo</div>
         <h1>AegisHQ</h1>

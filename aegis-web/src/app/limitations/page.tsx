@@ -32,6 +32,7 @@ export default function LimitationsPage() {
         containerClassName="limitations-page-video-wrap"
         overlayClassName="limitations-page-video-overlay"
         videoClassName="limitations-page-video"
+        posterSrc="/limitations-bg.png"
       />
       <nav className="limitations-page-nav">
         <Link href="/" className="nav-logo">

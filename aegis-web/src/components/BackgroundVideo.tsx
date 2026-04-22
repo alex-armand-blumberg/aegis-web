@@ -8,6 +8,7 @@ type Props = {
   containerClassName: string;
   overlayClassName?: string;
   videoClassName?: string;
+  posterSrc?: string;
 };
 
 export default function BackgroundVideo({
@@ -15,10 +16,12 @@ export default function BackgroundVideo({
   containerClassName,
   overlayClassName,
   videoClassName,
+  posterSrc = "/earth-bg.png",
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [paused, setPaused] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
   // Avoid accessing `document` during SSR; this component is client-side but can still be pre-rendered.
   const mounted = typeof document !== "undefined";
 
@@ -63,20 +66,26 @@ export default function BackgroundVideo({
       >
         <video
           ref={videoRef}
-          className={videoClassName}
+          className={`${videoClassName ?? ""} ${videoReady ? "bg-video-ready" : "bg-video-loading"}`.trim()}
           autoPlay
           muted
           loop
           playsInline
+          preload="auto"
+          poster={posterSrc}
           src={src}
+          onLoadedData={() => setVideoReady(true)}
         />
         {overlayClassName && (
           <div className={`bg-video-overlay ${overlayClassName}`} aria-hidden />
         )}
         <img
-          src="/earth-bg.png"
+          src={posterSrc}
           alt=""
-          className={`bg-video-fallback ${hidden ? "bg-video-fallback-visible" : ""}`}
+          className={`bg-video-fallback ${hidden || !videoReady ? "bg-video-fallback-visible" : ""}`}
+          loading="eager"
+          fetchPriority="high"
+          decoding="async"
           aria-hidden
         />
       </div>

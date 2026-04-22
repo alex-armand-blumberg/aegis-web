@@ -313,6 +313,13 @@ a {
   height: 100%;
   object-fit: cover;
   opacity: 1;
+  transition: opacity 0.3s ease;
+}
+.hero-video-bg video.bg-video-loading {
+  opacity: 0;
+}
+.hero-video-bg video.bg-video-ready {
+  opacity: 1;
 }
 .hero-video-bg::after {
   content: "";
@@ -379,6 +386,13 @@ a {
 }
 .bg-video-hidden.hero-video-bg::after {
   background: rgba(2, 6, 17, 0.35);
+}
+.bg-video-loading {
+  opacity: 0;
+}
+.bg-video-ready {
+  opacity: 1;
+  transition: opacity 0.3s ease;
 }
 
 .hero-with-video .hero-tag,
