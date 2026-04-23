@@ -53,6 +53,12 @@ type EscalationApiResponse = {
   escalationFlaggedMonths: string[];
   preEscalationMonths: string[];
   dataSource?: string;
+  cache?: {
+    status: "fresh" | "stale" | "miss";
+    ageMs: number;
+    source: "memory" | "redis" | "none";
+    generatedAt: string;
+  };
   error?: string;
 };
 
@@ -239,6 +245,7 @@ export default function EscalationPage() {
   async function loadData() {
     const c = country.trim();
     if (!c) return;
+    const hadData = Boolean(data);
     setLoading(true);
     setError(null);
     setProgress(0);
@@ -256,7 +263,7 @@ export default function EscalationPage() {
       if (!res.ok) {
         const json = (await res.json()) as EscalationApiResponse;
         setError(json.error ?? "Failed to load escalation index.");
-        setData(null);
+        if (!hadData) setData(null);
         setLoading(false);
         setProgress(100);
         return;
@@ -264,7 +271,7 @@ export default function EscalationPage() {
       const reader = res.body?.getReader();
       if (!reader) {
         setError("Failed to load escalation index.");
-        setData(null);
+        if (!hadData) setData(null);
         setLoading(false);
         setProgress(100);
         return;
@@ -280,7 +287,7 @@ export default function EscalationPage() {
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
-          let msg: { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string };
+          let msg: { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string; cache?: EscalationApiResponse["cache"] };
           try {
             msg = JSON.parse(trimmed) as typeof msg;
           } catch {
@@ -298,6 +305,7 @@ export default function EscalationPage() {
               escalationFlaggedMonths: msg.escalationFlaggedMonths ?? [],
               preEscalationMonths: msg.preEscalationMonths ?? [],
               dataSource: msg.dataSource,
+              cache: msg.cache,
             };
             setData(json);
             setDrillMonth(null);
@@ -333,7 +341,7 @@ export default function EscalationPage() {
             return;
           } else if (msg.type === "error") {
             setError(msg.error ?? "Failed to load escalation index.");
-            setData(null);
+            if (!hadData) setData(null);
             setProgress(100);
             setLoading(false);
             return;
@@ -342,7 +350,7 @@ export default function EscalationPage() {
       }
       if (buffer.trim()) {
         try {
-          const msg = JSON.parse(buffer.trim()) as { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string };
+          const msg = JSON.parse(buffer.trim()) as { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string; cache?: EscalationApiResponse["cache"] };
           if (msg.type === "progress" && typeof msg.pct === "number") {
             setProgress(msg.pct);
             if (typeof msg.fetched === "number") setProgressFetched(msg.fetched);
@@ -356,6 +364,7 @@ export default function EscalationPage() {
               escalationFlaggedMonths: msg.escalationFlaggedMonths ?? [],
               preEscalationMonths: msg.preEscalationMonths ?? [],
               dataSource: msg.dataSource,
+              cache: msg.cache,
             };
             setData(json);
             setDrillMonth(null);
@@ -383,11 +392,11 @@ export default function EscalationPage() {
             return;
           } else if (msg.type === "error") {
             setError(msg.error ?? "Failed to load escalation index.");
-            setData(null);
+            if (!hadData) setData(null);
           }
         } catch {
           setError("Failed to load escalation index.");
-          setData(null);
+          if (!hadData) setData(null);
         }
       }
       setLoading(false);
@@ -395,7 +404,7 @@ export default function EscalationPage() {
     } catch (e) {
       console.error(e);
       setError("Failed to load escalation index.");
-      setData(null);
+      if (!hadData) setData(null);
       setLoading(false);
       setProgress(100);
     }
@@ -861,6 +870,9 @@ User question: ${q}`;
                       <>
                         Data source: {data.dataSource}
                         {data.series.length > 0 ? ` · ${data.series.length} country-month rows` : ""}
+                        {data.cache
+                          ? ` · cache ${data.cache.status} (${Math.round(data.cache.ageMs / 1000)}s old)`
+                          : ""}
                       </>
                     ) : undefined
                   }
