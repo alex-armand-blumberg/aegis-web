@@ -79,6 +79,12 @@ export type MapApiResponse = {
   activeConflictCountries?: ActiveConflictCountry[];
   escalationRiskCountries?: EscalationRiskCountry[];
   frontlineOverlays?: FrontlineOverlay[];
+  cache?: {
+    status: "fresh" | "stale" | "miss";
+    ageMs: number;
+    source: "memory" | "redis" | "none";
+    generatedAt: string;
+  };
 };
 
 export type CountryIntelResponse = {

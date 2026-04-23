@@ -22,9 +22,14 @@ import {
   REQUESTED_SOURCE_ACCESS_MATRIX,
   WORLDMONITOR_RSS_NETWORK,
 } from "@/lib/intel/sourceRegistry";
+import { buildCacheKey, getCachedOrCompute } from "@/lib/cache/tieredCache";
 
 const ACLED_ARCGIS_QUERY_URL =
   "https://services8.arcgis.com/xu983xJB6fIDCjpX/arcgis/rest/services/ACLED/FeatureServer/0/query";
+
+const MAP_FAST_CACHE_ENABLED = (process.env.ENABLE_MAP_FAST_CACHE ?? "true").toLowerCase() !== "false";
+const MAP_FAST_CACHE_FRESH_MS = Number(process.env.MAP_FAST_CACHE_FRESH_MS ?? 90_000);
+const MAP_FAST_CACHE_STALE_MS = Number(process.env.MAP_FAST_CACHE_STALE_MS ?? 8 * 60_000);
 
 const ACLED_FIELDS =
   "country,admin1,event_month,battles,explosions_remote_violence,protests,riots,strategic_developments,violence_against_civilians,violent_actors,fatalities,centroid_longitude,centroid_latitude,ObjectId";
@@ -3393,37 +3398,44 @@ async function fetchTrustedPublisherSignals(rangeHours: number): Promise<{
   let geoMapped = 0;
   let domainFallbacks = 0;
 
-  for (const feed of TRUSTED_CONFLICT_RSS_FEEDS) {
-    const urls: string[] = [];
-    if (feed.url) urls.push(feed.url);
-    if (feed.domain) {
-      const q = encodeURIComponent(
-        `site:${feed.domain} (missile OR strike OR explosion OR shelling OR artillery OR drone OR battle OR raid OR clashes)`
+  const maxConcurrentFeeds = Math.max(2, Number(process.env.MAP_RSS_MAX_CONCURRENCY ?? 8));
+  const feedQueue = [...TRUSTED_CONFLICT_RSS_FEEDS];
+  const workers = Array.from({ length: Math.min(maxConcurrentFeeds, feedQueue.length) }, async () => {
+    while (feedQueue.length > 0) {
+      const feed = feedQueue.shift();
+      if (!feed) continue;
+      const urls: string[] = [];
+      if (feed.url) urls.push(feed.url);
+      if (feed.domain) {
+        const q = encodeURIComponent(
+          `site:${feed.domain} (missile OR strike OR explosion OR shelling OR artillery OR drone OR battle OR raid OR clashes)`
+        );
+        urls.push(...buildGoogleNewsRssUrls(q));
+        domainFallbacks += 1;
+      }
+      if (urls.length === 0) {
+        feedErrors += 1;
+        continue;
+      }
+      const fetchRes = await fetchTextWithRetries(urls, 9000, 1);
+      if (!fetchRes.ok || !fetchRes.text) {
+        feedErrors += 1;
+        continue;
+      }
+      const parsed = parseRssConflictPoints(
+        fetchRes.text,
+        cutoff,
+        `${feed.provider} (${feed.tier})`,
+        "news",
+        seen
       );
-      urls.push(...buildGoogleNewsRssUrls(q));
-      domainFallbacks += 1;
+      totalItems += parsed.totalItems;
+      conflictCandidates += parsed.conflictCandidates;
+      geoMapped += parsed.geoMapped;
+      points.push(...parsed.points);
     }
-    if (urls.length === 0) {
-      feedErrors += 1;
-      continue;
-    }
-    const fetchRes = await fetchTextWithRetries(urls, 12000, 2);
-    if (!fetchRes.ok || !fetchRes.text) {
-      feedErrors += 1;
-      continue;
-    }
-    const parsed = parseRssConflictPoints(
-      fetchRes.text,
-      cutoff,
-      `${feed.provider} (${feed.tier})`,
-      "news",
-      seen
-    );
-    totalItems += parsed.totalItems;
-    conflictCandidates += parsed.conflictCandidates;
-    geoMapped += parsed.geoMapped;
-    points.push(...parsed.points);
-  }
+  });
+  await Promise.all(workers);
 
   const deduped = dedupeEventPoints(points, 1).slice(0, 12000);
   const diagnostics =
@@ -6500,6 +6512,7 @@ function buildSourceAccessTelemetry(): ProviderHealth {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   try {
     const { searchParams } = new URL(request.url);
     const range = searchParams.get("range") ?? "7d";
@@ -6508,343 +6521,461 @@ export async function GET(request: Request) {
     const rangeHours = rangeToHours(range);
     const strategicPackEnv = (process.env.ENABLE_STRATEGIC_PACK ?? "true").toLowerCase();
     const strategicPackEnabledByEnv = strategicPackEnv !== "0" && strategicPackEnv !== "false" && strategicPackEnv !== "off";
+    const cacheKey = buildCacheKey("map:v2", {
+      range,
+      rangeHours,
+      layers: requestedLayers,
+      sourcePacks,
+      strategicPackEnabledByEnv,
+    });
 
-    const [
-      acledRes,
-      ucdpRes,
-      liveuamapRes,
-      gdeltRes,
-      eventRegistryRes,
-      rapidRes,
-      flightsRes,
-      usniVesselsRes,
-      vesselsRes,
-      newsRes,
-      rssNetworkRes,
-      relaySeedRes,
-      infraRes,
-      openSourceIntelRes,
-      lawfareDeployRes,
-      experimentalTrackersRes,
-      requestedDomainLiveRes,
-      strategicRes,
-    ] =
-      await Promise.all([
-      fetchAcledConflicts(rangeHours),
-      fetchUcdpConflicts(rangeHours),
-      fetchLiveuamapEvents(rangeHours),
-      fetchGdeltConflictEvents(rangeHours),
-      fetchEventRegistryNews(rangeHours),
-      fetchRapidConflictSignals(rangeHours),
-      fetchOpenSkyFlights(),
-      fetchUsniFleetTrackerSignals(rangeHours),
-      fetchVesselSignals(),
-      fetchNewsSignals(rangeHours),
-      fetchRssNetworkSignals(rangeHours),
-      fetchRelaySeedSignals(rangeHours),
-      fetchStrategicInfrastructure(),
-      fetchOpenSourceIntelSignals(rangeHours),
-      fetchLawfareDomesticDeployments(rangeHours),
-      fetchExperimentalTrackerSignals(rangeHours),
-      fetchRequestedDomainLiveSignals(rangeHours),
-      fetchStrategicEscalationSignals(
-        rangeHours,
-        sourcePacks.includes("strategicEscalation") && strategicPackEnabledByEnv
-      ),
-    ]);
+    const makeSkippedAdapter = (provider: string, message: string) => ({
+      points: [] as IntelPoint[],
+      health: {
+        provider,
+        ok: true,
+        updatedAt: new Date().toISOString(),
+        message,
+      } as ProviderHealth,
+    });
 
-    const mergedConflicts = [...ucdpRes.points, ...acledRes.points]
-      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 2400);
-    const eventRegistryStrikePoints: IntelPoint[] = eventRegistryRes.points
-      .filter((p) => {
-        const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`;
-        return isKineticEventText(text);
-      })
-      .map((p, idx) => ({
-        ...p,
-        id: `eventreg-strike-${p.id}-${idx}`,
-        layer: "liveStrikes" as const,
-        severity: p.severity === "critical" ? "critical" : "high",
-        source: "Event Registry",
-      }));
+    const buildResponse = async (): Promise<MapApiResponse> => {
+      const wantsConflicts =
+        requestedLayers.some((layer) => layer.startsWith("conflicts")) ||
+        requestedLayers.includes("liveStrikes") ||
+        requestedLayers.includes("news") ||
+        requestedLayers.includes("escalationRisk") ||
+        requestedLayers.includes("hotspots");
+      const wantsLiveSignals =
+        requestedLayers.includes("liveStrikes") ||
+        requestedLayers.includes("news") ||
+        requestedLayers.includes("escalationRisk") ||
+        requestedLayers.includes("hotspots");
+      const wantsFlights =
+        requestedLayers.includes("flights") ||
+        requestedLayers.includes("hotspots") ||
+        requestedLayers.includes("escalationRisk");
+      const wantsVessels =
+        requestedLayers.includes("vessels") ||
+        requestedLayers.includes("carriers") ||
+        requestedLayers.includes("hotspots") ||
+        requestedLayers.includes("escalationRisk");
+      const wantsInfrastructure =
+        requestedLayers.includes("infrastructure") || requestedLayers.includes("hotspots");
+      const includeFrontline =
+        requestedLayers.includes("conflicts") ||
+        requestedLayers.includes("conflictsBattles") ||
+        requestedLayers.includes("conflictsExplosions") ||
+        requestedLayers.includes("conflictsCivilians") ||
+        requestedLayers.includes("conflictsStrategic") ||
+        requestedLayers.includes("liveStrikes");
 
-    const liveStrikes = [
-      ...rapidRes.points,
-      ...gdeltRes.points,
-      ...liveuamapRes.points,
-      ...eventRegistryStrikePoints,
-      ...openSourceIntelRes.points.filter((p) => p.layer === "liveStrikes"),
-      ...experimentalTrackersRes.points.filter((p) => p.layer === "liveStrikes"),
-      ...requestedDomainLiveRes.points.filter((p) => p.layer === "liveStrikes"),
-      ...rssNetworkRes.points
+      const [
+        acledRes,
+        ucdpRes,
+        liveuamapRes,
+        gdeltRes,
+        eventRegistryRes,
+        rapidRes,
+        flightsRes,
+        usniVesselsRes,
+        vesselsRes,
+        newsRes,
+        rssNetworkRes,
+        relaySeedRes,
+        infraRes,
+        openSourceIntelRes,
+        lawfareDeployRes,
+        experimentalTrackersRes,
+        requestedDomainLiveRes,
+        strategicRes,
+      ] = await Promise.all([
+        wantsConflicts ? fetchAcledConflicts(rangeHours) : Promise.resolve(makeSkippedAdapter("ACLED ArcGIS", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsConflicts ? fetchUcdpConflicts(rangeHours) : Promise.resolve(makeSkippedAdapter("UCDP geocoded", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals ? fetchLiveuamapEvents(rangeHours) : Promise.resolve(makeSkippedAdapter("LiveUAMap", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals ? fetchGdeltConflictEvents(rangeHours) : Promise.resolve(makeSkippedAdapter("GDELT conflict feed", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals ? fetchEventRegistryNews(rangeHours) : Promise.resolve(makeSkippedAdapter("Event Registry conflict events", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals ? fetchRapidConflictSignals(rangeHours) : Promise.resolve(makeSkippedAdapter("Rapid conflict feed", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsFlights ? fetchOpenSkyFlights() : Promise.resolve(makeSkippedAdapter("OpenSky flights", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsVessels ? fetchUsniFleetTrackerSignals(rangeHours) : Promise.resolve(makeSkippedAdapter("USNI fleet tracker", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsVessels ? fetchVesselSignals() : Promise.resolve(makeSkippedAdapter("AIS vessel feed", "Skipped (layer filter) [reason=layer_gated]")),
+        requestedLayers.includes("news") || requestedLayers.includes("escalationRisk") || requestedLayers.includes("hotspots")
+          ? fetchNewsSignals(rangeHours)
+          : Promise.resolve(makeSkippedAdapter("Google News RSS", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals || requestedLayers.includes("news")
+          ? fetchRssNetworkSignals(rangeHours)
+          : Promise.resolve(makeSkippedAdapter("RSS network adapter", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals || requestedLayers.includes("news")
+          ? fetchRelaySeedSignals(rangeHours)
+          : Promise.resolve(makeSkippedAdapter("Relay seed digest", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsInfrastructure
+          ? fetchStrategicInfrastructure()
+          : Promise.resolve(makeSkippedAdapter("Strategic infrastructure", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals || requestedLayers.includes("news")
+          ? fetchOpenSourceIntelSignals(rangeHours)
+          : Promise.resolve(makeSkippedAdapter("Open-source intel adapters", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsInfrastructure
+          ? fetchLawfareDomesticDeployments(rangeHours)
+          : Promise.resolve(makeSkippedAdapter("Lawfare domestic deployments", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals || requestedLayers.includes("news")
+          ? fetchExperimentalTrackerSignals(rangeHours)
+          : Promise.resolve(makeSkippedAdapter("Experimental tracker adapters", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals || requestedLayers.includes("news")
+          ? fetchRequestedDomainLiveSignals(rangeHours)
+          : Promise.resolve(makeSkippedAdapter("Requested-domain live adapters", "Skipped (layer filter) [reason=layer_gated]")),
+        requestedLayers.includes("news") || requestedLayers.includes("escalationRisk")
+          ? fetchStrategicEscalationSignals(
+              rangeHours,
+              sourcePacks.includes("strategicEscalation") && strategicPackEnabledByEnv
+            )
+          : Promise.resolve({
+              ...makeSkippedAdapter("Strategic escalation signals", "Skipped (layer filter) [reason=layer_gated]"),
+              providerHealth: [] as ProviderHealth[],
+            }),
+      ]);
+
+      const mergedConflicts = [...ucdpRes.points, ...acledRes.points]
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, 2400);
+      const eventRegistryStrikePoints: IntelPoint[] = eventRegistryRes.points
         .filter((p) => {
-          const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`.toLowerCase();
-          return (
-            isKineticEventText(text) &&
-            !/\b(analysis|opinion|editorial|markets?|aid)\b/.test(text)
-          );
+          const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`;
+          return isKineticEventText(text);
         })
         .map((p, idx) => ({
           ...p,
-          id: `trusted-strike-${p.id}-${idx}`,
+          id: `eventreg-strike-${p.id}-${idx}`,
           layer: "liveStrikes" as const,
-          source: p.source || "Trusted publisher feeds",
-          severity: p.severity === "critical" ? ("critical" as const) : ("high" as const),
-          magnitude: Math.max(9, p.magnitude ?? 0),
-        })),
-      ...relaySeedRes.points
-        .filter((p) => isKineticEventText(`${p.title} ${p.subtitle ?? ""}`))
-        .map((p, idx) => ({
-          ...p,
-          id: `relay-strike-${p.id}-${idx}`,
-          layer: "liveStrikes" as const,
-          severity: p.severity === "critical" ? ("critical" as const) : ("high" as const),
-          source: `${p.source} (relay)`,
-        })),
-    ]
-      .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    const dedupedLiveStrikes = collapseRepeatedEvents(
-      dedupeEventPoints(liveStrikes, 0.5),
-      "liveStrikes"
-    ).slice(0, 8200);
-    const newsCandidates = [
-      ...newsRes.points,
-      ...eventRegistryRes.points,
-      ...rssNetworkRes.points,
-      ...relaySeedRes.points,
-      ...openSourceIntelRes.points.filter((p) => p.layer === "news"),
-      ...experimentalTrackersRes.points.filter((p) => p.layer === "news"),
-      ...requestedDomainLiveRes.points.filter((p) => p.layer === "news"),
-      ...strategicRes.points,
-      ...gdeltRes.points.map((p, idx) => ({
-        ...p,
-        id: `gdelt-news-${p.id}-${idx}`,
-        layer: "news" as const,
-        source: "GDELT",
-      })),
-      ...rapidRes.points.map((p, idx) => ({
-        ...p,
-        id: `rapid-news-${p.id}-${idx}`,
-        layer: "news" as const,
-        source: "Rapid conflict feed",
-      })),
-    ];
-    let fusedNewsPoints = dedupeEventPoints(newsCandidates, 0.75)
-      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 13200);
-    fusedNewsPoints = collapseRepeatedEvents(
-      fusedNewsPoints.filter((p) => {
-        const text = `${p.title} ${p.subtitle ?? ""}`;
-        if (HIGH_REPEAT_EXCLUDE_RE.test(text)) return false;
-        if (
-          GENERIC_REPEAT_LABEL_RE.test(p.title) &&
-          !isKineticEventText(`${p.title} ${String(p.metadata?.event_type ?? "")}`)
-        ) {
-          return false;
-        }
-        return true;
-      }),
-      "news"
-    );
-    if (fusedNewsPoints.length < 900) {
-      const densityBackfill = dedupeEventPoints(
-        [
-          ...fusedNewsPoints,
-          ...dedupedLiveStrikes.map((p, idx) => ({
+          severity: p.severity === "critical" ? "critical" : "high",
+          source: "Event Registry",
+        }));
+
+      const liveStrikes = [
+        ...rapidRes.points,
+        ...gdeltRes.points,
+        ...liveuamapRes.points,
+        ...eventRegistryStrikePoints,
+        ...openSourceIntelRes.points.filter((p) => p.layer === "liveStrikes"),
+        ...experimentalTrackersRes.points.filter((p) => p.layer === "liveStrikes"),
+        ...requestedDomainLiveRes.points.filter((p) => p.layer === "liveStrikes"),
+        ...rssNetworkRes.points
+          .filter((p) => {
+            const text = `${p.title} ${p.subtitle ?? ""} ${String(p.metadata?.event_type ?? "")}`.toLowerCase();
+            return (
+              isKineticEventText(text) &&
+              !/\b(analysis|opinion|editorial|markets?|aid)\b/.test(text)
+            );
+          })
+          .map((p, idx) => ({
             ...p,
-            id: `livestrike-news-backfill-${p.id}-${idx}`,
-            layer: "news" as const,
-            source: `${p.source} (backfill)`,
+            id: `trusted-strike-${p.id}-${idx}`,
+            layer: "liveStrikes" as const,
+            source: p.source || "Trusted publisher feeds",
+            severity: p.severity === "critical" ? ("critical" as const) : ("high" as const),
+            magnitude: Math.max(9, p.magnitude ?? 0),
           })),
-        ],
-        0.75
-      )
+        ...relaySeedRes.points
+          .filter((p) => isKineticEventText(`${p.title} ${p.subtitle ?? ""}`))
+          .map((p, idx) => ({
+            ...p,
+            id: `relay-strike-${p.id}-${idx}`,
+            layer: "liveStrikes" as const,
+            severity: p.severity === "critical" ? ("critical" as const) : ("high" as const),
+            source: `${p.source} (relay)`,
+          })),
+      ]
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+      const dedupedLiveStrikes = collapseRepeatedEvents(
+        dedupeEventPoints(liveStrikes, 0.5),
+        "liveStrikes"
+      ).slice(0, 8200);
+      const newsCandidates = [
+        ...newsRes.points,
+        ...eventRegistryRes.points,
+        ...rssNetworkRes.points,
+        ...relaySeedRes.points,
+        ...openSourceIntelRes.points.filter((p) => p.layer === "news"),
+        ...experimentalTrackersRes.points.filter((p) => p.layer === "news"),
+        ...requestedDomainLiveRes.points.filter((p) => p.layer === "news"),
+        ...strategicRes.points,
+        ...gdeltRes.points.map((p, idx) => ({
+          ...p,
+          id: `gdelt-news-${p.id}-${idx}`,
+          layer: "news" as const,
+          source: "GDELT",
+        })),
+        ...rapidRes.points.map((p, idx) => ({
+          ...p,
+          id: `rapid-news-${p.id}-${idx}`,
+          layer: "news" as const,
+          source: "Rapid conflict feed",
+        })),
+      ];
+      let fusedNewsPoints = dedupeEventPoints(newsCandidates, 0.75)
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-        .slice(0, 15600);
-      fusedNewsPoints = collapseRepeatedEvents(densityBackfill, "news");
-    }
-    const dedupedFlights = dedupeFlightPoints(flightsRes.points).slice(0, 7000);
-    const mergedVesselPoints = dedupeVesselPoints([
-      ...usniVesselsRes.points,
-      ...vesselsRes.points,
-    ]).slice(0, 9000);
-    const carrierGroups = mergeCarrierSignals(
-      extractCarrierGroups(mergedVesselPoints),
-      extractUsniCarrierTheaters(mergedVesselPoints)
-    );
-    const alignedLiveStrikes = dedupedLiveStrikes.map(pinPointToDeclaredCountry);
-    const alignedConflicts = mergedConflicts.map(pinPointToDeclaredCountry);
-    const alignedNews = fusedNewsPoints.map(pinPointToDeclaredCountry);
-    const acledSubtype = splitAcledConflictPoints(alignedConflicts);
-    const nonAcledConflicts = alignedConflicts.filter((p) => p.source !== "ACLED ArcGIS");
-    const conflictSubtypeBattles = [
-      ...nonAcledConflicts.map((p, idx) => ({ ...p, id: `${p.id}-kinetic-${idx}`, layer: "conflictsBattles" as const })),
-      ...acledSubtype.battles,
-    ];
-    const conflictSubtypeExplosions = acledSubtype.explosions;
-    const conflictSubtypeCivilians = acledSubtype.civilians;
-    const conflictSubtypeStrategic = acledSubtype.strategic;
-    const conflictSubtypeProtests = acledSubtype.protests;
-    const conflictSubtypeRiots = acledSubtype.riots;
-    const recombinedConflictPoints = [
-      ...conflictSubtypeBattles,
-      ...conflictSubtypeExplosions,
-      ...conflictSubtypeCivilians,
-      ...conflictSubtypeStrategic,
-      ...conflictSubtypeProtests,
-      ...conflictSubtypeRiots,
-    ];
-    const allowCuratedConflictFallback =
-      alignedLiveStrikes.length + recombinedConflictPoints.length + alignedNews.length < 25;
-    const activeConflictCountries = buildActiveConflictCountries(
-      alignedLiveStrikes,
-      recombinedConflictPoints,
-      alignedNews,
-      allowCuratedConflictFallback
-    );
-    const escalationRiskCountries = buildEscalationRiskCountries(
-      alignedLiveStrikes,
-      recombinedConflictPoints,
-      alignedNews
-    );
-    const mappedEscalationRiskPoints: Array<IntelPoint | null> = escalationRiskCountries
-      .map((risk, idx) => {
-        const canonical = risk.country;
-        const bboxEntry = Object.entries(COUNTRY_BBOX).find(
-          ([name]) => canonicalConflictCountry(name) === canonical
-        );
-        const bbox = bboxEntry?.[1];
-        if (!bbox) return null;
-        return {
-          id: `escalation-risk-${idx}-${canonical}`,
-          layer: "escalationRisk" as const,
-          title: `${bboxEntry?.[0] ?? risk.country} escalation risk`,
-          subtitle: `Trend ${risk.trend} | score ${risk.riskScore}`,
-          lat: bbox[4],
-          lon: bbox[5],
-          country: bboxEntry?.[0] ?? risk.country,
-          severity: risk.severity,
-          source: "AEGIS escalation model",
-          timestamp: risk.latestEventAt,
-          magnitude: Math.min(18, risk.riskScore),
-          confidence: 0.62,
-          metadata: {
-            risk_score: risk.riskScore,
-            trend: risk.trend,
-            signal_sources: risk.signals.join(", "),
+        .slice(0, 13200);
+      fusedNewsPoints = collapseRepeatedEvents(
+        fusedNewsPoints.filter((p) => {
+          const text = `${p.title} ${p.subtitle ?? ""}`;
+          if (HIGH_REPEAT_EXCLUDE_RE.test(text)) return false;
+          if (
+            GENERIC_REPEAT_LABEL_RE.test(p.title) &&
+            !isKineticEventText(`${p.title} ${String(p.metadata?.event_type ?? "")}`)
+          ) {
+            return false;
+          }
+          return true;
+        }),
+        "news"
+      );
+      if (fusedNewsPoints.length < 900) {
+        const densityBackfill = dedupeEventPoints(
+          [
+            ...fusedNewsPoints,
+            ...dedupedLiveStrikes.map((p, idx) => ({
+              ...p,
+              id: `livestrike-news-backfill-${p.id}-${idx}`,
+              layer: "news" as const,
+              source: `${p.source} (backfill)`,
+            })),
+          ],
+          0.75
+        )
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+          .slice(0, 15600);
+        fusedNewsPoints = collapseRepeatedEvents(densityBackfill, "news");
+      }
+      const dedupedFlights = dedupeFlightPoints(flightsRes.points).slice(0, 7000);
+      const mergedVesselPoints = dedupeVesselPoints([
+        ...usniVesselsRes.points,
+        ...vesselsRes.points,
+      ]).slice(0, 9000);
+      const carrierGroups = mergeCarrierSignals(
+        extractCarrierGroups(mergedVesselPoints),
+        extractUsniCarrierTheaters(mergedVesselPoints)
+      );
+      const alignedLiveStrikes = dedupedLiveStrikes.map(pinPointToDeclaredCountry);
+      const alignedConflicts = mergedConflicts.map(pinPointToDeclaredCountry);
+      const alignedNews = fusedNewsPoints.map(pinPointToDeclaredCountry);
+      const acledSubtype = splitAcledConflictPoints(alignedConflicts);
+      const nonAcledConflicts = alignedConflicts.filter((p) => p.source !== "ACLED ArcGIS");
+      const conflictSubtypeBattles = [
+        ...nonAcledConflicts.map((p, idx) => ({ ...p, id: `${p.id}-kinetic-${idx}`, layer: "conflictsBattles" as const })),
+        ...acledSubtype.battles,
+      ];
+      const conflictSubtypeExplosions = acledSubtype.explosions;
+      const conflictSubtypeCivilians = acledSubtype.civilians;
+      const conflictSubtypeStrategic = acledSubtype.strategic;
+      const conflictSubtypeProtests = acledSubtype.protests;
+      const conflictSubtypeRiots = acledSubtype.riots;
+      const recombinedConflictPoints = [
+        ...conflictSubtypeBattles,
+        ...conflictSubtypeExplosions,
+        ...conflictSubtypeCivilians,
+        ...conflictSubtypeStrategic,
+        ...conflictSubtypeProtests,
+        ...conflictSubtypeRiots,
+      ];
+      const allowCuratedConflictFallback =
+        alignedLiveStrikes.length + recombinedConflictPoints.length + alignedNews.length < 25;
+      const activeConflictCountries = buildActiveConflictCountries(
+        alignedLiveStrikes,
+        recombinedConflictPoints,
+        alignedNews,
+        allowCuratedConflictFallback
+      );
+      const escalationRiskCountries = buildEscalationRiskCountries(
+        alignedLiveStrikes,
+        recombinedConflictPoints,
+        alignedNews
+      );
+      const mappedEscalationRiskPoints: Array<IntelPoint | null> = escalationRiskCountries
+        .map((risk, idx) => {
+          const canonical = risk.country;
+          const bboxEntry = Object.entries(COUNTRY_BBOX).find(
+            ([name]) => canonicalConflictCountry(name) === canonical
+          );
+          const bbox = bboxEntry?.[1];
+          if (!bbox) return null;
+          return {
+            id: `escalation-risk-${idx}-${canonical}`,
+            layer: "escalationRisk" as const,
+            title: `${bboxEntry?.[0] ?? risk.country} escalation risk`,
+            subtitle: `Trend ${risk.trend} | score ${risk.riskScore}`,
+            lat: bbox[4],
+            lon: bbox[5],
+            country: bboxEntry?.[0] ?? risk.country,
+            severity: risk.severity,
+            source: "AEGIS escalation model",
+            timestamp: risk.latestEventAt,
+            magnitude: Math.min(18, risk.riskScore),
+            confidence: 0.62,
+            metadata: {
+              risk_score: risk.riskScore,
+              trend: risk.trend,
+              signal_sources: risk.signals.join(", "),
+            },
+          };
+        });
+      const escalationRiskPoints = mappedEscalationRiskPoints.filter(
+        (p): p is IntelPoint => p !== null
+      );
+
+      const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
+        conflicts: recombinedConflictPoints,
+        conflictsBattles: conflictSubtypeBattles,
+        conflictsExplosions: conflictSubtypeExplosions,
+        conflictsCivilians: conflictSubtypeCivilians,
+        conflictsStrategic: conflictSubtypeStrategic,
+        conflictsProtests: conflictSubtypeProtests,
+        conflictsRiots: conflictSubtypeRiots,
+        liveStrikes: alignedLiveStrikes,
+        flights: dedupedFlights,
+        vessels: mergedVesselPoints,
+        troopMovements: [],
+        carriers: carrierGroups,
+        news: alignedNews,
+        escalationRisk: escalationRiskPoints,
+        hotspots: [],
+        infrastructure: dedupeEventPoints(
+          [...infraRes.points, ...lawfareDeployRes.points.filter((p) => p.layer === "infrastructure")],
+          6
+        ).slice(0, 2200),
+      };
+
+      const [countryCenters, frontline] = await Promise.all([
+        getNaturalEarthCountryCentersMap(),
+        includeFrontline
+          ? buildFrontlineOverlays()
+          : Promise.resolve({
+              overlays: [] as FrontlineOverlay[],
+              health: {
+                provider: "Ukraine frontlines",
+                ok: true,
+                updatedAt: new Date().toISOString(),
+                message: "Skipped (layer filter) [reason=layer_gated]",
+              } as ProviderHealth,
+            }),
+      ]);
+      baseLayers.hotspots = buildHotspots(baseLayers, countryCenters);
+
+      return {
+        updatedAt: new Date().toISOString(),
+        range,
+        layers: filterToRequestedLayers(baseLayers, requestedLayers),
+        activeConflictCountries,
+        escalationRiskCountries,
+        frontlineOverlays: frontline.overlays,
+        providerHealth: [
+          {
+            provider: "Source family matrix",
+            ok: true,
+            updatedAt: new Date().toISOString(),
+            message: `Families ${MAP_SOURCE_FAMILY_MATRIX.length} mapped to layers (conflicts/liveStrikes/news/flights/vessels/infrastructure) [reason=inventory_loaded]`,
+          },
+          {
+            provider: "Conflict fusion",
+            ok: recombinedConflictPoints.length > 0 || alignedLiveStrikes.length > 0,
+            updatedAt: new Date().toISOString(),
+            message: `Conflicts: ${recombinedConflictPoints.length} classified points | Live strikes: ${alignedLiveStrikes.length} near-live events | News: ${alignedNews.length}`,
+          },
+          {
+            provider: "Adapter telemetry",
+            ok: true,
+            updatedAt: new Date().toISOString(),
+            message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; strategic=${strategicRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; troop_movements=0; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
+          },
+          buildSourceAccessTelemetry(),
+          buildConflictAdapterTelemetry({
+            acled: acledRes.points,
+            ucdp: ucdpRes.points,
+            gdelt: gdeltRes.points,
+            liveuamap: liveuamapRes.points,
+            eventRegistry: eventRegistryRes.points,
+            rapid: rapidRes.points,
+            rssNetwork: rssNetworkRes.points,
+            relaySeed: relaySeedRes.points,
+            experimentalTrackers: experimentalTrackersRes.points,
+            requestedDomainLive: requestedDomainLiveRes.points,
+          }),
+          acledRes.health,
+          ucdpRes.health,
+          liveuamapRes.health,
+          gdeltRes.health,
+          eventRegistryRes.health,
+          rapidRes.health,
+          flightsRes.health,
+          usniVesselsRes.health,
+          vesselsRes.health,
+          rssNetworkRes.health,
+          relaySeedRes.health,
+          openSourceIntelRes.health,
+          lawfareDeployRes.health,
+          experimentalTrackersRes.health,
+          requestedDomainLiveRes.health,
+          strategicRes.health,
+          ...strategicRes.providerHealth,
+          {
+            provider: "Carrier groups",
+            ok: carrierGroups.length > 0,
+            updatedAt: new Date().toISOString(),
+            message: carrierGroups.length
+              ? `Detected ${carrierGroups.length} carrier/group contacts`
+              : "No carrier groups detected in current AIS window",
+          },
+          buildMilitaryInfraTelemetry({
+            flights: dedupedFlights,
+            vessels: mergedVesselPoints,
+            carriers: carrierGroups,
+            infrastructure: baseLayers.infrastructure,
+          }),
+          frontline.health,
+          newsRes.health,
+          infraRes.health,
+        ],
+      };
+    };
+
+    const cachedResult = MAP_FAST_CACHE_ENABLED
+      ? await getCachedOrCompute<MapApiResponse>({
+          key: cacheKey,
+          freshForMs: MAP_FAST_CACHE_FRESH_MS,
+          staleForMs: MAP_FAST_CACHE_STALE_MS,
+          compute: buildResponse,
+        })
+      : {
+          value: await buildResponse(),
+          meta: {
+            status: "miss" as const,
+            ageMs: 0,
+            source: "none" as const,
+            key: cacheKey,
           },
         };
-      });
-    const escalationRiskPoints = mappedEscalationRiskPoints.filter(
-      (p): p is IntelPoint => p !== null
-    );
 
-    const baseLayers: Record<IntelLayerKey, IntelPoint[]> = {
-      conflicts: recombinedConflictPoints,
-      conflictsBattles: conflictSubtypeBattles,
-      conflictsExplosions: conflictSubtypeExplosions,
-      conflictsCivilians: conflictSubtypeCivilians,
-      conflictsStrategic: conflictSubtypeStrategic,
-      conflictsProtests: conflictSubtypeProtests,
-      conflictsRiots: conflictSubtypeRiots,
-      liveStrikes: alignedLiveStrikes,
-      flights: dedupedFlights,
-      vessels: mergedVesselPoints,
-      // No verified ground-force troop movement dataset available in this build.
-      // We keep the layer key for compatibility, but it is always empty.
-      troopMovements: [],
-      carriers: carrierGroups,
-      news: alignedNews,
-      escalationRisk: escalationRiskPoints,
-      hotspots: [],
-      infrastructure: dedupeEventPoints(
-        [...infraRes.points, ...lawfareDeployRes.points.filter((p) => p.layer === "infrastructure")],
-        6
-      ).slice(0, 2200),
-    };
-
-    const countryCenters = await getNaturalEarthCountryCentersMap();
-    baseLayers.hotspots = buildHotspots(baseLayers, countryCenters);
-    const frontline = await buildFrontlineOverlays();
-
-    const response: MapApiResponse = {
-      updatedAt: new Date().toISOString(),
-      range,
-      layers: filterToRequestedLayers(baseLayers, requestedLayers),
-      activeConflictCountries,
-      escalationRiskCountries,
-      frontlineOverlays: frontline.overlays,
+    const responseWithMeta: MapApiResponse = {
+      ...cachedResult.value,
       providerHealth: [
+        ...cachedResult.value.providerHealth,
         {
-          provider: "Source family matrix",
+          provider: "Map API performance",
           ok: true,
           updatedAt: new Date().toISOString(),
-          message: `Families ${MAP_SOURCE_FAMILY_MATRIX.length} mapped to layers (conflicts/liveStrikes/news/flights/vessels/infrastructure) [reason=inventory_loaded]`,
+          latencyMs: Date.now() - startedAt,
+          message: `cache=${cachedResult.meta.status}; cache_source=${cachedResult.meta.source}; total_ms=${
+            Date.now() - startedAt
+          }`,
         },
-        {
-          provider: "Conflict fusion",
-          ok: recombinedConflictPoints.length > 0 || alignedLiveStrikes.length > 0,
-          updatedAt: new Date().toISOString(),
-          message: `Conflicts: ${recombinedConflictPoints.length} classified points | Live strikes: ${alignedLiveStrikes.length} near-live events | News: ${alignedNews.length}`,
-        },
-        {
-          provider: "Adapter telemetry",
-          ok: true,
-          updatedAt: new Date().toISOString(),
-          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; strategic=${strategicRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; troop_movements=0; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
-        },
-        buildSourceAccessTelemetry(),
-        buildConflictAdapterTelemetry({
-          acled: acledRes.points,
-          ucdp: ucdpRes.points,
-          gdelt: gdeltRes.points,
-          liveuamap: liveuamapRes.points,
-          eventRegistry: eventRegistryRes.points,
-          rapid: rapidRes.points,
-          rssNetwork: rssNetworkRes.points,
-          relaySeed: relaySeedRes.points,
-          experimentalTrackers: experimentalTrackersRes.points,
-          requestedDomainLive: requestedDomainLiveRes.points,
-        }),
-        acledRes.health,
-        ucdpRes.health,
-        liveuamapRes.health,
-        gdeltRes.health,
-        eventRegistryRes.health,
-        rapidRes.health,
-        flightsRes.health,
-        usniVesselsRes.health,
-        vesselsRes.health,
-        rssNetworkRes.health,
-        relaySeedRes.health,
-        openSourceIntelRes.health,
-        lawfareDeployRes.health,
-        experimentalTrackersRes.health,
-        requestedDomainLiveRes.health,
-        strategicRes.health,
-        ...strategicRes.providerHealth,
-        {
-          provider: "Carrier groups",
-          ok: carrierGroups.length > 0,
-          updatedAt: new Date().toISOString(),
-          message: carrierGroups.length
-            ? `Detected ${carrierGroups.length} carrier/group contacts`
-            : "No carrier groups detected in current AIS window",
-        },
-        buildMilitaryInfraTelemetry({
-          flights: dedupedFlights,
-          vessels: mergedVesselPoints,
-          carriers: carrierGroups,
-          infrastructure: baseLayers.infrastructure,
-        }),
-        frontline.health,
-        newsRes.health,
-        infraRes.health,
       ],
+      cache: {
+        status: cachedResult.meta.status,
+        ageMs: cachedResult.meta.ageMs,
+        source: cachedResult.meta.source,
+        generatedAt: new Date(Date.now() - Math.max(0, cachedResult.meta.ageMs)).toISOString(),
+      },
     };
-
-    return NextResponse.json(response, { status: 200 });
+    const serverTiming = `total;dur=${Date.now() - startedAt}, cache;desc="${cachedResult.meta.status}:${cachedResult.meta.source}"`;
+    return NextResponse.json(responseWithMeta, { status: 200, headers: { "Server-Timing": serverTiming } });
   } catch (err) {
     console.error("Map API error", err);
     return NextResponse.json(

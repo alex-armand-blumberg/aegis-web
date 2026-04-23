@@ -505,6 +505,11 @@ export default function MapPage() {
   const aiSummaryCacheRef = useRef<Record<string, string>>({});
   const usedRegionImagesRef = useRef<Set<string>>(new Set());
   const regionIntelCacheRef = useRef<Record<string, RegionIntelResponse>>({});
+  const hasDataRef = useRef(false);
+
+  useEffect(() => {
+    hasDataRef.current = Boolean(apiData);
+  }, [apiData]);
 
   const requestedLayerList = useMemo(
     () => ALL_LAYERS.filter((k) => activeLayers[k]).join(","),
@@ -513,7 +518,8 @@ export default function MapPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setMapReady(false);
+    const hadData = hasDataRef.current;
+    if (!hadData) setMapReady(false);
     try {
       const params = new URLSearchParams({
         range,
@@ -523,9 +529,10 @@ export default function MapPage() {
       const data = (await res.json()) as MapApiResponse & { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Failed to load map feeds");
       setApiData(data);
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load map feeds");
-      setApiData(null);
+      if (!hadData) setApiData(null);
     } finally {
       setLoading(false);
     }
@@ -1200,8 +1207,8 @@ export default function MapPage() {
             ))}
           </div>
           <div className="map-status-caption">
-            Requested conflict source adapters run automatically; use layer toggles above only for visualization
-            filtering. <strong>Vessels</strong> are maritime AIS (ships), not aircraft—enable <strong>flights</strong>{" "}
+            Layer toggles now also reduce backend fetch work for faster reloads. <strong>Vessels</strong> are maritime
+            AIS (ships), not aircraft—enable <strong>flights</strong>{" "}
             for ADS-B military aircraft tracks. <strong>Carriers</strong> is work in progress: only hulls matching
             known carrier names, CVN/CV- hull numbers, or explicit &quot;aircraft carrier&quot; wording are shown—
             not general cargo or bulk carriers.
@@ -1211,6 +1218,12 @@ export default function MapPage() {
             <span>Visible points: {totalVisible.toLocaleString()}</span>
             <span>
               Updated: {apiData ? new Date(apiData.updatedAt).toLocaleTimeString() : "--"}
+            </span>
+            <span>
+              Cache:{" "}
+              {apiData?.cache
+                ? `${apiData.cache.status} (${Math.round(apiData.cache.ageMs / 1000)}s old)`
+                : "--"}
             </span>
             <span>Range: {formatRangeLabel(range)}</span>
             <span>Adapters: core + requested-source live feeds</span>

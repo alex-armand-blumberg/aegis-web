@@ -7,6 +7,11 @@ import type { AcledMonthlyRecord } from "./escalation";
 
 const ACLED_OAUTH_URL = "https://acleddata.com/oauth/token";
 const ACLED_API_URL = "https://acleddata.com/api/acled/read";
+const ACLED_TOKEN_SKEW_MS = 30_000;
+const ACLED_MONTHLY_CACHE_TTL_MS = 10 * 60_000;
+
+let cachedAuthToken: { token: string; expiresAt: number } | null = null;
+const acledMonthlyCache = new Map<string, { expiresAt: number; rows: AcledMonthlyRecord[] }>();
 
 const EVENT_TYPE_MAP: Record<string, keyof Pick<AcledMonthlyRecord, "battles" | "explosions_remote_violence" | "violence_against_civilians" | "strategic_developments" | "protests" | "riots">> = {
   "Battles": "battles",
@@ -18,6 +23,9 @@ const EVENT_TYPE_MAP: Record<string, keyof Pick<AcledMonthlyRecord, "battles" | 
 };
 
 export async function getAcledToken(): Promise<string> {
+  if (cachedAuthToken && Date.now() < cachedAuthToken.expiresAt) {
+    return cachedAuthToken.token;
+  }
   const email = process.env.ACLED_EMAIL;
   const password = process.env.ACLED_PASSWORD;
   if (!email || !password) {
@@ -39,8 +47,13 @@ export async function getAcledToken(): Promise<string> {
     const text = await res.text();
     throw new Error(`ACLED login failed (${res.status}). ${text}`);
   }
-  const data = (await res.json()) as { access_token?: string };
+  const data = (await res.json()) as { access_token?: string; expires_in?: number };
   if (!data.access_token) throw new Error("ACLED token response missing access_token");
+  const expiresInMs = Math.max(60_000, Number(data.expires_in ?? 3600) * 1000);
+  cachedAuthToken = {
+    token: data.access_token,
+    expiresAt: Date.now() + expiresInMs - ACLED_TOKEN_SKEW_MS,
+  };
   return data.access_token;
 }
 
@@ -138,6 +151,19 @@ export async function fetchAcledCountryMonthly(
   endDate: Date,
   onProgress?: (fetched: number, total: number | null) => void
 ): Promise<AcledMonthlyRecord[]> {
+  const cacheKey = `${country.toLowerCase()}|${startDate.toISOString().slice(0, 10)}|${endDate
+    .toISOString()
+    .slice(0, 10)}`;
+  const cached = acledMonthlyCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    const rows = cached.rows.map((row) => ({
+      ...row,
+      event_month: new Date(row.event_month),
+    }));
+    onProgress?.(rows.length, rows.length);
+    return rows;
+  }
+
   const token = await getAcledToken();
   const startYear = startDate.getFullYear();
   const endYear = endDate.getFullYear();
@@ -179,10 +205,15 @@ export async function fetchAcledCountryMonthly(
   const monthly = aggregateToMonthly(allRows, country);
   const start = startDate.getTime();
   const end = endDate.getTime();
-  return monthly.filter((m) => {
+  const filtered = monthly.filter((m) => {
     const t = m.event_month.getTime();
     return t >= start && t <= end;
   });
+  acledMonthlyCache.set(cacheKey, {
+    expiresAt: Date.now() + ACLED_MONTHLY_CACHE_TTL_MS,
+    rows: filtered.map((row) => ({ ...row, event_month: new Date(row.event_month) })),
+  });
+  return filtered;
 }
 
 export function hasAcledEnv(): boolean {

@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   AcledMonthlyRecord,
   computeEscalationIndex,
-  computeForecastFromTail,
+  EscalationForecastPoint,
 } from "@/lib/escalation";
 import {
   fetchAcledCountryMonthly,
   hasAcledEnv,
 } from "@/lib/acled-api";
+import { buildCacheKey, getCachedOrCompute } from "@/lib/cache/tieredCache";
 
 const ACLED_ARCGIS_QUERY_URL =
   "https://services8.arcgis.com/xu983xJB6fIDCjpX/arcgis/rest/services/ACLED/FeatureServer/0/query";
@@ -44,6 +45,24 @@ type AcledArcgisFeature = {
   };
 };
 
+const ESCALATION_FAST_CACHE_ENABLED =
+  (process.env.ENABLE_ESCALATION_FAST_CACHE ?? "true").toLowerCase() !== "false";
+const ESCALATION_FAST_CACHE_FRESH_MS = Number(
+  process.env.ESCALATION_FAST_CACHE_FRESH_MS ?? 5 * 60_000
+);
+const ESCALATION_FAST_CACHE_STALE_MS = Number(
+  process.env.ESCALATION_FAST_CACHE_STALE_MS ?? 60 * 60_000
+);
+
+type EscalationPayload = {
+  series: ReturnType<typeof computeEscalationIndex>["series"];
+  forecast: EscalationForecastPoint[];
+  escalationThreshold: number;
+  escalationFlaggedMonths: string[];
+  preEscalationMonths: string[];
+  dataSource: string;
+};
+
 /** Default end date for ACLED research tier: one year ago. */
 function getDefaultEndDate(): Date {
   const d = new Date();
@@ -58,6 +77,7 @@ function parseDateParam(value: string | null, fallback: Date): Date {
 }
 
 async function fetchAcledViaArcGIS(
+  countryFilter: string,
   onProgress?: (fetched: number) => void
 ): Promise<AcledMonthlyRecord[]> {
   const pageSize = 1000;
@@ -65,8 +85,9 @@ async function fetchAcledViaArcGIS(
   const rows: AcledMonthlyRecord[] = [];
 
   while (true) {
+    const safeCountry = countryFilter.replace(/'/g, "''");
     const params = new URLSearchParams({
-      where: "1=1",
+      where: `country='${safeCountry}'`,
       outFields: ACLED_FIELDS.join(","),
       returnGeometry: "false",
       orderByFields: "ObjectId ASC",
@@ -142,6 +163,7 @@ function progressPct(fetched: number, total: number | null): number {
 }
 
 export async function GET(req: NextRequest) {
+  const startedAt = Date.now();
   const { searchParams } = new URL(req.url);
   const country = searchParams.get("country")?.trim();
   const smoothParam = searchParams.get("smooth");
@@ -163,37 +185,41 @@ export async function GET(req: NextRequest) {
   let endDate = parseDateParam(endParam, defaultEnd);
   if (endDate > defaultEnd) endDate = defaultEnd;
 
+  const cacheKey = buildCacheKey("escalation:v2", {
+    country: country.toLowerCase(),
+    smoothWindow,
+    threshold,
+    start: startDate.toISOString().slice(0, 10),
+    end: endDate.toISOString().slice(0, 10),
+    defaultEnd: defaultEnd.toISOString().slice(0, 10),
+    hasAcledEnv: hasAcledEnv(),
+  });
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       const push = (obj: object) => {
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       };
-      try {
-        push({ type: "progress", pct: 2, fetched: 0, total: undefined });
+
+      const buildPayload = async (): Promise<EscalationPayload> => {
         let allRows: AcledMonthlyRecord[];
         let dataSource: string;
-
         if (hasAcledEnv()) {
           try {
             const fullStart = new Date("2018-01-01");
-            allRows = await fetchAcledCountryMonthly(
-              country,
-              fullStart,
-              defaultEnd,
-              (fetched, total) => {
-                push({
-                  type: "progress",
-                  pct: progressPct(fetched, total),
-                  fetched,
-                  total: total ?? undefined,
-                });
-              }
-            );
+            allRows = await fetchAcledCountryMonthly(country, fullStart, defaultEnd, (fetched, total) => {
+              push({
+                type: "progress",
+                pct: progressPct(fetched, total),
+                fetched,
+                total: total ?? undefined,
+              });
+            });
             dataSource = "ACLED API (full history)";
           } catch (acledErr) {
             console.error("ACLED API failed, falling back to ArcGIS", acledErr);
-            allRows = await fetchAcledViaArcGIS((fetched) => {
+            allRows = await fetchAcledViaArcGIS(country, (fetched) => {
               push({
                 type: "progress",
                 pct: progressPct(fetched, null),
@@ -204,7 +230,7 @@ export async function GET(req: NextRequest) {
             dataSource = "ACLED ArcGIS (fallback)";
           }
         } else {
-          allRows = await fetchAcledViaArcGIS((fetched) => {
+          allRows = await fetchAcledViaArcGIS(country, (fetched) => {
             push({
               type: "progress",
               pct: progressPct(fetched, null),
@@ -215,66 +241,71 @@ export async function GET(req: NextRequest) {
           dataSource = "ACLED ArcGIS";
         }
 
-        push({
-          type: "progress",
-          pct: 95,
-          fetched: allRows.length,
-          total: allRows.length,
-        });
-        const result = computeEscalationIndex(
-          allRows,
-          country,
-          smoothWindow,
-          threshold
-        );
-
+        const result = computeEscalationIndex(allRows, country, smoothWindow, threshold);
         if (!result.series.length) {
-          push({ type: "error", error: `No data available for country '${country}'.` });
-          controller.close();
-          return;
+          throw new Error(`No data available for country '${country}'.`);
         }
-
-        const filteredSeries = filterSeriesByDateRange(
-          result.series,
-          startDate,
-          endDate
-        );
+        const filteredSeries = filterSeriesByDateRange(result.series, startDate, endDate);
         if (!filteredSeries.length) {
-          push({
-            type: "error",
-            error: `No data for ${country} in the selected date range. Try a wider range.`,
-          });
-          controller.close();
-          return;
+          throw new Error(`No data for ${country} in the selected date range. Try a wider range.`);
         }
 
-        const filteredMonths = new Set(
-          filteredSeries.map((s) => s.event_month.slice(0, 7))
-        );
-        const filteredFlagged = result.escalationFlaggedMonths.filter((m) =>
-          filteredMonths.has(m)
-        );
-        const filteredPre = result.preEscalationMonths.filter((m) =>
-          filteredMonths.has(m)
-        );
-        const forecast = computeForecastFromTail(filteredSeries);
-
-        push({
-          type: "result",
+        const filteredMonths = new Set(filteredSeries.map((s) => s.event_month.slice(0, 7)));
+        const filteredFlagged = result.escalationFlaggedMonths.filter((m) => filteredMonths.has(m));
+        const filteredPre = result.preEscalationMonths.filter((m) => filteredMonths.has(m));
+        return {
           series: filteredSeries,
-          forecast,
+          forecast: result.forecast,
           escalationThreshold: result.escalationThreshold,
           escalationFlaggedMonths: filteredFlagged,
           preEscalationMonths: filteredPre,
           dataSource,
+        };
+      };
+
+      try {
+        push({ type: "progress", pct: 2, fetched: 0, total: undefined });
+        const cached = ESCALATION_FAST_CACHE_ENABLED
+          ? await getCachedOrCompute<EscalationPayload>({
+              key: cacheKey,
+              freshForMs: ESCALATION_FAST_CACHE_FRESH_MS,
+              staleForMs: ESCALATION_FAST_CACHE_STALE_MS,
+              compute: buildPayload,
+            })
+          : {
+              value: await buildPayload(),
+              meta: { status: "miss" as const, ageMs: 0, source: "none" as const, key: cacheKey },
+            };
+
+        push({
+          type: "progress",
+          pct: 100,
+          fetched: cached.value.series.length,
+          total: cached.value.series.length,
+        });
+        push({
+          type: "result",
+          ...cached.value,
+          cache: {
+            status: cached.meta.status,
+            ageMs: cached.meta.ageMs,
+            source: cached.meta.source,
+            generatedAt: new Date(Date.now() - Math.max(0, cached.meta.ageMs)).toISOString(),
+          },
+          perf: {
+            totalMs: Date.now() - startedAt,
+            cacheStatus: cached.meta.status,
+            cacheSource: cached.meta.source,
+          },
         });
         controller.close();
       } catch (err) {
         console.error("Escalation API error", err);
         push({
           type: "error",
-          error:
-            "Failed to compute escalation index. The ACLED service may be unavailable or slow.",
+          error: err instanceof Error && err.message
+            ? err.message
+            : "Failed to compute escalation index. The ACLED service may be unavailable or slow.",
         });
         controller.close();
       }
@@ -282,6 +313,9 @@ export async function GET(req: NextRequest) {
   });
 
   return new Response(stream, {
-    headers: { "Content-Type": "application/x-ndjson" },
+    headers: {
+      "Content-Type": "application/x-ndjson",
+      "Server-Timing": `total;dur=${Date.now() - startedAt}`,
+    },
   });
 }
