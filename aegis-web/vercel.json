@@ -1,12 +1,1 @@
-{
-  "crons": [
-    {
-      "path": "/api/internal/warm?scope=map",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/internal/warm?scope=escalation",
-      "schedule": "*/10 * * * *"
-    }
-  ]
-}
+{}
