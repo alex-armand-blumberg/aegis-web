@@ -8,7 +8,20 @@ import type { AcledMonthlyRecord } from "./escalation";
 const ACLED_OAUTH_URL = "https://acleddata.com/oauth/token";
 const ACLED_API_URL = "https://acleddata.com/api/acled/read";
 const ACLED_TOKEN_SKEW_MS = 30_000;
-const ACLED_MONTHLY_CACHE_TTL_MS = 10 * 60_000;
+const ACLED_MONTHLY_CACHE_TTL_MS = 24 * 60 * 60_000;
+const ACLED_PAGE_SIZE = 5000;
+const ACLED_WINDOW_MONTHS = Math.max(
+  1,
+  Math.floor(Number(process.env.ACLED_WINDOW_MONTHS ?? 1))
+);
+const ACLED_WINDOW_CONCURRENCY = Math.max(
+  1,
+  Math.min(6, Math.floor(Number(process.env.ACLED_WINDOW_CONCURRENCY ?? 3)))
+);
+const ACLED_MAX_PAGES_PER_WINDOW = Math.max(
+  1,
+  Math.floor(Number(process.env.ACLED_MAX_PAGES_PER_WINDOW ?? 8))
+);
 
 let cachedAuthToken: { token: string; expiresAt: number } | null = null;
 const acledMonthlyCache = new Map<string, { expiresAt: number; rows: AcledMonthlyRecord[] }>();
@@ -58,6 +71,10 @@ export async function getAcledToken(): Promise<string> {
 }
 
 type AcledApiRow = Record<string, unknown>;
+type DateWindow = {
+  start: Date;
+  end: Date;
+};
 
 function toLowerKeys(row: AcledApiRow): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -140,6 +157,98 @@ function aggregateToMonthly(
     }));
 }
 
+function mergeMonthlyRecords(records: AcledMonthlyRecord[]): AcledMonthlyRecord[] {
+  const byMonth = new Map<string, AcledMonthlyRecord>();
+  for (const row of records) {
+    const month = row.event_month.toISOString().slice(0, 7);
+    const existing = byMonth.get(month);
+    if (!existing) {
+      byMonth.set(month, { ...row, event_month: new Date(row.event_month) });
+      continue;
+    }
+    existing.battles += row.battles;
+    existing.explosions_remote_violence += row.explosions_remote_violence;
+    existing.protests += row.protests;
+    existing.riots += row.riots;
+    existing.strategic_developments += row.strategic_developments;
+    existing.violence_against_civilians += row.violence_against_civilians;
+    existing.violent_actors += row.violent_actors;
+    existing.fatalities += row.fatalities;
+  }
+  return Array.from(byMonth.values()).sort(
+    (a, b) => a.event_month.getTime() - b.event_month.getTime()
+  );
+}
+
+function utcMonthStart(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function utcMonthEnd(year: number, monthIndex: number): Date {
+  return new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
+}
+
+function buildDateWindows(startDate: Date, endDate: Date, monthsPerWindow: number): DateWindow[] {
+  const windows: DateWindow[] = [];
+  let cursor = utcMonthStart(startDate);
+  const end = new Date(endDate);
+  end.setUTCHours(23, 59, 59, 999);
+
+  while (cursor <= end) {
+    const windowStart = new Date(Math.max(cursor.getTime(), startDate.getTime()));
+    const endMonthIndex = cursor.getUTCMonth() + monthsPerWindow - 1;
+    const rawWindowEnd = utcMonthEnd(cursor.getUTCFullYear(), endMonthIndex);
+    const windowEnd = new Date(Math.min(rawWindowEnd.getTime(), end.getTime()));
+    windows.push({ start: windowStart, end: windowEnd });
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + monthsPerWindow, 1));
+  }
+
+  return windows;
+}
+
+function isoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+async function fetchAcledWindowMonthly(
+  token: string,
+  country: string,
+  window: DateWindow,
+  onProgress?: (fetched: number, total: number | null) => void
+): Promise<AcledMonthlyRecord[]> {
+  const rows: AcledApiRow[] = [];
+  let page = 1;
+
+  while (page <= ACLED_MAX_PAGES_PER_WINDOW) {
+    const params = new URLSearchParams({
+      country,
+      event_date: `${isoDate(window.start)}|${isoDate(window.end)}`,
+      event_date_where: "BETWEEN",
+      fields: "event_date|country|event_type|fatalities",
+      limit: String(ACLED_PAGE_SIZE),
+      page: String(page),
+    });
+    const res = await fetch(`${ACLED_API_URL}?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "User-Agent": "AEGIS-escalation-index",
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error(`ACLED API error ${res.status}: ${await res.text()}`);
+    }
+    const data = (await res.json()) as { data?: AcledApiRow[]; total_count?: number };
+    const chunk = data.data ?? [];
+    rows.push(...chunk);
+    onProgress?.(chunk.length, typeof data.total_count === "number" ? data.total_count : null);
+    if (chunk.length < ACLED_PAGE_SIZE) break;
+    page += 1;
+  }
+
+  return aggregateToMonthly(rows, country);
+}
+
 /**
  * Fetch ACLED event data for one country in the given date range and return
  * monthly aggregated records. Uses ACLED_EMAIL and ACLED_PASSWORD.
@@ -165,44 +274,28 @@ export async function fetchAcledCountryMonthly(
   }
 
   const token = await getAcledToken();
-  const startYear = startDate.getFullYear();
-  const endYear = endDate.getFullYear();
-  const yearRange = `${startYear}|${endYear}`;
-  const allRows: AcledApiRow[] = [];
-  const pageSize = 5000;
-  const maxPages = 60;
-  let page = 1;
+  const windows = buildDateWindows(startDate, endDate, ACLED_WINDOW_MONTHS);
+  const queue = [...windows];
+  const monthlyChunks: AcledMonthlyRecord[][] = [];
+  let fetchedRows = 0;
 
-  while (page <= maxPages) {
-    const params = new URLSearchParams({
-      country,
-      year: yearRange,
-      year_where: "BETWEEN",
-      fields: "event_date|country|event_type|fatalities|latitude|longitude",
-      limit: String(pageSize),
-      page: String(page),
-    });
-    const res = await fetch(`${ACLED_API_URL}?${params.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "User-Agent": "AEGIS-escalation-index",
-      },
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      throw new Error(`ACLED API error ${res.status}: ${await res.text()}`);
+  const workers = Array.from(
+    { length: Math.min(ACLED_WINDOW_CONCURRENCY, queue.length || 1) },
+    async () => {
+      while (queue.length > 0) {
+        const window = queue.shift();
+        if (!window) continue;
+        const rows = await fetchAcledWindowMonthly(token, country, window, (fetched) => {
+          fetchedRows += fetched;
+          onProgress?.(fetchedRows, null);
+        });
+        monthlyChunks.push(rows);
+      }
     }
-    const data = (await res.json()) as { data?: AcledApiRow[] };
-    const chunk = data.data ?? [];
-    if (!chunk.length) break;
-    allRows.push(...chunk);
-    const total = chunk.length < pageSize ? allRows.length : null;
-    onProgress?.(allRows.length, total);
-    if (chunk.length < pageSize) break;
-    page += 1;
-  }
+  );
+  await Promise.all(workers);
 
-  const monthly = aggregateToMonthly(allRows, country);
+  const monthly = mergeMonthlyRecords(monthlyChunks.flat());
   const start = startDate.getTime();
   const end = endDate.getTime();
   const filtered = monthly.filter((m) => {

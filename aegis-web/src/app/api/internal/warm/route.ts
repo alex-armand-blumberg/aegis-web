@@ -1,5 +1,34 @@
 import { NextResponse } from "next/server";
 
+export const maxDuration = 300;
+
+const DEFAULT_PRIORITY_ESCALATION_COUNTRIES = [
+  "Ukraine",
+  "Israel",
+  "Iran",
+  "Taiwan",
+  "China",
+  "Russia",
+  "United States of America",
+  "North Korea",
+  "South Korea",
+  "India",
+  "Pakistan",
+  "Syria",
+  "Iraq",
+  "Yemen",
+  "Lebanon",
+  "Sudan",
+  "Myanmar",
+  "Afghanistan",
+  "Haiti",
+  "Venezuela",
+  "Ethiopia",
+  "Somalia",
+  "Mexico",
+  "Turkey",
+];
+
 function isAuthorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret) return true;
@@ -19,10 +48,17 @@ async function safeFetch(url: string): Promise<{ ok: boolean; status: number; el
         "x-aegis-warmer": "1",
       },
     });
+    await res.text();
     return { ok: res.ok, status: res.status, elapsedMs: Date.now() - started };
   } catch {
     return { ok: false, status: 0, elapsedMs: Date.now() - started };
   }
+}
+
+function selectBatch<T>(items: T[], batch: number, batches: number): T[] {
+  if (batches <= 1) return items;
+  const zeroBasedBatch = Math.max(0, Math.min(batches - 1, batch - 1));
+  return items.filter((_, idx) => idx % batches === zeroBasedBatch);
 }
 
 export async function GET(request: Request) {
@@ -33,25 +69,27 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const baseUrl = `${url.protocol}//${url.host}`;
   const scope = (url.searchParams.get("scope") ?? "all").toLowerCase();
+  const batches = Math.max(1, Number(url.searchParams.get("batches") ?? 1) || 1);
+  const batch = Math.max(1, Number(url.searchParams.get("batch") ?? 1) || 1);
 
   const mapRanges = ["1h", "6h", "24h", "7d", "30d"];
   const mapJobs: string[] = [];
   if (scope === "all" || scope === "map") {
     for (const range of mapRanges) {
-      mapJobs.push(`${baseUrl}/api/map?range=${encodeURIComponent(range)}`);
+      mapJobs.push(`${baseUrl}/api/map?range=${encodeURIComponent(range)}&refresh=stale`);
     }
   }
 
-  const defaultCountries = ["Ukraine", "Israel", "Taiwan", "Iran", "United States", "China"];
-  const countries = (process.env.WARM_ESCALATION_COUNTRIES ?? defaultCountries.join(","))
+  const countries = (process.env.WARM_ESCALATION_COUNTRIES ?? DEFAULT_PRIORITY_ESCALATION_COUNTRIES.join(","))
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+  const selectedCountries = selectBatch(countries, batch, batches);
   const escalationJobs: string[] = [];
   if (scope === "all" || scope === "escalation") {
-    for (const country of countries) {
+    for (const country of selectedCountries) {
       escalationJobs.push(
-        `${baseUrl}/api/escalation?country=${encodeURIComponent(country)}`
+        `${baseUrl}/api/escalation?country=${encodeURIComponent(country)}&refresh=stale`
       );
     }
   }
@@ -81,11 +119,13 @@ export async function GET(request: Request) {
   return NextResponse.json(
     {
       scope,
+      batch,
+      batches,
       total: results.length,
       success,
       failed,
       latencyMs: { p50, p95 },
-      noCronFallback: `${baseUrl}/api/internal/warm?scope=${encodeURIComponent(scope)}&secret=YOUR_CRON_SECRET`,
+      noCronFallback: `${baseUrl}/api/internal/warm?scope=${encodeURIComponent(scope)}&batch=${batch}&batches=${batches}&secret=YOUR_CRON_SECRET`,
       ranAt: new Date().toISOString(),
       jobs: results,
     },

@@ -11,7 +11,14 @@ import {
   fetchAcledCountryMonthly,
   hasAcledEnv,
 } from "@/lib/acled-api";
-import { buildCacheKey, getCachedOrCompute } from "@/lib/cache/tieredCache";
+import {
+  buildCacheKey,
+  readTieredCache,
+  writeTieredCache,
+  type TieredCacheMeta,
+} from "@/lib/cache/tieredCache";
+
+export const maxDuration = 300;
 
 const ACLED_ARCGIS_QUERY_URL =
   "https://services8.arcgis.com/xu983xJB6fIDCjpX/arcgis/rest/services/ACLED/FeatureServer/0/query";
@@ -51,10 +58,10 @@ type AcledArcgisFeature = {
 const ESCALATION_FAST_CACHE_ENABLED =
   (process.env.ENABLE_ESCALATION_FAST_CACHE ?? "true").toLowerCase() !== "false";
 const ESCALATION_FAST_CACHE_FRESH_MS = Number(
-  process.env.ESCALATION_FAST_CACHE_FRESH_MS ?? 5 * 60_000
+  process.env.ESCALATION_FAST_CACHE_FRESH_MS ?? 24 * 60 * 60_000
 );
 const ESCALATION_FAST_CACHE_STALE_MS = Number(
-  process.env.ESCALATION_FAST_CACHE_STALE_MS ?? 60 * 60_000
+  process.env.ESCALATION_FAST_CACHE_STALE_MS ?? 30 * 24 * 60 * 60_000
 );
 
 type CanonicalEscalationArtifact = {
@@ -86,6 +93,10 @@ function parseDateParam(value: string | null, fallback: Date): Date {
   if (!value) return fallback;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? fallback : d;
+}
+
+function datasetMonthVersion(date: Date): string {
+  return date.toISOString().slice(0, 7);
 }
 
 async function fetchAcledViaArcGIS(
@@ -182,6 +193,7 @@ export async function GET(req: NextRequest) {
   const thresholdParam = searchParams.get("threshold");
   const startParam = searchParams.get("start");
   const endParam = searchParams.get("end");
+  const refreshMode = (searchParams.get("refresh") ?? "").toLowerCase();
 
   if (!country) {
     return NextResponse.json(
@@ -197,7 +209,7 @@ export async function GET(req: NextRequest) {
   let endDate = parseDateParam(endParam, defaultEnd);
   if (endDate > defaultEnd) endDate = defaultEnd;
 
-  const datasetVersion = defaultEnd.toISOString().slice(0, 10);
+  const datasetVersion = datasetMonthVersion(defaultEnd);
   const canonicalCacheKey = buildCacheKey("escalation:canonical:v1", {
     country: country.toLowerCase(),
     datasetVersion,
@@ -211,41 +223,26 @@ export async function GET(req: NextRequest) {
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       };
 
-      const buildCanonicalArtifact = async (): Promise<CanonicalEscalationArtifact> => {
+      const buildCanonicalArtifact = async (
+        onProgress?: (fetched: number, total: number | null) => void
+      ): Promise<CanonicalEscalationArtifact> => {
         let allRows: AcledMonthlyRecord[];
         let dataSource: string;
         if (hasAcledEnv()) {
           try {
             const fullStart = new Date("2018-01-01");
-            allRows = await fetchAcledCountryMonthly(country, fullStart, defaultEnd, (fetched, total) => {
-              push({
-                type: "progress",
-                pct: progressPct(fetched, total),
-                fetched,
-                total: total ?? undefined,
-              });
-            });
+            allRows = await fetchAcledCountryMonthly(country, fullStart, defaultEnd, onProgress);
             dataSource = "ACLED API (full history)";
           } catch (acledErr) {
             console.error("ACLED API failed, falling back to ArcGIS", acledErr);
             allRows = await fetchAcledViaArcGIS(country, (fetched) => {
-              push({
-                type: "progress",
-                pct: progressPct(fetched, null),
-                fetched,
-                total: undefined,
-              });
+              onProgress?.(fetched, null);
             });
             dataSource = "ACLED ArcGIS (fallback)";
           }
         } else {
           allRows = await fetchAcledViaArcGIS(country, (fetched) => {
-            push({
-              type: "progress",
-              pct: progressPct(fetched, null),
-              fetched,
-              total: undefined,
-            });
+            onProgress?.(fetched, null);
           });
           dataSource = "ACLED ArcGIS";
         }
@@ -265,22 +262,78 @@ export async function GET(req: NextRequest) {
       try {
         push({ type: "progress", pct: 2, fetched: 0, total: undefined });
         const cacheLookupStartedAt = Date.now();
-        const cached = ESCALATION_FAST_CACHE_ENABLED
-          ? await getCachedOrCompute<CanonicalEscalationArtifact>({
-              key: canonicalCacheKey,
-              freshForMs: ESCALATION_FAST_CACHE_FRESH_MS,
-              staleForMs: ESCALATION_FAST_CACHE_STALE_MS,
-              compute: buildCanonicalArtifact,
-            })
-          : {
-              value: await buildCanonicalArtifact(),
+        const progress = (fetched: number, total: number | null) => {
+          push({
+            type: "progress",
+            pct: progressPct(fetched, total),
+            fetched,
+            total: total ?? undefined,
+          });
+        };
+        const forceRefresh = refreshMode === "1" || refreshMode === "true";
+        const refreshWhenStale = refreshMode === "stale";
+        const cachedRead = ESCALATION_FAST_CACHE_ENABLED
+          ? await readTieredCache<CanonicalEscalationArtifact>(
+              canonicalCacheKey,
+              ESCALATION_FAST_CACHE_FRESH_MS,
+              ESCALATION_FAST_CACHE_STALE_MS
+            )
+          : null;
+        let cached: { value: CanonicalEscalationArtifact; meta: TieredCacheMeta };
+
+        if (
+          ESCALATION_FAST_CACHE_ENABLED &&
+          cachedRead?.envelope &&
+          cachedRead.meta.status === "fresh" &&
+          !forceRefresh
+        ) {
+          cached = { value: cachedRead.envelope.value, meta: cachedRead.meta };
+        } else if (
+          ESCALATION_FAST_CACHE_ENABLED &&
+          cachedRead?.envelope &&
+          cachedRead.meta.status === "stale" &&
+          !forceRefresh &&
+          !refreshWhenStale
+        ) {
+          cached = { value: cachedRead.envelope.value, meta: cachedRead.meta };
+          void buildCanonicalArtifact()
+            .then((nextValue) =>
+              writeTieredCache(
+                canonicalCacheKey,
+                nextValue,
+                ESCALATION_FAST_CACHE_FRESH_MS,
+                ESCALATION_FAST_CACHE_STALE_MS
+              )
+            )
+            .catch(() => undefined);
+        } else {
+          try {
+            const value = await buildCanonicalArtifact(progress);
+            if (ESCALATION_FAST_CACHE_ENABLED) {
+              await writeTieredCache(
+                canonicalCacheKey,
+                value,
+                ESCALATION_FAST_CACHE_FRESH_MS,
+                ESCALATION_FAST_CACHE_STALE_MS
+              );
+            }
+            cached = {
+              value,
               meta: {
-                status: "miss" as const,
+                status: "fresh",
                 ageMs: 0,
-                source: "none" as const,
+                source: ESCALATION_FAST_CACHE_ENABLED ? "memory" : "none",
                 key: canonicalCacheKey,
               },
             };
+          } catch (err) {
+            if (cachedRead?.envelope) {
+              cached = { value: cachedRead.envelope.value, meta: cachedRead.meta };
+            } else {
+              throw err;
+            }
+          }
+        }
         const cacheLookupMs = Date.now() - cacheLookupStartedAt;
 
         const view = buildEscalationViewFromCanonical(

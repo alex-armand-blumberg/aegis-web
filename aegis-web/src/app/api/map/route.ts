@@ -22,14 +22,21 @@ import {
   REQUESTED_SOURCE_ACCESS_MATRIX,
   WORLDMONITOR_RSS_NETWORK,
 } from "@/lib/intel/sourceRegistry";
-import { buildCacheKey, getCachedOrCompute } from "@/lib/cache/tieredCache";
+import {
+  buildCacheKey,
+  getCachedOrCompute,
+  readTieredCache,
+  writeTieredCache,
+} from "@/lib/cache/tieredCache";
+
+export const maxDuration = 300;
 
 const ACLED_ARCGIS_QUERY_URL =
   "https://services8.arcgis.com/xu983xJB6fIDCjpX/arcgis/rest/services/ACLED/FeatureServer/0/query";
 
 const MAP_FAST_CACHE_ENABLED = (process.env.ENABLE_MAP_FAST_CACHE ?? "true").toLowerCase() !== "false";
-const MAP_FAST_CACHE_FRESH_MS = Number(process.env.MAP_FAST_CACHE_FRESH_MS ?? 5 * 60_000);
-const MAP_FAST_CACHE_STALE_MS = Number(process.env.MAP_FAST_CACHE_STALE_MS ?? 60 * 60_000);
+const MAP_FAST_CACHE_FRESH_MS = Number(process.env.MAP_FAST_CACHE_FRESH_MS ?? 10 * 60_000);
+const MAP_FAST_CACHE_STALE_MS = Number(process.env.MAP_FAST_CACHE_STALE_MS ?? 24 * 60 * 60_000);
 
 const ACLED_FIELDS =
   "country,admin1,event_month,battles,explosions_remote_violence,protests,riots,strategic_developments,violence_against_civilians,violent_actors,fatalities,centroid_longitude,centroid_latitude,ObjectId";
@@ -6518,6 +6525,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const range = searchParams.get("range") ?? "7d";
+    const refreshMode = (searchParams.get("refresh") ?? "").toLowerCase();
     const requestedLayers = parseLayers(searchParams.get("layers"));
     const sourcePacks = parseSourcePacks(searchParams.get("sourcePacks"));
     const rangeHours = rangeToHours(range);
@@ -6938,22 +6946,61 @@ export async function GET(request: Request) {
     };
 
     const cacheLookupStartedAt = Date.now();
-    const cachedResult = MAP_FAST_CACHE_ENABLED
-      ? await getCachedOrCompute<MapApiResponse>({
-          key: cacheKey,
-          freshForMs: MAP_FAST_CACHE_FRESH_MS,
-          staleForMs: MAP_FAST_CACHE_STALE_MS,
-          compute: () => buildResponse(CANONICAL_LAYER_SET),
-        })
-      : {
-          value: await buildResponse(CANONICAL_LAYER_SET),
-          meta: {
-            status: "miss" as const,
-            ageMs: 0,
-            source: "none" as const,
-            key: cacheKey,
-          },
-        };
+    const forceRefresh = refreshMode === "1" || refreshMode === "true";
+    const refreshWhenStale = refreshMode === "stale";
+    const cachedRead =
+      MAP_FAST_CACHE_ENABLED && (forceRefresh || refreshWhenStale)
+        ? await readTieredCache<MapApiResponse>(
+            cacheKey,
+            MAP_FAST_CACHE_FRESH_MS,
+            MAP_FAST_CACHE_STALE_MS
+          )
+        : null;
+    const cachedResult =
+      MAP_FAST_CACHE_ENABLED && refreshWhenStale && cachedRead?.envelope && cachedRead.meta.status === "fresh"
+        ? { value: cachedRead.envelope.value, meta: cachedRead.meta }
+        : MAP_FAST_CACHE_ENABLED && (forceRefresh || refreshWhenStale)
+          ? await (async () => {
+              try {
+                const value = await buildResponse(CANONICAL_LAYER_SET);
+                await writeTieredCache(
+                  cacheKey,
+                  value,
+                  MAP_FAST_CACHE_FRESH_MS,
+                  MAP_FAST_CACHE_STALE_MS
+                );
+                return {
+                  value,
+                  meta: {
+                    status: "fresh" as const,
+                    ageMs: 0,
+                    source: "memory" as const,
+                    key: cacheKey,
+                  },
+                };
+              } catch (err) {
+                if (cachedRead?.envelope) {
+                  return { value: cachedRead.envelope.value, meta: cachedRead.meta };
+                }
+                throw err;
+              }
+            })()
+          : MAP_FAST_CACHE_ENABLED
+            ? await getCachedOrCompute<MapApiResponse>({
+                key: cacheKey,
+                freshForMs: MAP_FAST_CACHE_FRESH_MS,
+                staleForMs: MAP_FAST_CACHE_STALE_MS,
+                compute: () => buildResponse(CANONICAL_LAYER_SET),
+              })
+            : {
+                value: await buildResponse(CANONICAL_LAYER_SET),
+                meta: {
+                  status: "miss" as const,
+                  ageMs: 0,
+                  source: "none" as const,
+                  key: cacheKey,
+                },
+              };
     const cacheLookupMs = Date.now() - cacheLookupStartedAt;
 
     const responseWithMeta: MapApiResponse = {
