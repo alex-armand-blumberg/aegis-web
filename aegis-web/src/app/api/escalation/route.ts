@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   AcledMonthlyRecord,
+  buildEscalationViewFromCanonical,
   computeEscalationIndex,
+  computeForecastFromTail,
   EscalationForecastPoint,
+  EscalationPoint,
 } from "@/lib/escalation";
 import {
   fetchAcledCountryMonthly,
@@ -54,13 +57,22 @@ const ESCALATION_FAST_CACHE_STALE_MS = Number(
   process.env.ESCALATION_FAST_CACHE_STALE_MS ?? 60 * 60_000
 );
 
-type EscalationPayload = {
+type CanonicalEscalationArtifact = {
+  datasetVersion: string;
+  generatedAt: string;
+  dataSource: string;
+  canonicalSeries: EscalationPoint[];
+};
+
+type EscalationResponsePayload = {
   series: ReturnType<typeof computeEscalationIndex>["series"];
   forecast: EscalationForecastPoint[];
   escalationThreshold: number;
   escalationFlaggedMonths: string[];
   preEscalationMonths: string[];
   dataSource: string;
+  datasetVersion: string;
+  generatedAt: string;
 };
 
 /** Default end date for ACLED research tier: one year ago. */
@@ -185,13 +197,10 @@ export async function GET(req: NextRequest) {
   let endDate = parseDateParam(endParam, defaultEnd);
   if (endDate > defaultEnd) endDate = defaultEnd;
 
-  const cacheKey = buildCacheKey("escalation:v2", {
+  const datasetVersion = defaultEnd.toISOString().slice(0, 10);
+  const canonicalCacheKey = buildCacheKey("escalation:canonical:v1", {
     country: country.toLowerCase(),
-    smoothWindow,
-    threshold,
-    start: startDate.toISOString().slice(0, 10),
-    end: endDate.toISOString().slice(0, 10),
-    defaultEnd: defaultEnd.toISOString().slice(0, 10),
+    datasetVersion,
     hasAcledEnv: hasAcledEnv(),
   });
 
@@ -202,7 +211,7 @@ export async function GET(req: NextRequest) {
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       };
 
-      const buildPayload = async (): Promise<EscalationPayload> => {
+      const buildCanonicalArtifact = async (): Promise<CanonicalEscalationArtifact> => {
         let allRows: AcledMonthlyRecord[];
         let dataSource: string;
         if (hasAcledEnv()) {
@@ -241,51 +250,71 @@ export async function GET(req: NextRequest) {
           dataSource = "ACLED ArcGIS";
         }
 
-        const result = computeEscalationIndex(allRows, country, smoothWindow, threshold);
+        const result = computeEscalationIndex(allRows, country, 1, 45);
         if (!result.series.length) {
           throw new Error(`No data available for country '${country}'.`);
         }
-        const filteredSeries = filterSeriesByDateRange(result.series, startDate, endDate);
-        if (!filteredSeries.length) {
-          throw new Error(`No data for ${country} in the selected date range. Try a wider range.`);
-        }
-
-        const filteredMonths = new Set(filteredSeries.map((s) => s.event_month.slice(0, 7)));
-        const filteredFlagged = result.escalationFlaggedMonths.filter((m) => filteredMonths.has(m));
-        const filteredPre = result.preEscalationMonths.filter((m) => filteredMonths.has(m));
         return {
-          series: filteredSeries,
-          forecast: result.forecast,
-          escalationThreshold: result.escalationThreshold,
-          escalationFlaggedMonths: filteredFlagged,
-          preEscalationMonths: filteredPre,
+          datasetVersion,
+          generatedAt: new Date().toISOString(),
           dataSource,
+          canonicalSeries: result.series,
         };
       };
 
       try {
         push({ type: "progress", pct: 2, fetched: 0, total: undefined });
+        const cacheLookupStartedAt = Date.now();
         const cached = ESCALATION_FAST_CACHE_ENABLED
-          ? await getCachedOrCompute<EscalationPayload>({
-              key: cacheKey,
+          ? await getCachedOrCompute<CanonicalEscalationArtifact>({
+              key: canonicalCacheKey,
               freshForMs: ESCALATION_FAST_CACHE_FRESH_MS,
               staleForMs: ESCALATION_FAST_CACHE_STALE_MS,
-              compute: buildPayload,
+              compute: buildCanonicalArtifact,
             })
           : {
-              value: await buildPayload(),
-              meta: { status: "miss" as const, ageMs: 0, source: "none" as const, key: cacheKey },
+              value: await buildCanonicalArtifact(),
+              meta: {
+                status: "miss" as const,
+                ageMs: 0,
+                source: "none" as const,
+                key: canonicalCacheKey,
+              },
             };
+        const cacheLookupMs = Date.now() - cacheLookupStartedAt;
+
+        const view = buildEscalationViewFromCanonical(
+          cached.value.canonicalSeries,
+          smoothWindow,
+          threshold
+        );
+        const filteredSeries = filterSeriesByDateRange(view.series, startDate, endDate);
+        if (!filteredSeries.length) {
+          throw new Error(`No data for ${country} in the selected date range. Try a wider range.`);
+        }
+        const filteredMonths = new Set(filteredSeries.map((s) => s.event_month.slice(0, 7)));
+        const responsePayload: EscalationResponsePayload = {
+          series: filteredSeries,
+          forecast: computeForecastFromTail(filteredSeries),
+          escalationThreshold: view.escalationThreshold,
+          escalationFlaggedMonths: view.escalationFlaggedMonths.filter((m) =>
+            filteredMonths.has(m)
+          ),
+          preEscalationMonths: view.preEscalationMonths.filter((m) => filteredMonths.has(m)),
+          dataSource: cached.value.dataSource,
+          datasetVersion: cached.value.datasetVersion,
+          generatedAt: cached.value.generatedAt,
+        };
 
         push({
           type: "progress",
           pct: 100,
-          fetched: cached.value.series.length,
-          total: cached.value.series.length,
+          fetched: responsePayload.series.length,
+          total: responsePayload.series.length,
         });
         push({
           type: "result",
-          ...cached.value,
+          ...responsePayload,
           cache: {
             status: cached.meta.status,
             ageMs: cached.meta.ageMs,
@@ -294,6 +323,7 @@ export async function GET(req: NextRequest) {
           },
           perf: {
             totalMs: Date.now() - startedAt,
+            cacheLookupMs,
             cacheStatus: cached.meta.status,
             cacheSource: cached.meta.source,
           },

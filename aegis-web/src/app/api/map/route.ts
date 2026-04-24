@@ -28,8 +28,8 @@ const ACLED_ARCGIS_QUERY_URL =
   "https://services8.arcgis.com/xu983xJB6fIDCjpX/arcgis/rest/services/ACLED/FeatureServer/0/query";
 
 const MAP_FAST_CACHE_ENABLED = (process.env.ENABLE_MAP_FAST_CACHE ?? "true").toLowerCase() !== "false";
-const MAP_FAST_CACHE_FRESH_MS = Number(process.env.MAP_FAST_CACHE_FRESH_MS ?? 90_000);
-const MAP_FAST_CACHE_STALE_MS = Number(process.env.MAP_FAST_CACHE_STALE_MS ?? 8 * 60_000);
+const MAP_FAST_CACHE_FRESH_MS = Number(process.env.MAP_FAST_CACHE_FRESH_MS ?? 5 * 60_000);
+const MAP_FAST_CACHE_STALE_MS = Number(process.env.MAP_FAST_CACHE_STALE_MS ?? 60 * 60_000);
 
 const ACLED_FIELDS =
   "country,admin1,event_month,battles,explosions_remote_violence,protests,riots,strategic_developments,violence_against_civilians,violent_actors,fatalities,centroid_longitude,centroid_latitude,ObjectId";
@@ -125,6 +125,8 @@ function parseLayers(raw: string | null): IntelLayerKey[] {
     .filter((s): s is IntelLayerKey => allowed.has(s as IntelLayerKey));
   return out.length ? out : defaults;
 }
+
+const CANONICAL_LAYER_SET: IntelLayerKey[] = parseLayers(null);
 
 type SourcePackKey =
   | "core"
@@ -6524,7 +6526,6 @@ export async function GET(request: Request) {
     const cacheKey = buildCacheKey("map:v2", {
       range,
       rangeHours,
-      layers: requestedLayers,
       sourcePacks,
       strategicPackEnabledByEnv,
     });
@@ -6539,36 +6540,36 @@ export async function GET(request: Request) {
       } as ProviderHealth,
     });
 
-    const buildResponse = async (): Promise<MapApiResponse> => {
+    const buildResponse = async (buildLayers: IntelLayerKey[]): Promise<MapApiResponse> => {
       const wantsConflicts =
-        requestedLayers.some((layer) => layer.startsWith("conflicts")) ||
-        requestedLayers.includes("liveStrikes") ||
-        requestedLayers.includes("news") ||
-        requestedLayers.includes("escalationRisk") ||
-        requestedLayers.includes("hotspots");
+        buildLayers.some((layer) => layer.startsWith("conflicts")) ||
+        buildLayers.includes("liveStrikes") ||
+        buildLayers.includes("news") ||
+        buildLayers.includes("escalationRisk") ||
+        buildLayers.includes("hotspots");
       const wantsLiveSignals =
-        requestedLayers.includes("liveStrikes") ||
-        requestedLayers.includes("news") ||
-        requestedLayers.includes("escalationRisk") ||
-        requestedLayers.includes("hotspots");
+        buildLayers.includes("liveStrikes") ||
+        buildLayers.includes("news") ||
+        buildLayers.includes("escalationRisk") ||
+        buildLayers.includes("hotspots");
       const wantsFlights =
-        requestedLayers.includes("flights") ||
-        requestedLayers.includes("hotspots") ||
-        requestedLayers.includes("escalationRisk");
+        buildLayers.includes("flights") ||
+        buildLayers.includes("hotspots") ||
+        buildLayers.includes("escalationRisk");
       const wantsVessels =
-        requestedLayers.includes("vessels") ||
-        requestedLayers.includes("carriers") ||
-        requestedLayers.includes("hotspots") ||
-        requestedLayers.includes("escalationRisk");
+        buildLayers.includes("vessels") ||
+        buildLayers.includes("carriers") ||
+        buildLayers.includes("hotspots") ||
+        buildLayers.includes("escalationRisk");
       const wantsInfrastructure =
-        requestedLayers.includes("infrastructure") || requestedLayers.includes("hotspots");
+        buildLayers.includes("infrastructure") || buildLayers.includes("hotspots");
       const includeFrontline =
-        requestedLayers.includes("conflicts") ||
-        requestedLayers.includes("conflictsBattles") ||
-        requestedLayers.includes("conflictsExplosions") ||
-        requestedLayers.includes("conflictsCivilians") ||
-        requestedLayers.includes("conflictsStrategic") ||
-        requestedLayers.includes("liveStrikes");
+        buildLayers.includes("conflicts") ||
+        buildLayers.includes("conflictsBattles") ||
+        buildLayers.includes("conflictsExplosions") ||
+        buildLayers.includes("conflictsCivilians") ||
+        buildLayers.includes("conflictsStrategic") ||
+        buildLayers.includes("liveStrikes");
 
       const [
         acledRes,
@@ -6599,31 +6600,31 @@ export async function GET(request: Request) {
         wantsFlights ? fetchOpenSkyFlights() : Promise.resolve(makeSkippedAdapter("OpenSky flights", "Skipped (layer filter) [reason=layer_gated]")),
         wantsVessels ? fetchUsniFleetTrackerSignals(rangeHours) : Promise.resolve(makeSkippedAdapter("USNI fleet tracker", "Skipped (layer filter) [reason=layer_gated]")),
         wantsVessels ? fetchVesselSignals() : Promise.resolve(makeSkippedAdapter("AIS vessel feed", "Skipped (layer filter) [reason=layer_gated]")),
-        requestedLayers.includes("news") || requestedLayers.includes("escalationRisk") || requestedLayers.includes("hotspots")
+        buildLayers.includes("news") || buildLayers.includes("escalationRisk") || buildLayers.includes("hotspots")
           ? fetchNewsSignals(rangeHours)
           : Promise.resolve(makeSkippedAdapter("Google News RSS", "Skipped (layer filter) [reason=layer_gated]")),
-        wantsLiveSignals || requestedLayers.includes("news")
+        wantsLiveSignals || buildLayers.includes("news")
           ? fetchRssNetworkSignals(rangeHours)
           : Promise.resolve(makeSkippedAdapter("RSS network adapter", "Skipped (layer filter) [reason=layer_gated]")),
-        wantsLiveSignals || requestedLayers.includes("news")
+        wantsLiveSignals || buildLayers.includes("news")
           ? fetchRelaySeedSignals(rangeHours)
           : Promise.resolve(makeSkippedAdapter("Relay seed digest", "Skipped (layer filter) [reason=layer_gated]")),
         wantsInfrastructure
           ? fetchStrategicInfrastructure()
           : Promise.resolve(makeSkippedAdapter("Strategic infrastructure", "Skipped (layer filter) [reason=layer_gated]")),
-        wantsLiveSignals || requestedLayers.includes("news")
+        wantsLiveSignals || buildLayers.includes("news")
           ? fetchOpenSourceIntelSignals(rangeHours)
           : Promise.resolve(makeSkippedAdapter("Open-source intel adapters", "Skipped (layer filter) [reason=layer_gated]")),
         wantsInfrastructure
           ? fetchLawfareDomesticDeployments(rangeHours)
           : Promise.resolve(makeSkippedAdapter("Lawfare domestic deployments", "Skipped (layer filter) [reason=layer_gated]")),
-        wantsLiveSignals || requestedLayers.includes("news")
+        wantsLiveSignals || buildLayers.includes("news")
           ? fetchExperimentalTrackerSignals(rangeHours)
           : Promise.resolve(makeSkippedAdapter("Experimental tracker adapters", "Skipped (layer filter) [reason=layer_gated]")),
-        wantsLiveSignals || requestedLayers.includes("news")
+        wantsLiveSignals || buildLayers.includes("news")
           ? fetchRequestedDomainLiveSignals(rangeHours)
           : Promise.resolve(makeSkippedAdapter("Requested-domain live adapters", "Skipped (layer filter) [reason=layer_gated]")),
-        requestedLayers.includes("news") || requestedLayers.includes("escalationRisk")
+        buildLayers.includes("news") || buildLayers.includes("escalationRisk")
           ? fetchStrategicEscalationSignals(
               rangeHours,
               sourcePacks.includes("strategicEscalation") && strategicPackEnabledByEnv
@@ -6862,7 +6863,7 @@ export async function GET(request: Request) {
       return {
         updatedAt: new Date().toISOString(),
         range,
-        layers: filterToRequestedLayers(baseLayers, requestedLayers),
+        layers: baseLayers,
         activeConflictCountries,
         escalationRiskCountries,
         frontlineOverlays: frontline.overlays,
@@ -6883,7 +6884,7 @@ export async function GET(request: Request) {
             provider: "Adapter telemetry",
             ok: true,
             updatedAt: new Date().toISOString(),
-            message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; strategic=${strategicRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; troop_movements=0; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}]`,
+          message: `rss_network=${rssNetworkRes.points.length}; relay_seed=${relaySeedRes.points.length}; rapid=${rapidRes.points.length}; gdelt=${gdeltRes.points.length}; event_registry=${eventRegistryRes.points.length}; open_source=${openSourceIntelRes.points.length}; lawfare=${lawfareDeployRes.points.length}; experimental=${experimentalTrackersRes.points.length}; requested_domain_live=${requestedDomainLiveRes.points.length}; strategic=${strategicRes.points.length}; flights=${dedupedFlights.length}; vessels=${mergedVesselPoints.length}; troop_movements=0; infrastructure=${infraRes.points.length} [source_packs=${sourcePacks.join("|")}; build_layers=${buildLayers.join("|")}]`,
           },
           buildSourceAccessTelemetry(),
           buildConflictAdapterTelemetry({
@@ -6936,15 +6937,16 @@ export async function GET(request: Request) {
       };
     };
 
+    const cacheLookupStartedAt = Date.now();
     const cachedResult = MAP_FAST_CACHE_ENABLED
       ? await getCachedOrCompute<MapApiResponse>({
           key: cacheKey,
           freshForMs: MAP_FAST_CACHE_FRESH_MS,
           staleForMs: MAP_FAST_CACHE_STALE_MS,
-          compute: buildResponse,
+          compute: () => buildResponse(CANONICAL_LAYER_SET),
         })
       : {
-          value: await buildResponse(),
+          value: await buildResponse(CANONICAL_LAYER_SET),
           meta: {
             status: "miss" as const,
             ageMs: 0,
@@ -6952,9 +6954,11 @@ export async function GET(request: Request) {
             key: cacheKey,
           },
         };
+    const cacheLookupMs = Date.now() - cacheLookupStartedAt;
 
     const responseWithMeta: MapApiResponse = {
       ...cachedResult.value,
+      layers: filterToRequestedLayers(cachedResult.value.layers, requestedLayers),
       providerHealth: [
         ...cachedResult.value.providerHealth,
         {
@@ -6964,7 +6968,7 @@ export async function GET(request: Request) {
           latencyMs: Date.now() - startedAt,
           message: `cache=${cachedResult.meta.status}; cache_source=${cachedResult.meta.source}; total_ms=${
             Date.now() - startedAt
-          }`,
+          }; requested_layers=${requestedLayers.join("|")}; canonical_layers=${CANONICAL_LAYER_SET.join("|")}`,
         },
       ],
       cache: {
@@ -6973,8 +6977,18 @@ export async function GET(request: Request) {
         source: cachedResult.meta.source,
         generatedAt: new Date(Date.now() - Math.max(0, cachedResult.meta.ageMs)).toISOString(),
       },
+      perf: {
+        totalMs: Date.now() - startedAt,
+        cacheLookupMs,
+        cacheStatus: cachedResult.meta.status,
+        cacheSource: cachedResult.meta.source,
+      },
     };
-    const serverTiming = `total;dur=${Date.now() - startedAt}, cache;desc="${cachedResult.meta.status}:${cachedResult.meta.source}"`;
+    const serverTiming = [
+      `total;dur=${Date.now() - startedAt}`,
+      `cache_lookup;dur=${cacheLookupMs}`,
+      `cache;desc="${cachedResult.meta.status}:${cachedResult.meta.source}"`,
+    ].join(", ");
     return NextResponse.json(responseWithMeta, { status: 200, headers: { "Server-Timing": serverTiming } });
   } catch (err) {
     console.error("Map API error", err);

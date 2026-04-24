@@ -1207,8 +1207,8 @@ export default function MapPage() {
             ))}
           </div>
           <div className="map-status-caption">
-            Layer toggles now also reduce backend fetch work for faster reloads. <strong>Vessels</strong> are maritime
-            AIS (ships), not aircraft—enable <strong>flights</strong>{" "}
+            Layer toggles filter a canonical cached snapshot for faster reloads. <strong>Vessels</strong> are maritime
+            AIS (ships), not aircraft; enable <strong>flights</strong>{" "}
             for ADS-B military aircraft tracks. <strong>Carriers</strong> is work in progress: only hulls matching
             known carrier names, CVN/CV- hull numbers, or explicit &quot;aircraft carrier&quot; wording are shown—
             not general cargo or bulk carriers.
@@ -1227,6 +1227,7 @@ export default function MapPage() {
             </span>
             <span>Range: {formatRangeLabel(range)}</span>
             <span>Adapters: core + requested-source live feeds</span>
+            <span>{loading ? (apiData ? "Refreshing..." : "Loading...") : "Ready"}</span>
           </div>
           <div className="map-status-caption">Zoom in for more points to become visible.</div>
 

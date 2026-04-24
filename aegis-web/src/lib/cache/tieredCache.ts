@@ -17,10 +17,20 @@ export type TieredCacheMeta = {
   key: string;
 };
 
+export type TieredCacheRuntimeStatus = {
+  redisConfigured: boolean;
+  redisUrlSet: boolean;
+  redisTokenSet: boolean;
+  productionMode: boolean;
+  strictMode: boolean;
+};
+
 const memoryCache = new Map<string, MemoryEntry>();
 const inFlight = new Map<string, Promise<unknown>>();
 
 const DEFAULT_REDIS_TIMEOUT_MS = 3500;
+const STRICT_CACHE_IN_PRODUCTION =
+  (process.env.REQUIRE_SHARED_CACHE_IN_PRODUCTION ?? "true").toLowerCase() !== "false";
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -40,6 +50,34 @@ function redisConfig() {
   const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
   if (!url || !token) return null;
   return { url, token };
+}
+
+function isProductionMode(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+function isStrictMode(): boolean {
+  return isProductionMode() && STRICT_CACHE_IN_PRODUCTION;
+}
+
+function assertRedisAvailability(): void {
+  if (isStrictMode() && !redisConfig()) {
+    throw new Error(
+      "Shared Redis cache is required in production. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN."
+    );
+  }
+}
+
+export function getTieredCacheRuntimeStatus(): TieredCacheRuntimeStatus {
+  const urlSet = Boolean(process.env.UPSTASH_REDIS_REST_URL?.trim());
+  const tokenSet = Boolean(process.env.UPSTASH_REDIS_REST_TOKEN?.trim());
+  return {
+    redisConfigured: urlSet && tokenSet,
+    redisUrlSet: urlSet,
+    redisTokenSet: tokenSet,
+    productionMode: isProductionMode(),
+    strictMode: isStrictMode(),
+  };
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -132,6 +170,7 @@ export async function readTieredCache<T>(
   freshForMs: number,
   staleForMs: number
 ): Promise<{ envelope: CacheEnvelope<T> | null; meta: TieredCacheMeta }> {
+  assertRedisAvailability();
   const now = Date.now();
   const maxAgeMs = Math.max(0, freshForMs + staleForMs);
   const memoryRaw = memoryGet(key);
@@ -183,6 +222,7 @@ export async function writeTieredCache<T>(
   freshForMs: number,
   staleForMs: number
 ): Promise<void> {
+  assertRedisAvailability();
   const ttlMs = Math.max(1000, freshForMs + staleForMs);
   const ttlSeconds = Math.ceil(ttlMs / 1000);
   const envelope: CacheEnvelope<T> = {
@@ -207,6 +247,7 @@ export async function getCachedOrCompute<T>(
   value: T;
   meta: TieredCacheMeta;
 }> {
+  assertRedisAvailability();
   const { key, freshForMs, staleForMs, compute } = options;
   const cached = await readTieredCache<T>(key, freshForMs, staleForMs);
   if (cached.meta.status === "fresh" && cached.envelope) {
@@ -227,13 +268,13 @@ export async function getCachedOrCompute<T>(
     return { value: cached.envelope.value, meta: cached.meta };
   }
 
-  const existing = inFlight.get(key) as Promise<T> | undefined;
+  const existing = inFlight.get(key);
   if (existing) {
-    const value = await existing;
-    return {
-      value,
-      meta: { status: "fresh", ageMs: 0, source: "none", key },
-    };
+    await existing;
+    const afterWait = await readTieredCache<T>(key, freshForMs, staleForMs);
+    if (afterWait.envelope) {
+      return { value: afterWait.envelope.value, meta: afterWait.meta };
+    }
   }
 
   const promise = compute();
@@ -243,7 +284,7 @@ export async function getCachedOrCompute<T>(
     await writeTieredCache(key, value, freshForMs, staleForMs);
     return {
       value,
-      meta: { status: "fresh", ageMs: 0, source: "none", key },
+      meta: { status: "fresh", ageMs: 0, source: "memory", key },
     };
   } finally {
     inFlight.delete(key);

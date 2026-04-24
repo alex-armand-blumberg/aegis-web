@@ -49,6 +49,14 @@ export type EscalationSeries = {
   preEscalationMonths: string[];
 };
 
+export type EscalationView = {
+  series: EscalationPoint[];
+  forecast: EscalationForecastPoint[];
+  escalationThreshold: number;
+  escalationFlaggedMonths: string[];
+  preEscalationMonths: string[];
+};
+
 /**
  * Compute the monthly Escalation Index series for a given country.
  * Mirrors the logic in the original Streamlit implementation:
@@ -372,5 +380,64 @@ export function computeForecastFromTail(
     });
   }
   return forecast;
+}
+
+/**
+ * Recompute smoothing, threshold-based flags, and forecast from a canonical series.
+ * Canonical series should have stable per-month component values and escalation_index;
+ * this function applies request-time view parameters without refetching upstream data.
+ */
+export function buildEscalationViewFromCanonical(
+  canonicalSeries: EscalationPoint[],
+  smoothWindow = 3,
+  escalationThreshold = 45
+): EscalationView {
+  if (!canonicalSeries.length) {
+    return {
+      series: [],
+      forecast: [],
+      escalationThreshold,
+      escalationFlaggedMonths: [],
+      preEscalationMonths: [],
+    };
+  }
+  const series = canonicalSeries.map((row) => ({ ...row }));
+  const window = Math.max(1, Math.floor(smoothWindow));
+  for (let i = 0; i < series.length; i++) {
+    let sum = 0;
+    let count = 0;
+    for (let j = Math.max(0, i - window + 1); j <= i; j++) {
+      sum += series[j].escalation_index;
+      count += 1;
+    }
+    series[i].index_smoothed = sum / count;
+  }
+
+  const threshold = Math.max(0, Math.min(100, escalationThreshold));
+  const escalationFlaggedMonths: string[] = [];
+  const preEscalationMonths: string[] = [];
+  for (let i = 0; i < series.length; i++) {
+    const row = series[i];
+    const monthKey = row.event_month.slice(0, 7);
+    if (row.index_smoothed > threshold) {
+      escalationFlaggedMonths.push(monthKey);
+    } else if (
+      row.index_smoothed < threshold &&
+      row.index_smoothed > threshold - 20 &&
+      (row.c_strategic > 0.25 || row.c_explosion > 0.25) &&
+      i > 0 &&
+      row.index_smoothed > series[i - 1].index_smoothed
+    ) {
+      preEscalationMonths.push(monthKey);
+    }
+  }
+
+  return {
+    series,
+    forecast: computeForecastFromTail(series),
+    escalationThreshold: threshold,
+    escalationFlaggedMonths,
+    preEscalationMonths,
+  };
 }
 

@@ -35,16 +35,10 @@ export async function GET(request: Request) {
   const scope = (url.searchParams.get("scope") ?? "all").toLowerCase();
 
   const mapRanges = ["1h", "6h", "24h", "7d", "30d"];
-  const mapLayerSets = [
-    "conflictsBattles,conflictsExplosions,conflictsCivilians,conflictsStrategic,liveStrikes,news,escalationRisk,hotspots,infrastructure",
-    "conflictsBattles,conflictsExplosions,liveStrikes,news",
-  ];
   const mapJobs: string[] = [];
   if (scope === "all" || scope === "map") {
     for (const range of mapRanges) {
-      for (const layers of mapLayerSets) {
-        mapJobs.push(`${baseUrl}/api/map?range=${encodeURIComponent(range)}&layers=${encodeURIComponent(layers)}`);
-      }
+      mapJobs.push(`${baseUrl}/api/map?range=${encodeURIComponent(range)}`);
     }
   }
 
@@ -57,7 +51,7 @@ export async function GET(request: Request) {
   if (scope === "all" || scope === "escalation") {
     for (const country of countries) {
       escalationJobs.push(
-        `${baseUrl}/api/escalation?country=${encodeURIComponent(country)}&smooth=3&threshold=45&start=2018-01-01`
+        `${baseUrl}/api/escalation?country=${encodeURIComponent(country)}`
       );
     }
   }
@@ -79,12 +73,19 @@ export async function GET(request: Request) {
 
   const success = results.filter((r) => r.ok).length;
   const failed = results.length - success;
+  const durations = results.map((r) => r.elapsedMs).sort((a, b) => a - b);
+  const p50 =
+    durations.length > 0 ? durations[Math.min(durations.length - 1, Math.floor(durations.length * 0.5))] : 0;
+  const p95 =
+    durations.length > 0 ? durations[Math.min(durations.length - 1, Math.floor(durations.length * 0.95))] : 0;
   return NextResponse.json(
     {
       scope,
       total: results.length,
       success,
       failed,
+      latencyMs: { p50, p95 },
+      noCronFallback: `${baseUrl}/api/internal/warm?scope=${encodeURIComponent(scope)}&secret=YOUR_CRON_SECRET`,
       ranAt: new Date().toISOString(),
       jobs: results,
     },

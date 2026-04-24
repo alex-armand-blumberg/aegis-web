@@ -85,6 +85,12 @@ export type MapApiResponse = {
     source: "memory" | "redis" | "none";
     generatedAt: string;
   };
+  perf?: {
+    totalMs: number;
+    cacheLookupMs: number;
+    cacheStatus: "fresh" | "stale" | "miss";
+    cacheSource: "memory" | "redis" | "none";
+  };
 };
 
 export type CountryIntelResponse = {

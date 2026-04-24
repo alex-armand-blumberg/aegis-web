@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { getTieredCacheRuntimeStatus } from "@/lib/cache/tieredCache";
 
 export async function GET() {
+  const cacheRuntime = getTieredCacheRuntimeStatus();
   const openskyBasic = Boolean(
     process.env.OPENSKY_USERNAME?.trim() && process.env.OPENSKY_PASSWORD?.trim()
   );
@@ -21,6 +23,9 @@ export async function GET() {
     redisRest:
       Boolean(process.env.UPSTASH_REDIS_REST_URL?.trim()) &&
       Boolean(process.env.UPSTASH_REDIS_REST_TOKEN?.trim()),
+    redisRequiredInProduction: cacheRuntime.strictMode,
+    redisReadyForProduction:
+      !cacheRuntime.productionMode || (cacheRuntime.productionMode && cacheRuntime.redisConfigured),
   };
 
   return NextResponse.json(
@@ -36,6 +41,9 @@ export async function GET() {
         "Event Registry feed is enabled when NEWS_API is set.",
         "Relay-seeded feed ingestion is enabled when INTEL_RELAY_DIGEST_URL is set.",
         "Redis tiered cache is enabled when UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set.",
+        cacheRuntime.strictMode
+          ? "Shared Redis cache is required in production mode for instant-load cache guarantees."
+          : "Shared Redis cache requirement in production is disabled by REQUIRE_SHARED_CACHE_IN_PRODUCTION=false.",
         "Source inventory and family mapping are exposed at /api/map/sources.",
       ],
     },

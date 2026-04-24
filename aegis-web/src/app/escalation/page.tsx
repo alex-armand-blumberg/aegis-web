@@ -53,11 +53,19 @@ type EscalationApiResponse = {
   escalationFlaggedMonths: string[];
   preEscalationMonths: string[];
   dataSource?: string;
+  datasetVersion?: string;
+  generatedAt?: string;
   cache?: {
     status: "fresh" | "stale" | "miss";
     ageMs: number;
     source: "memory" | "redis" | "none";
     generatedAt: string;
+  };
+  perf?: {
+    totalMs: number;
+    cacheLookupMs?: number;
+    cacheStatus: "fresh" | "stale" | "miss";
+    cacheSource: "memory" | "redis" | "none";
   };
   error?: string;
 };
@@ -287,7 +295,7 @@ export default function EscalationPage() {
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
-          let msg: { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string; cache?: EscalationApiResponse["cache"] };
+          let msg: { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string; datasetVersion?: string; generatedAt?: string; cache?: EscalationApiResponse["cache"]; perf?: EscalationApiResponse["perf"] };
           try {
             msg = JSON.parse(trimmed) as typeof msg;
           } catch {
@@ -305,7 +313,10 @@ export default function EscalationPage() {
               escalationFlaggedMonths: msg.escalationFlaggedMonths ?? [],
               preEscalationMonths: msg.preEscalationMonths ?? [],
               dataSource: msg.dataSource,
+              datasetVersion: msg.datasetVersion,
+              generatedAt: msg.generatedAt,
               cache: msg.cache,
+              perf: msg.perf,
             };
             setData(json);
             setDrillMonth(null);
@@ -350,7 +361,7 @@ export default function EscalationPage() {
       }
       if (buffer.trim()) {
         try {
-          const msg = JSON.parse(buffer.trim()) as { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string; cache?: EscalationApiResponse["cache"] };
+          const msg = JSON.parse(buffer.trim()) as { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string; datasetVersion?: string; generatedAt?: string; cache?: EscalationApiResponse["cache"]; perf?: EscalationApiResponse["perf"] };
           if (msg.type === "progress" && typeof msg.pct === "number") {
             setProgress(msg.pct);
             if (typeof msg.fetched === "number") setProgressFetched(msg.fetched);
@@ -364,7 +375,10 @@ export default function EscalationPage() {
               escalationFlaggedMonths: msg.escalationFlaggedMonths ?? [],
               preEscalationMonths: msg.preEscalationMonths ?? [],
               dataSource: msg.dataSource,
+              datasetVersion: msg.datasetVersion,
+              generatedAt: msg.generatedAt,
               cache: msg.cache,
+              perf: msg.perf,
             };
             setData(json);
             setDrillMonth(null);
@@ -870,9 +884,11 @@ User question: ${q}`;
                       <>
                         Data source: {data.dataSource}
                         {data.series.length > 0 ? ` · ${data.series.length} country-month rows` : ""}
+                        {data.datasetVersion ? ` · dataset ${data.datasetVersion}` : ""}
                         {data.cache
                           ? ` · cache ${data.cache.status} (${Math.round(data.cache.ageMs / 1000)}s old)`
                           : ""}
+                        {data.perf ? ` · ${Math.round(data.perf.totalMs)}ms` : ""}
                       </>
                     ) : undefined
                   }
