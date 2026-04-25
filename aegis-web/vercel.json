@@ -3,23 +3,23 @@
   "crons": [
     {
       "path": "/api/internal/warm?scope=map",
-      "schedule": "*/10 * * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/internal/warm?scope=escalation&batch=1&batches=4",
-      "schedule": "3 */6 * * *"
+      "schedule": "0 1 * * *"
     },
     {
       "path": "/api/internal/warm?scope=escalation&batch=2&batches=4",
-      "schedule": "18 */6 * * *"
+      "schedule": "0 2 * * *"
     },
     {
       "path": "/api/internal/warm?scope=escalation&batch=3&batches=4",
-      "schedule": "33 */6 * * *"
+      "schedule": "0 3 * * *"
     },
     {
       "path": "/api/internal/warm?scope=escalation&batch=4&batches=4",
-      "schedule": "48 */6 * * *"
+      "schedule": "0 4 * * *"
     }
   ]
 }
