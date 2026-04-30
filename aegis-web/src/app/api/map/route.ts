@@ -36,7 +36,7 @@ const ACLED_ARCGIS_QUERY_URL =
 
 const MAP_FAST_CACHE_ENABLED = (process.env.ENABLE_MAP_FAST_CACHE ?? "true").toLowerCase() !== "false";
 const MAP_FAST_CACHE_FRESH_MS = Number(process.env.MAP_FAST_CACHE_FRESH_MS ?? 10 * 60_000);
-const MAP_FAST_CACHE_STALE_MS = Number(process.env.MAP_FAST_CACHE_STALE_MS ?? 24 * 60 * 60_000);
+const MAP_FAST_CACHE_STALE_MS = Number(process.env.MAP_FAST_CACHE_STALE_MS ?? 7 * 24 * 60 * 60_000);
 
 const ACLED_FIELDS =
   "country,admin1,event_month,battles,explosions_remote_violence,protests,riots,strategic_developments,violence_against_civilians,violent_actors,fatalities,centroid_longitude,centroid_latitude,ObjectId";

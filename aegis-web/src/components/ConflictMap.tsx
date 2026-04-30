@@ -43,8 +43,7 @@ const DEFAULT_VIEW_STATE = {
 
 const BASEMAP_STYLE =
   "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
-const COUNTRY_GEOJSON_URL =
-  "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
+const COUNTRY_GEOJSON_URL = "/map-assets/countries.geo.json";
 
 function normalizeCountryName(name: string): string {
   return name

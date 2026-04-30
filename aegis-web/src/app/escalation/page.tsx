@@ -70,6 +70,115 @@ type EscalationApiResponse = {
   error?: string;
 };
 
+type EscalationStreamMessage = {
+  type?: string;
+  pct?: number;
+  fetched?: number;
+  total?: number;
+  error?: string;
+  series?: EscalationPoint[];
+  forecast?: EscalationForecastPoint[];
+  escalationThreshold?: number;
+  escalationFlaggedMonths?: string[];
+  preEscalationMonths?: string[];
+  dataSource?: string;
+  datasetVersion?: string;
+  generatedAt?: string;
+  cache?: EscalationApiResponse["cache"];
+  perf?: EscalationApiResponse["perf"];
+  warming?: boolean;
+};
+
+type EscalationPrefetchEntry = {
+  promise: Promise<EscalationApiResponse | null>;
+  data?: EscalationApiResponse;
+};
+
+function buildEscalationApiUrl(input: {
+  country: string;
+  smooth: number;
+  threshold: number;
+  startDate: string;
+  endDate: string;
+  instant?: boolean;
+}): string {
+  const params = new URLSearchParams({
+    country: input.country,
+    smooth: String(input.smooth),
+    threshold: String(input.threshold),
+    start: input.startDate,
+    end: input.endDate,
+  });
+  if (input.instant) params.set("instant", "1");
+  return `/api/escalation?${params.toString()}`;
+}
+
+function messageToEscalationResponse(msg: EscalationStreamMessage): EscalationApiResponse {
+  return {
+    series: msg.series ?? [],
+    forecast: msg.forecast ?? [],
+    escalationThreshold: msg.escalationThreshold ?? 0,
+    escalationFlaggedMonths: msg.escalationFlaggedMonths ?? [],
+    preEscalationMonths: msg.preEscalationMonths ?? [],
+    dataSource: msg.dataSource,
+    datasetVersion: msg.datasetVersion,
+    generatedAt: msg.generatedAt,
+    cache: msg.cache,
+    perf: msg.perf,
+  };
+}
+
+async function readEscalationApiResponse(
+  res: Response,
+  onProgress?: (msg: EscalationStreamMessage) => void
+): Promise<EscalationApiResponse | null> {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const json = (await res.json()) as EscalationApiResponse & EscalationStreamMessage;
+    if (res.status === 202 || json.warming) return null;
+    if (!res.ok) throw new Error(json.error ?? "Failed to load escalation index.");
+    return json;
+  }
+
+  if (!res.ok) {
+    const json = (await res.json()) as EscalationApiResponse;
+    throw new Error(json.error ?? "Failed to load escalation index.");
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("Failed to load escalation index.");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const handleMessage = (msg: EscalationStreamMessage): EscalationApiResponse | null => {
+    if (msg.type === "progress") {
+      onProgress?.(msg);
+      return null;
+    }
+    if (msg.type === "result") return messageToEscalationResponse(msg);
+    if (msg.type === "error") throw new Error(msg.error ?? "Failed to load escalation index.");
+    return null;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const result = handleMessage(JSON.parse(trimmed) as EscalationStreamMessage);
+      if (result) return result;
+    }
+  }
+  if (buffer.trim()) {
+    const result = handleMessage(JSON.parse(buffer.trim()) as EscalationStreamMessage);
+    if (result) return result;
+  }
+  return null;
+}
+
 function getDefaultEndDate(): string {
   const d = new Date();
   d.setFullYear(d.getFullYear() - 1);
@@ -183,6 +292,8 @@ export default function EscalationPage() {
   const [syncLabel, setSyncLabel] = useState<string | undefined>();
   const monthDropdownRef = useRef<HTMLDivElement>(null);
   const countryInputRef = useRef<HTMLDivElement>(null);
+  const prefetchCacheRef = useRef<Map<string, EscalationPrefetchEntry>>(new Map());
+  const [prefetchStatus, setPrefetchStatus] = useState<"idle" | "warming" | "ready">("idle");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -250,6 +361,90 @@ export default function EscalationPage() {
     return () => clearTimeout(t);
   }, [showCompleted]);
 
+  function commitEscalationData(json: EscalationApiResponse, c: string) {
+    setData(json);
+    setDrillMonth(null);
+    setAiSummary(null);
+    setAiError(null);
+    setEventsResult(null);
+    setEventsError(null);
+    setSentinelAnswer(null);
+    setSentinelError(null);
+    savePlot({
+      data: json,
+      country: c,
+      startDate,
+      endDate,
+      threshold,
+      smooth,
+      showComponents,
+    });
+    setSyncLabel(
+      `Series loaded ${new Date().toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      })} EST`
+    );
+    setProgress(100);
+    setLoading(false);
+    setShowCompleted(true);
+  }
+
+  useEffect(() => {
+    const c = country.trim();
+    if (!c) {
+      setPrefetchStatus("idle");
+      return;
+    }
+    const url = buildEscalationApiUrl({
+      country: c,
+      smooth,
+      threshold,
+      startDate,
+      endDate,
+      instant: true,
+    });
+    setPrefetchStatus("warming");
+    const timer = window.setTimeout(() => {
+      const existing = prefetchCacheRef.current.get(url);
+      if (existing?.data) {
+        setPrefetchStatus("ready");
+        return;
+      }
+      if (existing?.promise) return;
+
+      const promise = fetch(url)
+        .then((res) => readEscalationApiResponse(res))
+        .then(async (json) => {
+          if (json) return json;
+          await new Promise((resolve) => window.setTimeout(resolve, 1800));
+          const retry = await fetch(url);
+          return readEscalationApiResponse(retry);
+        })
+        .then((json) => {
+          const entry = prefetchCacheRef.current.get(url);
+          if (json && entry) {
+            entry.data = json;
+            setPrefetchStatus("ready");
+          } else {
+            setPrefetchStatus("warming");
+          }
+          return json;
+        })
+        .catch(() => {
+          setPrefetchStatus("idle");
+          return null;
+        });
+      prefetchCacheRef.current.set(url, { promise });
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [country, smooth, threshold, startDate, endDate]);
+
   async function loadData() {
     const c = country.trim();
     if (!c) return;
@@ -260,164 +455,52 @@ export default function EscalationPage() {
     setProgressFetched(undefined);
     setProgressTotal(undefined);
     try {
-      const params = new URLSearchParams({
+      const instantUrl = buildEscalationApiUrl({
         country: c,
-        smooth: String(smooth),
-        threshold: String(threshold),
-        start: startDate,
-        end: endDate,
+        smooth,
+        threshold,
+        startDate,
+        endDate,
+        instant: true,
       });
-      const res = await fetch(`/api/escalation?${params.toString()}`);
-      if (!res.ok) {
-        const json = (await res.json()) as EscalationApiResponse;
-        setError(json.error ?? "Failed to load escalation index.");
+      const prefetched = prefetchCacheRef.current.get(instantUrl);
+      if (prefetched?.data) {
+        commitEscalationData(prefetched.data, c);
+        return;
+      }
+
+      if (prefetched?.promise) {
+        const json = await prefetched.promise;
+        if (json) {
+          commitEscalationData(json, c);
+          return;
+        }
+      }
+
+      const liveUrl = buildEscalationApiUrl({
+        country: c,
+        smooth,
+        threshold,
+        startDate,
+        endDate,
+      });
+      const res = await fetch(liveUrl);
+      const json = await readEscalationApiResponse(res, (msg) => {
+        if (typeof msg.pct === "number") setProgress(msg.pct);
+        if (typeof msg.fetched === "number") setProgressFetched(msg.fetched);
+        if (typeof msg.total === "number") setProgressTotal(msg.total);
+      });
+      if (!json) {
+        setError("Escalation data is warming. Try again in a moment.");
         if (!hadData) setData(null);
         setLoading(false);
         setProgress(100);
         return;
       }
-      const reader = res.body?.getReader();
-      if (!reader) {
-        setError("Failed to load escalation index.");
-        if (!hadData) setData(null);
-        setLoading(false);
-        setProgress(100);
-        return;
-      }
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          let msg: { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string; datasetVersion?: string; generatedAt?: string; cache?: EscalationApiResponse["cache"]; perf?: EscalationApiResponse["perf"] };
-          try {
-            msg = JSON.parse(trimmed) as typeof msg;
-          } catch {
-            continue;
-          }
-          if (msg.type === "progress" && typeof msg.pct === "number") {
-            setProgress(msg.pct);
-            if (typeof msg.fetched === "number") setProgressFetched(msg.fetched);
-            if (typeof msg.total === "number") setProgressTotal(msg.total);
-          } else if (msg.type === "result") {
-            const json: EscalationApiResponse = {
-              series: msg.series ?? [],
-              forecast: msg.forecast ?? [],
-              escalationThreshold: msg.escalationThreshold ?? 0,
-              escalationFlaggedMonths: msg.escalationFlaggedMonths ?? [],
-              preEscalationMonths: msg.preEscalationMonths ?? [],
-              dataSource: msg.dataSource,
-              datasetVersion: msg.datasetVersion,
-              generatedAt: msg.generatedAt,
-              cache: msg.cache,
-              perf: msg.perf,
-            };
-            setData(json);
-            setDrillMonth(null);
-            setAiSummary(null);
-            setAiError(null);
-            setEventsResult(null);
-            setEventsError(null);
-            setSentinelAnswer(null);
-            setSentinelError(null);
-            savePlot({
-              data: json,
-              country: c,
-              startDate,
-              endDate,
-              threshold,
-              smooth,
-              showComponents,
-            });
-            setSyncLabel(
-              `Series loaded ${new Date().toLocaleString("en-US", {
-                timeZone: "America/New_York",
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: true,
-              })} EST`
-            );
-            setProgress(100);
-            setLoading(false);
-            setShowCompleted(true);
-            return;
-          } else if (msg.type === "error") {
-            setError(msg.error ?? "Failed to load escalation index.");
-            if (!hadData) setData(null);
-            setProgress(100);
-            setLoading(false);
-            return;
-          }
-        }
-      }
-      if (buffer.trim()) {
-        try {
-          const msg = JSON.parse(buffer.trim()) as { type: string; pct?: number; fetched?: number; total?: number; error?: string; series?: EscalationPoint[]; forecast?: EscalationForecastPoint[]; escalationThreshold?: number; escalationFlaggedMonths?: string[]; preEscalationMonths?: string[]; dataSource?: string; datasetVersion?: string; generatedAt?: string; cache?: EscalationApiResponse["cache"]; perf?: EscalationApiResponse["perf"] };
-          if (msg.type === "progress" && typeof msg.pct === "number") {
-            setProgress(msg.pct);
-            if (typeof msg.fetched === "number") setProgressFetched(msg.fetched);
-            if (typeof msg.total === "number") setProgressTotal(msg.total);
-          }
-          else if (msg.type === "result") {
-            const json: EscalationApiResponse = {
-              series: msg.series ?? [],
-              forecast: msg.forecast ?? [],
-              escalationThreshold: msg.escalationThreshold ?? 0,
-              escalationFlaggedMonths: msg.escalationFlaggedMonths ?? [],
-              preEscalationMonths: msg.preEscalationMonths ?? [],
-              dataSource: msg.dataSource,
-              datasetVersion: msg.datasetVersion,
-              generatedAt: msg.generatedAt,
-              cache: msg.cache,
-              perf: msg.perf,
-            };
-            setData(json);
-            setDrillMonth(null);
-            setAiSummary(null);
-            setAiError(null);
-            setEventsResult(null);
-            setEventsError(null);
-            setSentinelAnswer(null);
-            setSentinelError(null);
-            savePlot({ data: json, country: c, startDate, endDate, threshold, smooth, showComponents });
-            setSyncLabel(
-              `Series loaded ${new Date().toLocaleString("en-US", {
-                timeZone: "America/New_York",
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: true,
-              })} EST`
-            );
-            setProgress(100);
-            setLoading(false);
-            setShowCompleted(true);
-            return;
-          } else if (msg.type === "error") {
-            setError(msg.error ?? "Failed to load escalation index.");
-            if (!hadData) setData(null);
-          }
-        } catch {
-          setError("Failed to load escalation index.");
-          if (!hadData) setData(null);
-        }
-      }
-      setLoading(false);
-      setProgress(100);
+      commitEscalationData(json, c);
     } catch (e) {
       console.error(e);
-      setError("Failed to load escalation index.");
+      setError(e instanceof Error ? e.message : "Failed to load escalation index.");
       if (!hadData) setData(null);
       setLoading(false);
       setProgress(100);
@@ -791,8 +874,17 @@ User question: ${q}`;
                   disabled={loading || !country.trim()}
                   className="btn-primary escalation-generate-btn"
                 >
-                  {loading ? "Computing…" : "Generate plot"}
+                  {loading
+                    ? "Computing…"
+                    : prefetchStatus === "ready"
+                      ? "Generate plot (ready)"
+                      : "Generate plot"}
                 </button>
+                {country.trim() && !loading && (
+                  <span className="control-label" style={{ alignSelf: "center" }}>
+                    {prefetchStatus === "ready" ? "Instant cache ready" : "Preparing cache"}
+                  </span>
+                )}
                 <Link href="/limitations" className="escalation-limitations-link">
                   Limitations →
                 </Link>

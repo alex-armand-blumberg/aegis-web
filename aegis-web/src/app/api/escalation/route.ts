@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import {
   AcledMonthlyRecord,
   buildEscalationViewFromCanonical,
@@ -185,6 +185,77 @@ function progressPct(fetched: number, total: number | null): number {
   return Math.min(90, pct);
 }
 
+async function buildCanonicalArtifact(
+  country: string,
+  datasetVersion: string,
+  defaultEnd: Date,
+  onProgress?: (fetched: number, total: number | null) => void
+): Promise<CanonicalEscalationArtifact> {
+  let allRows: AcledMonthlyRecord[];
+  let dataSource: string;
+  if (hasAcledEnv()) {
+    try {
+      const fullStart = new Date("2018-01-01");
+      allRows = await fetchAcledCountryMonthly(country, fullStart, defaultEnd, onProgress);
+      dataSource = "ACLED API (full history)";
+    } catch (acledErr) {
+      console.error("ACLED API failed, falling back to ArcGIS", acledErr);
+      allRows = await fetchAcledViaArcGIS(country, (fetched) => {
+        onProgress?.(fetched, null);
+      });
+      dataSource = "ACLED ArcGIS (fallback)";
+    }
+  } else {
+    allRows = await fetchAcledViaArcGIS(country, (fetched) => {
+      onProgress?.(fetched, null);
+    });
+    dataSource = "ACLED ArcGIS";
+  }
+
+  const result = computeEscalationIndex(allRows, country, 1, 45);
+  if (!result.series.length) {
+    throw new Error(`No data available for country '${country}'.`);
+  }
+  return {
+    datasetVersion,
+    generatedAt: new Date().toISOString(),
+    dataSource,
+    canonicalSeries: result.series,
+  };
+}
+
+function buildResponsePayload(
+  artifact: CanonicalEscalationArtifact,
+  country: string,
+  smoothWindow: number,
+  threshold: number,
+  startDate: Date,
+  endDate: Date
+): EscalationResponsePayload {
+  const view = buildEscalationViewFromCanonical(
+    artifact.canonicalSeries,
+    smoothWindow,
+    threshold
+  );
+  const filteredSeries = filterSeriesByDateRange(view.series, startDate, endDate);
+  if (!filteredSeries.length) {
+    throw new Error(`No data for ${country} in the selected date range. Try a wider range.`);
+  }
+  const filteredMonths = new Set(filteredSeries.map((s) => s.event_month.slice(0, 7)));
+  return {
+    series: filteredSeries,
+    forecast: computeForecastFromTail(filteredSeries),
+    escalationThreshold: view.escalationThreshold,
+    escalationFlaggedMonths: view.escalationFlaggedMonths.filter((m) =>
+      filteredMonths.has(m)
+    ),
+    preEscalationMonths: view.preEscalationMonths.filter((m) => filteredMonths.has(m)),
+    dataSource: artifact.dataSource,
+    datasetVersion: artifact.datasetVersion,
+    generatedAt: artifact.generatedAt,
+  };
+}
+
 export async function GET(req: NextRequest) {
   const startedAt = Date.now();
   const { searchParams } = new URL(req.url);
@@ -194,6 +265,7 @@ export async function GET(req: NextRequest) {
   const startParam = searchParams.get("start");
   const endParam = searchParams.get("end");
   const refreshMode = (searchParams.get("refresh") ?? "").toLowerCase();
+  const instantMode = ["1", "true", "yes"].includes((searchParams.get("instant") ?? "").toLowerCase());
 
   if (!country) {
     return NextResponse.json(
@@ -216,47 +288,83 @@ export async function GET(req: NextRequest) {
     hasAcledEnv: hasAcledEnv(),
   });
 
+  if (instantMode) {
+    const cacheLookupStartedAt = Date.now();
+    const cachedRead = ESCALATION_FAST_CACHE_ENABLED
+      ? await readTieredCache<CanonicalEscalationArtifact>(
+          canonicalCacheKey,
+          ESCALATION_FAST_CACHE_FRESH_MS,
+          ESCALATION_FAST_CACHE_STALE_MS
+        )
+      : null;
+    if (cachedRead?.envelope) {
+      const responsePayload = buildResponsePayload(
+        cachedRead.envelope.value,
+        country,
+        smoothWindow,
+        threshold,
+        startDate,
+        endDate
+      );
+      return NextResponse.json({
+        ...responsePayload,
+        cache: {
+          status: cachedRead.meta.status,
+          ageMs: cachedRead.meta.ageMs,
+          source: cachedRead.meta.source,
+          generatedAt: new Date(Date.now() - Math.max(0, cachedRead.meta.ageMs)).toISOString(),
+        },
+        perf: {
+          totalMs: Date.now() - startedAt,
+          cacheLookupMs: Date.now() - cacheLookupStartedAt,
+          cacheStatus: cachedRead.meta.status,
+          cacheSource: cachedRead.meta.source,
+        },
+      });
+    }
+
+    if (ESCALATION_FAST_CACHE_ENABLED) {
+      after(async () => {
+        try {
+          const nextValue = await buildCanonicalArtifact(country, datasetVersion, defaultEnd);
+          await writeTieredCache(
+            canonicalCacheKey,
+            nextValue,
+            ESCALATION_FAST_CACHE_FRESH_MS,
+            ESCALATION_FAST_CACHE_STALE_MS
+          );
+        } catch (err) {
+          console.error("Escalation cache warm failed", err);
+        }
+      });
+    }
+
+    return NextResponse.json(
+      {
+        warming: true,
+        error: "Escalation data is warming. Try again in a moment.",
+        cache: {
+          status: "miss",
+          ageMs: 0,
+          source: "none",
+          generatedAt: new Date().toISOString(),
+        },
+        perf: {
+          totalMs: Date.now() - startedAt,
+          cacheLookupMs: Date.now() - cacheLookupStartedAt,
+          cacheStatus: "miss",
+          cacheSource: "none",
+        },
+      },
+      { status: 202 }
+    );
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       const push = (obj: object) => {
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
-      };
-
-      const buildCanonicalArtifact = async (
-        onProgress?: (fetched: number, total: number | null) => void
-      ): Promise<CanonicalEscalationArtifact> => {
-        let allRows: AcledMonthlyRecord[];
-        let dataSource: string;
-        if (hasAcledEnv()) {
-          try {
-            const fullStart = new Date("2018-01-01");
-            allRows = await fetchAcledCountryMonthly(country, fullStart, defaultEnd, onProgress);
-            dataSource = "ACLED API (full history)";
-          } catch (acledErr) {
-            console.error("ACLED API failed, falling back to ArcGIS", acledErr);
-            allRows = await fetchAcledViaArcGIS(country, (fetched) => {
-              onProgress?.(fetched, null);
-            });
-            dataSource = "ACLED ArcGIS (fallback)";
-          }
-        } else {
-          allRows = await fetchAcledViaArcGIS(country, (fetched) => {
-            onProgress?.(fetched, null);
-          });
-          dataSource = "ACLED ArcGIS";
-        }
-
-        const result = computeEscalationIndex(allRows, country, 1, 45);
-        if (!result.series.length) {
-          throw new Error(`No data available for country '${country}'.`);
-        }
-        return {
-          datasetVersion,
-          generatedAt: new Date().toISOString(),
-          dataSource,
-          canonicalSeries: result.series,
-        };
       };
 
       try {
@@ -296,7 +404,7 @@ export async function GET(req: NextRequest) {
           !refreshWhenStale
         ) {
           cached = { value: cachedRead.envelope.value, meta: cachedRead.meta };
-          void buildCanonicalArtifact()
+          void buildCanonicalArtifact(country, datasetVersion, defaultEnd)
             .then((nextValue) =>
               writeTieredCache(
                 canonicalCacheKey,
@@ -308,7 +416,7 @@ export async function GET(req: NextRequest) {
             .catch(() => undefined);
         } else {
           try {
-            const value = await buildCanonicalArtifact(progress);
+            const value = await buildCanonicalArtifact(country, datasetVersion, defaultEnd, progress);
             if (ESCALATION_FAST_CACHE_ENABLED) {
               await writeTieredCache(
                 canonicalCacheKey,
@@ -336,28 +444,14 @@ export async function GET(req: NextRequest) {
         }
         const cacheLookupMs = Date.now() - cacheLookupStartedAt;
 
-        const view = buildEscalationViewFromCanonical(
-          cached.value.canonicalSeries,
+        const responsePayload = buildResponsePayload(
+          cached.value,
+          country,
           smoothWindow,
-          threshold
+          threshold,
+          startDate,
+          endDate
         );
-        const filteredSeries = filterSeriesByDateRange(view.series, startDate, endDate);
-        if (!filteredSeries.length) {
-          throw new Error(`No data for ${country} in the selected date range. Try a wider range.`);
-        }
-        const filteredMonths = new Set(filteredSeries.map((s) => s.event_month.slice(0, 7)));
-        const responsePayload: EscalationResponsePayload = {
-          series: filteredSeries,
-          forecast: computeForecastFromTail(filteredSeries),
-          escalationThreshold: view.escalationThreshold,
-          escalationFlaggedMonths: view.escalationFlaggedMonths.filter((m) =>
-            filteredMonths.has(m)
-          ),
-          preEscalationMonths: view.preEscalationMonths.filter((m) => filteredMonths.has(m)),
-          dataSource: cached.value.dataSource,
-          datasetVersion: cached.value.datasetVersion,
-          generatedAt: cached.value.generatedAt,
-        };
 
         push({
           type: "progress",

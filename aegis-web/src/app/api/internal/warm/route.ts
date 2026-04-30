@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { COUNTRY_NAMES } from "@/lib/countries";
 
 export const maxDuration = 300;
 
@@ -61,6 +62,16 @@ function selectBatch<T>(items: T[], batch: number, batches: number): T[] {
   return items.filter((_, idx) => idx % batches === zeroBasedBatch);
 }
 
+function parseCountryList(raw: string | null): string[] {
+  const value = raw?.trim();
+  if (!value) return DEFAULT_PRIORITY_ESCALATION_COUNTRIES;
+  if (value.toLowerCase() === "all") return COUNTRY_NAMES;
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export async function GET(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -80,10 +91,9 @@ export async function GET(request: Request) {
     }
   }
 
-  const countries = (process.env.WARM_ESCALATION_COUNTRIES ?? DEFAULT_PRIORITY_ESCALATION_COUNTRIES.join(","))
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const countries = parseCountryList(
+    url.searchParams.get("countries") ?? process.env.WARM_ESCALATION_COUNTRIES ?? null
+  );
   const selectedCountries = selectBatch(countries, batch, batches);
   const escalationJobs: string[] = [];
   if (scope === "all" || scope === "escalation") {

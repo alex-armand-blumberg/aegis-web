@@ -18,6 +18,11 @@ import { getCountryBounds } from "@/lib/countryBounds";
 import { getOceanRegionByKey, pointInRegion } from "@/lib/regionGeometry";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
 import RegionIntelPanel from "@/components/RegionIntelPanel";
+import {
+  buildMapDataUrl,
+  consumeReadyMapPrefetch,
+  getMapPrefetchEntry,
+} from "@/lib/instantLoad";
 
 const ConflictMap = dynamic(() => import("@/components/ConflictMap"), {
   ssr: false,
@@ -515,19 +520,31 @@ export default function MapPage() {
     () => ALL_LAYERS.filter((k) => activeLayers[k]).join(","),
     [activeLayers]
   );
+  const mapDataUrl = useMemo(
+    () => buildMapDataUrl(range, requestedLayerList),
+    [range, requestedLayerList]
+  );
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     const hadData = hasDataRef.current;
     if (!hadData) setMapReady(false);
     try {
-      const params = new URLSearchParams({
-        range,
-        layers: requestedLayerList,
-      });
-      const res = await fetch(`/api/map?${params.toString()}`);
-      const data = (await res.json()) as MapApiResponse & { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Failed to load map feeds");
+      const prefetched = consumeReadyMapPrefetch(mapDataUrl);
+      let data: MapApiResponse;
+      if (prefetched) {
+        data = prefetched;
+      } else {
+        const inFlightPrefetch = getMapPrefetchEntry(mapDataUrl)?.promise;
+        if (inFlightPrefetch) {
+          data = await inFlightPrefetch;
+        } else {
+          const res = await fetch(mapDataUrl);
+          const json = (await res.json()) as MapApiResponse & { error?: string };
+          if (!res.ok) throw new Error(json.error ?? "Failed to load map feeds");
+          data = json;
+        }
+      }
       setApiData(data);
       setError(null);
     } catch (err) {
@@ -536,7 +553,7 @@ export default function MapPage() {
     } finally {
       setLoading(false);
     }
-  }, [range, requestedLayerList]);
+  }, [mapDataUrl]);
 
   useEffect(() => {
     fetchData();

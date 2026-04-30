@@ -3,6 +3,10 @@ import { getTieredCacheRuntimeStatus } from "@/lib/cache/tieredCache";
 
 export async function GET() {
   const cacheRuntime = getTieredCacheRuntimeStatus();
+  const mapFreshMs = Number(process.env.MAP_FAST_CACHE_FRESH_MS ?? 10 * 60_000);
+  const mapStaleMs = Number(process.env.MAP_FAST_CACHE_STALE_MS ?? 7 * 24 * 60 * 60_000);
+  const escalationFreshMs = Number(process.env.ESCALATION_FAST_CACHE_FRESH_MS ?? 24 * 60 * 60_000);
+  const escalationStaleMs = Number(process.env.ESCALATION_FAST_CACHE_STALE_MS ?? 30 * 24 * 60 * 60_000);
   const openskyBasic = Boolean(
     process.env.OPENSKY_USERNAME?.trim() && process.env.OPENSKY_PASSWORD?.trim()
   );
@@ -33,6 +37,22 @@ export async function GET() {
       status: "ok",
       updatedAt: new Date().toISOString(),
       env,
+      instantLoad: {
+        ready:
+          cacheRuntime.redisConfigured &&
+          (!cacheRuntime.productionMode || env.redisReadyForProduction),
+        cache: {
+          redisConfigured: cacheRuntime.redisConfigured,
+          productionRequiresRedis: cacheRuntime.strictMode,
+          mapFreshMs,
+          mapStaleMs,
+          escalationFreshMs,
+          escalationStaleMs,
+        },
+        guarantees: cacheRuntime.redisConfigured
+          ? "Warm map and escalation responses can be shared across serverless instances."
+          : "Only per-instance memory cache is available; instant loads are not guaranteed after cold starts.",
+      },
       notes: [
         "OpenSky cloud reliability is best with OAuth credentials (OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET).",
         "Basic OpenSky auth still works in some environments but can be blocked/rate-limited on cloud IP ranges.",

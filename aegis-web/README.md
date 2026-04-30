@@ -30,6 +30,10 @@ Copy `.env.example` to `.env.local` and set:
 - `RESEND_API_KEY` — Resend API key for contact form (emails to alex.armandblumberg@gmail.com). Get at resend.com.
 - `SAM_GOV_API_KEY` — optional free API key for strategic procurement signals from SAM.gov opportunities.
 - `ENABLE_STRATEGIC_PACK` — optional toggle (`true`/`false`) for the strategic escalation source pack (defaults to enabled through source packs).
+- `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — strongly recommended for instant map and escalation loads in production. Without shared Redis, cache hits are limited to one serverless instance.
+- `WARM_ESCALATION_COUNTRIES` — comma-separated country list warmed by `/api/internal/warm`; set to `all` to batch through every country in the local autocomplete list.
+- `MAP_FAST_CACHE_STALE_MS` — optional map stale-cache window. Defaults to seven days so users get an immediate cached map while live feeds refresh.
+- `ESCALATION_FAST_CACHE_STALE_MS` — optional escalation stale-cache window. Defaults to thirty days for canonical ACLED country artifacts.
 
 **ACLED (full-history data):** If `ACLED_EMAIL` and `ACLED_PASSWORD` are set, the escalation index uses ACLED’s authenticated API for data from 2018 up to one year ago. If missing, the app falls back to the public ArcGIS layer (limited history).
 

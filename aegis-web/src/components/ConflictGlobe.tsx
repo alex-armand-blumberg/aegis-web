@@ -177,9 +177,9 @@ export default function ConflictGlobe({
         ref={globeRef as React.MutableRefObject<GlobeMethods | undefined>}
         width={size.width}
         height={size.height}
-        globeImageUrl="https://unpkg.com/three-globe/example/img/earth-dark.jpg"
-        bumpImageUrl="https://unpkg.com/three-globe/example/img/earth-topology.png"
-        backgroundImageUrl="https://unpkg.com/three-globe/example/img/night-sky.png"
+        globeImageUrl="/map-assets/earth-dark.jpg"
+        bumpImageUrl="/map-assets/earth-topology.png"
+        backgroundImageUrl="/map-assets/night-sky.png"
         backgroundColor="#020617"
         showAtmosphere={true}
         atmosphereColor="#4b7fd1"

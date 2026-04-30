@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import AnimatedNumberOnView from "@/components/AnimatedNumberOnView";
 import AnimatedMethodWeight from "@/components/AnimatedMethodWeight";
 import BackgroundVideo from "@/components/BackgroundVideo";
@@ -10,9 +11,15 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { CtaBand } from "@/components/ui/CtaBand";
 import { SiteFooter } from "@/components/ui/SiteFooter";
 import { useContactModal } from "@/components/ui/ContactModalContext";
+import { prefetchMapExperience } from "@/lib/instantLoad";
 
 export default function Home() {
   const { openContact } = useContactModal();
+  const router = useRouter();
+  const warmMap = useCallback(() => {
+    router.prefetch("/map");
+    void prefetchMapExperience();
+  }, [router]);
 
   useEffect(() => {
     const revealObs = new IntersectionObserver(
@@ -57,6 +64,16 @@ export default function Home() {
     });
   }, []);
 
+  useEffect(() => {
+    const warm = () => warmMap();
+    if ("requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(warm, { timeout: 2500 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(warm, 1200);
+    return () => window.clearTimeout(id);
+  }, []);
+
   return (
     <>
       <MarketingNav onContactClick={openContact} />
@@ -76,7 +93,7 @@ export default function Home() {
           <Link href="/escalation" className="btn-primary">
             Launch Demo &rarr;
           </Link>
-          <Link href="/map" className="btn-secondary">
+          <Link href="/map" className="btn-secondary" onMouseEnter={warmMap} onFocus={warmMap}>
             Interactive Map
           </Link>
           <a href="#features" className="btn-secondary btn-learn-more">
@@ -132,7 +149,13 @@ export default function Home() {
               </div>
               <span className="feature-tag">Leading Indicators</span>
             </Link>
-            <Link href="/map" className="feature-card" style={{ "--accent": "#3b82f6" } as React.CSSProperties}>
+            <Link
+              href="/map"
+              className="feature-card"
+              style={{ "--accent": "#3b82f6" } as React.CSSProperties}
+              onMouseEnter={warmMap}
+              onFocus={warmMap}
+            >
               <div className="feature-icon">🌐</div>
               <div className="feature-title">Interactive Map</div>
               <div className="feature-desc">
