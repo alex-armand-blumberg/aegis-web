@@ -66,9 +66,13 @@ export default function Home() {
 
   useEffect(() => {
     const warm = () => warmMap();
-    if ("requestIdleCallback" in window) {
-      const id = window.requestIdleCallback(warm, { timeout: 2500 });
-      return () => window.cancelIdleCallback(id);
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      const id = idleWindow.requestIdleCallback(warm, { timeout: 2500 });
+      return () => idleWindow.cancelIdleCallback?.(id);
     }
     const id = window.setTimeout(warm, 1200);
     return () => window.clearTimeout(id);
