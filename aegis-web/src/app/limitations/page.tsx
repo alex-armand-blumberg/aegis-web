@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import BackgroundVideo from "@/components/BackgroundVideo";
+import { MarketingNav } from "@/components/ui/MarketingNav";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { SiteFooter } from "@/components/ui/SiteFooter";
 import { TransparencyModule } from "@/components/ui/TransparencyModule";
@@ -34,15 +35,7 @@ export default function LimitationsPage() {
         videoClassName="limitations-page-video"
         posterSrc="/limitations-bg.png"
       />
-      <nav className="limitations-page-nav">
-        <Link href="/" className="nav-logo">
-          AEG<span>I</span>S<sub className="logo-hq">hq</sub>
-        </Link>
-        <div className="nav-links">
-          <Link href="/">← Back to Home</Link>
-          <Link href="/escalation">App</Link>
-        </div>
-      </nav>
+      <MarketingNav />
 
       <main className="limitations-page-main relative z-10 pt-24">
         <section>

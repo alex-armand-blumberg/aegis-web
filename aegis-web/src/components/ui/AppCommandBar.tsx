@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import { useCommandPalette } from "./CommandPaletteContext";
 
 type AppCommandBarProps = {
+  /** Show left brand link (hide when page already uses MarketingNav). */
+  showBrand?: boolean;
   title: string;
   syncLabel?: string;
   /** e.g. range + mode chips */
@@ -20,6 +22,7 @@ type AppCommandBarProps = {
 };
 
 export function AppCommandBar({
+  showBrand = true,
   title,
   syncLabel,
   statusSlot,
@@ -36,9 +39,11 @@ export function AppCommandBar({
   return (
     <header className={`app-command-bar ${className}`.trim()}>
       <div className="app-command-bar-main">
-        <Link href="/" className="app-command-bar-logo">
-          AEG<span>I</span>S
-        </Link>
+        {showBrand ? (
+          <Link href="/" className="app-command-bar-logo">
+            AEG<span>I</span>S
+          </Link>
+        ) : null}
         <div className="app-command-bar-title-block">
           <div className="app-command-bar-title">{title}</div>
           {syncLabel ? <div className="app-command-bar-sync">{syncLabel}</div> : null}

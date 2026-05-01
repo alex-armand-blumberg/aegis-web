@@ -6,11 +6,11 @@ import { useRouter } from "next/navigation";
 import AnimatedNumberOnView from "@/components/AnimatedNumberOnView";
 import AnimatedMethodWeight from "@/components/AnimatedMethodWeight";
 import BackgroundVideo from "@/components/BackgroundVideo";
+import { useContactModal } from "@/components/ui/ContactModalContext";
 import { MarketingNav } from "@/components/ui/MarketingNav";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { CtaBand } from "@/components/ui/CtaBand";
 import { SiteFooter } from "@/components/ui/SiteFooter";
-import { useContactModal } from "@/components/ui/ContactModalContext";
 import { prefetchMapExperience } from "@/lib/instantLoad";
 
 export default function Home() {
@@ -80,7 +80,7 @@ export default function Home() {
 
   return (
     <>
-      <MarketingNav onContactClick={openContact} />
+      <MarketingNav />
 
       <section id="hero" className="hero-with-video">
         <BackgroundVideo
@@ -88,7 +88,7 @@ export default function Home() {
           containerClassName="hero-video-bg"
           posterSrc="/earth-bg.png"
         />
-        <div className="hero-tag">Palantir demo</div>
+        <div className="hero-tag">Palantir Valley Forge Grant Demo</div>
         <h1>AegisHQ</h1>
         <p className="hero-sub">
           Advanced Early-Warning &amp; Geostrategic Intelligence System

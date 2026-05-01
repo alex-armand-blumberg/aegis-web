@@ -6,7 +6,7 @@ import { useEscalationPlot } from "@/contexts/EscalationPlotContext";
 import BackgroundVideo from "@/components/BackgroundVideo";
 import AnimatedMethodWeight from "@/components/AnimatedMethodWeight";
 import { AppCommandBar } from "@/components/ui/AppCommandBar";
-import { AppRouteNav } from "@/components/ui/AppRouteNav";
+import { MarketingNav } from "@/components/ui/MarketingNav";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { ChartFrame } from "@/components/ui/ChartFrame";
 import { TransparencyModule } from "@/components/ui/TransparencyModule";
@@ -745,10 +745,11 @@ User question: ${q}`;
         videoClassName="escalation-page-video"
         posterSrc="/satellite-earth.png"
       />
+      <MarketingNav />
       <main className="relative z-10 pt-4">
         <div className="section !pb-8 !pt-20">
-          <AppRouteNav />
           <AppCommandBar
+            showBrand={false}
             title="Escalation Index"
             syncLabel={syncLabel ?? "Run generate to load series"}
             onRefresh={() => {

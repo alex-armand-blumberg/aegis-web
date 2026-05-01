@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
+import { MarketingNav } from "@/components/ui/MarketingNav";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { SiteFooter } from "@/components/ui/SiteFooter";
 import { getDataSourceSections } from "@/lib/dataSourcesCatalog";
@@ -28,17 +29,7 @@ export default function DataPage() {
 
   return (
     <div className="data-page min-h-screen text-[#e2e8f0]">
-      <nav className="data-page-nav">
-        <Link href="/" className="nav-logo">
-          AEG<span>I</span>S<sub className="logo-hq">hq</sub>
-        </Link>
-        <div className="nav-links">
-          <Link href="/">Home</Link>
-          <Link href="/escalation">Index</Link>
-          <Link href="/map">Map</Link>
-          <Link href="/limitations">Limitations</Link>
-        </div>
-      </nav>
+      <MarketingNav />
 
       <main className="data-page-main relative z-10 pt-24 pb-16">
         <section>

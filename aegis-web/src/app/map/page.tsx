@@ -18,6 +18,7 @@ import { getCountryBounds } from "@/lib/countryBounds";
 import { getOceanRegionByKey, pointInRegion } from "@/lib/regionGeometry";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
 import RegionIntelPanel from "@/components/RegionIntelPanel";
+import { MarketingNav } from "@/components/ui/MarketingNav";
 import {
   buildMapDataUrl,
   consumeReadyMapPrefetch,
@@ -1117,18 +1118,7 @@ export default function MapPage() {
 
   return (
     <div className="map-page min-h-screen text-[#e2e8f0]">
-      <nav>
-        <Link href="/" className="nav-logo">
-          AEG<span>I</span>S<sub className="logo-hq">hq</sub>
-        </Link>
-        <div className="nav-links">
-          <Link href="/">Back to Home</Link>
-          <Link href="/escalation">App</Link>
-          <Link href="/map" className="nav-cta">
-            Interactive Map
-          </Link>
-        </div>
-      </nav>
+      <MarketingNav />
 
       <main className="relative z-10 map-main-compact">
         <div className="map-top-section">

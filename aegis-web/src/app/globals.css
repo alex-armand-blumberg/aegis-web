@@ -1100,7 +1100,7 @@ footer {
   background: linear-gradient(to bottom, rgba(2, 6, 17, 0.25), rgba(2, 6, 17, 0.35));
   pointer-events: none;
 }
-.escalation-page > nav,
+.escalation-page > .marketing-nav-shell,
 .escalation-page > main,
 .escalation-page > footer {
   position: relative;
@@ -1279,7 +1279,7 @@ footer {
     radial-gradient(ellipse 100% 55% at 50% -15%, rgba(59, 130, 246, 0.07) 0%, transparent 52%),
     linear-gradient(180deg, #020617 0%, #0a1022 45%, #020617 100%);
 }
-.data-page > nav,
+.data-page > .marketing-nav-shell,
 .data-page > main,
 .data-page > footer {
   position: relative;
@@ -1349,7 +1349,7 @@ footer {
   background: linear-gradient(to bottom, rgba(2, 6, 17, 0.25), rgba(2, 6, 17, 0.4));
   pointer-events: none;
 }
-.limitations-page > nav,
+.limitations-page > .marketing-nav-shell,
 .limitations-page > main,
 .limitations-page > footer {
   position: relative;
@@ -1784,7 +1784,7 @@ footer {
   position: relative;
   min-height: 100vh;
 }
-.map-page > nav,
+.map-page > .marketing-nav-shell,
 .map-page > main,
 .map-page > footer {
   position: relative;
@@ -3174,7 +3174,6 @@ footer {
 .app-route-nav-link.is-active {
   color: #fff;
 }
-.map-page .app-command-bar,
 .escalation-page .app-command-bar {
   top: 48px;
 }
@@ -3194,12 +3193,6 @@ footer {
   border-top: none;
   background: var(--surface-4);
   backdrop-filter: blur(8px);
-}
-.map-page .app-route-nav + .app-command-bar,
-.escalation-page .app-route-nav + .app-command-bar {
-  margin-top: 0;
-  border-top: 1px solid var(--border-subtle);
-  border-radius: 0 0 10px 10px;
 }
 .app-command-bar-main {
   display: flex;
