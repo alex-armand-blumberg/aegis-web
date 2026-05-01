@@ -60,7 +60,7 @@ export function FirstVisitWipModal({ deploymentDisplay }: FirstVisitWipModalProp
         </h2>
         <p className="wip-first-visit-body">
           AEGIS is an independent research prototype. The experience, data pipelines, and analysis tools are still
-          evolving—expect rough edges and incomplete coverage while we continue to ship improvements.
+          evolving—expect rough edges and incomplete coverage while improvements continue to be made.
         </p>
         <p className="wip-first-visit-meta">
           Last change: <strong>{deploymentDisplay} EST</strong>
