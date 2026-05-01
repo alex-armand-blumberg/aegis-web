@@ -746,8 +746,8 @@ User question: ${q}`;
         posterSrc="/satellite-earth.png"
       />
       <MarketingNav />
-      <main className="relative z-10 pt-4">
-        <div className="section !pb-8 !pt-20">
+      <main className="relative z-10 pt-6">
+        <div className="section !pb-8 !pt-10">
           <AppCommandBar
             showBrand={false}
             title="Escalation Index"

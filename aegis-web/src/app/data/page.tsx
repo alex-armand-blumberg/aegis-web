@@ -31,7 +31,7 @@ export default function DataPage() {
     <div className="data-page min-h-screen text-[#e2e8f0]">
       <MarketingNav />
 
-      <main className="data-page-main relative z-10 pt-24 pb-16">
+      <main className="data-page-main relative z-10 pt-8 pb-16">
         <section>
           <div className="section">
             <SectionHeader

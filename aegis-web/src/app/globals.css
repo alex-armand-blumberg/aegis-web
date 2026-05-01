@@ -24,6 +24,8 @@
   --duration-base: 220ms;
   --duration-slow: 380ms;
   --card: var(--surface-2);
+  /* Fixed marketing header — spacer + sticky offsets (see .marketing-nav-spacer) */
+  --marketing-nav-height: 72px;
 }
 
 @theme inline {
@@ -559,6 +561,9 @@ nav {
 .nav-links a:hover {
   color: white;
 }
+.nav-links a.is-active {
+  color: #fff;
+}
 .nav-cta {
   background: var(--red) !important;
   color: white !important;
@@ -583,7 +588,8 @@ nav {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 120px 24px 80px;
+  /* Spacer below fixed nav supplies ~72px; keep total offset similar to previous 120px top pad */
+  padding: 48px 24px 80px;
   position: relative;
 }
 #hero::before {
@@ -1053,8 +1059,18 @@ footer {
   nav {
     padding: 16px 20px;
   }
-  .nav-links a:not(.nav-cta) {
+  .marketing-nav-shell[data-variant="home"] .nav-links a:not(.nav-cta) {
     display: none;
+  }
+  .marketing-nav-shell[data-variant="app"] .nav-links {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 8px;
+    column-gap: 14px;
+  }
+  .marketing-nav-shell[data-variant="app"] .nav-links a {
+    font-size: 11px;
+    letter-spacing: 0.1em;
   }
   .section {
     padding: 64px 20px;
@@ -2135,7 +2151,7 @@ footer {
   letter-spacing: 0.02em;
 }
 .map-page .map-main-compact {
-  padding-top: 1rem;
+  padding-top: 0;
   padding-bottom: 2rem;
   padding-left: 20px;
   padding-right: 20px;
@@ -3175,7 +3191,7 @@ footer {
   color: #fff;
 }
 .escalation-page .app-command-bar {
-  top: 48px;
+  top: var(--marketing-nav-height);
 }
 .app-command-bar {
   position: sticky;
@@ -3289,6 +3305,11 @@ footer {
 
 .marketing-nav-shell nav {
   position: fixed;
+}
+.marketing-nav-spacer {
+  height: var(--marketing-nav-height);
+  flex-shrink: 0;
+  pointer-events: none;
 }
 
 .ui-transparency-module {

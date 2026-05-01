@@ -37,7 +37,7 @@ export default function LimitationsPage() {
       />
       <MarketingNav />
 
-      <main className="limitations-page-main relative z-10 pt-24">
+      <main className="limitations-page-main relative z-10 pt-8">
         <section>
           <div className="section">
             <SectionHeader
