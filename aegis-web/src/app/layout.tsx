@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Bebas_Neue, Barlow, Barlow_Condensed, Oswald } from "next/font/google";
-import { DeployBanner } from "@/components/DeployBanner";
+import { FirstVisitWipModal } from "@/components/FirstVisitWipModal";
 import { EscalationPlotProvider } from "@/contexts/EscalationPlotContext";
 import { UiProviders } from "@/components/ui/UiProviders";
 import "./globals.css";
@@ -61,7 +61,7 @@ export default function RootLayout({
       className={`${bebasNeue.variable} ${barlow.variable} ${barlowCondensed.variable} ${oswald.variable} overflow-x-hidden bg-[#020611] text-[#e2e8f0]`}
     >
       <body className="min-h-screen bg-[#020611] text-[#e2e8f0] antialiased">
-        <DeployBanner deploymentDisplay={deploymentDisplay} />
+        <FirstVisitWipModal deploymentDisplay={deploymentDisplay} />
         <EscalationPlotProvider>
           <UiProviders>{children}</UiProviders>
         </EscalationPlotProvider>

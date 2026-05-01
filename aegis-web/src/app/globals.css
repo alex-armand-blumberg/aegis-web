@@ -58,45 +58,53 @@ body {
   position: relative;
 }
 
-.global-deploy-banner {
+/* First-visit WIP notice (see FirstVisitWipModal.tsx) */
+.wip-first-visit-backdrop {
   position: fixed;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 9999;
-  display: inline-flex;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(96, 165, 250, 0.35);
-  background: rgba(2, 8, 20, 0.86);
-  color: rgba(226, 232, 240, 0.9);
-  font-size: 11px;
-  letter-spacing: 0.03em;
-  backdrop-filter: blur(4px);
-  pointer-events: none;
-  opacity: 1;
-  transition: opacity 0.32s ease-out;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 6, 17, 0.82);
+  backdrop-filter: blur(6px);
 }
-
-.global-deploy-banner.global-deploy-banner--exiting {
-  opacity: 0;
+.wip-first-visit-dialog {
+  max-width: 420px;
+  width: 100%;
+  padding: 28px 28px 24px;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .global-deploy-banner {
-    transition: none;
-  }
+.wip-first-visit-title {
+  font-family: var(--font-bebas), "Bebas Neue", sans-serif;
+  font-size: 26px;
+  letter-spacing: 0.08em;
+  color: #fff;
+  margin: 0 0 14px;
 }
-
-.global-deploy-banner strong {
+.wip-first-visit-body {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(226, 232, 240, 0.82);
+}
+.wip-first-visit-meta {
+  margin: 0 0 22px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: rgba(148, 163, 184, 0.95);
+}
+.wip-first-visit-meta strong {
   color: #bfdbfe;
   font-weight: 600;
 }
-
-.global-deploy-commit {
-  color: rgba(148, 163, 184, 0.95);
+.wip-first-visit-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* Noise overlay */
