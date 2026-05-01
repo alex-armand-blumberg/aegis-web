@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -19,6 +18,7 @@ import { getOceanRegionByKey, pointInRegion } from "@/lib/regionGeometry";
 import IntelInfoPanel from "@/components/IntelInfoPanel";
 import RegionIntelPanel from "@/components/RegionIntelPanel";
 import { MarketingNav } from "@/components/ui/MarketingNav";
+import { SiteFooter } from "@/components/ui/SiteFooter";
 import {
   buildMapDataUrl,
   consumeReadyMapPrefetch,
@@ -1108,6 +1108,16 @@ export default function MapPage() {
     setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
   };
 
+  const handlePointSelect = useCallback((point: IntelPoint) => {
+    setSelectedRegion(null);
+    setSelectedPoint(point);
+  }, []);
+
+  const clearMapSelections = useCallback(() => {
+    setSelectedPoint(null);
+    setSelectedRegion(null);
+  }, []);
+
   const regionPanelData: RegionIntelResponse | null = useMemo(() => {
     if (regionIntel) return regionIntel;
     if (!selectedRegion) return null;
@@ -1295,7 +1305,8 @@ export default function MapPage() {
                 recenterRef={recenterRef}
                 onReady={() => setMapReady(true)}
                 onError={(m) => setError(m)}
-                onPointSelect={setSelectedPoint}
+                onPointSelect={handlePointSelect}
+                onPickingEmpty={clearMapSelections}
                 onCountrySelect={(country) => {
                   setSelectedPoint(null);
                   setSelectedRegion({
@@ -1321,7 +1332,8 @@ export default function MapPage() {
                 recenterRef={recenterRef}
                 onReady={() => setMapReady(true)}
                 onError={(m) => setError(m)}
-                onPointSelect={setSelectedPoint}
+                onPointSelect={handlePointSelect}
+                onGlobeBackgroundClick={clearMapSelections}
                 autoRotate={autoRotate}
               />
             )}
@@ -1470,14 +1482,7 @@ export default function MapPage() {
         </div>
       </main>
 
-      <footer>
-        <div className="footer-logo">AEGIS</div>
-        <div className="footer-links">
-          <Link href="/escalation">App</Link>
-          <Link href="/map">Map</Link>
-        </div>
-        <div className="footer-copy">&copy; 2026 Alexander Armand-Blumberg · AEGIS</div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

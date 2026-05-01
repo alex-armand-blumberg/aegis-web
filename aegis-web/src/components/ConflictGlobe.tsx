@@ -87,6 +87,8 @@ type ConflictGlobeProps = {
   onReady?: () => void;
   onError?: (message: string) => void;
   onPointSelect?: (point: IntelPoint) => void;
+  /** Globe background click (not a data point). */
+  onGlobeBackgroundClick?: () => void;
   autoRotate?: boolean;
 };
 
@@ -104,6 +106,7 @@ export default function ConflictGlobe({
   onReady,
   onError,
   onPointSelect,
+  onGlobeBackgroundClick,
   autoRotate = false,
 }: ConflictGlobeProps) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
@@ -219,6 +222,7 @@ export default function ConflictGlobe({
         }}
         onGlobeClick={() => {
           setShowWipNotice(true);
+          onGlobeBackgroundClick?.();
         }}
         onGlobeReady={() => {
           globeRef.current?.pointOfView(DEFAULT_POV, 0);

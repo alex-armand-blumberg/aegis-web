@@ -3525,6 +3525,9 @@ footer {
 }
 
 .site-footer-enhanced {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   padding: 48px 24px 32px;
   border-top: 1px solid var(--border-subtle);
   background: linear-gradient(180deg, transparent, rgba(8, 18, 45, 0.35));

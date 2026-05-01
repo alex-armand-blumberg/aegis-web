@@ -29,6 +29,8 @@ export type ConflictMapProps = {
   onReady?: () => void;
   onError?: (message: string) => void;
   onPointSelect?: (point: IntelPoint) => void;
+  /** When the user clicks the map but no deck layer returns a pick (e.g. empty ocean). */
+  onPickingEmpty?: () => void;
   onCountrySelect?: (country: string) => void;
   onRegionSelect?: (selection: RegionSelection) => void;
 };
@@ -156,6 +158,7 @@ export default function ConflictMap({
   onReady,
   onError,
   onPointSelect,
+  onPickingEmpty,
   onCountrySelect,
   onRegionSelect,
 }: ConflictMapProps) {
@@ -489,6 +492,9 @@ export default function ConflictMap({
         })
       }
       getCursor={({ isHovering }) => (isHovering ? "pointer" : "grab")}
+      onClick={(info) => {
+        if (!info.picked) onPickingEmpty?.();
+      }}
     >
       <Map
         mapLib={maplibregl}
