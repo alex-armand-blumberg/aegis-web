@@ -40,9 +40,13 @@ Copy `.env.example` to `.env.local` and set:
 - `GDELT_CLOUD_API_KEY` — optional; enables GDELT Cloud real-time conflict events and story clusters.
 - `RELIEFWEB_APPNAME` — optional; enables ReliefWeb humanitarian report signals. ReliefWeb requires a pre-approved appname.
 - `ESCALATION_ENABLE_GDACS` — optional toggle for GDACS disaster-stress alerts (defaults to enabled).
-- `EVENT_REGISTRY_API_KEY` or `NEWS_API` — optional; enables Event Registry / NewsAPI.ai event clusters according to your plan terms.
+- (No paid news key required) Google News RSS conflict signals are enabled by default in the map and escalation adapters.
+- `ENABLE_CHEAP_NEWS_PROVIDER` — optional (`false` by default). Enables an experimental low-cost provider adapter only when it adds unique signals beyond RSS.
+- `CHEAP_NEWS_PROVIDER` — optional provider slug (currently supports `currents`).
+- `CURRENTS_API_KEY` — optional key for the cheap-provider adapter.
+- `CHEAP_NEWS_MIN_UNIQUE_SIGNALS` — optional quality gate (default `15` unique signals above RSS baseline) before the cheap provider is accepted.
 
-**Escalation Index V2:** The API now keeps ACLED as the verified historical base and adds env-gated real-time signals from GDELT Cloud, ReliefWeb, GDACS, and optional paid news-event APIs. Every source adapter returns attribution, terms, freshness, and status metadata in the `/api/escalation` response. If a source is not configured or fails, the index degrades gracefully to the remaining sources.
+**Escalation Index V2:** The API now keeps ACLED as the verified historical base and adds real-time signals from GDELT Cloud, ReliefWeb, GDACS, and Google News RSS. Every source adapter returns attribution, terms, freshness, and status metadata in the `/api/escalation` response. If a source is not configured or fails, the index degrades gracefully to the remaining sources.
 
 **ACLED (full-history data):** If `ACLED_EMAIL` and `ACLED_PASSWORD` are set, the escalation index uses ACLED’s authenticated API for data from 2018 through `ESCALATION_ACLED_LAG_DAYS` before today. If missing, the app falls back to the public ArcGIS layer (limited history).
 

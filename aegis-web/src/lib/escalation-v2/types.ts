@@ -8,7 +8,8 @@ export type EscalationSourceId =
   | "gdelt_cloud"
   | "reliefweb"
   | "gdacs"
-  | "event_registry";
+  | "google_news_rss"
+  | "cheap_news_provider";
 
 export type EscalationSignalType =
   | "battle"

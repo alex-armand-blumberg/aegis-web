@@ -383,7 +383,7 @@ export async function GET(req: NextRequest) {
     gdelt: Boolean(process.env.GDELT_CLOUD_API_KEY?.trim()),
     reliefweb: Boolean(process.env.RELIEFWEB_APPNAME?.trim()),
     gdacs: (process.env.ESCALATION_ENABLE_GDACS ?? "true").toLowerCase() !== "false",
-    eventRegistry: Boolean(process.env.EVENT_REGISTRY_API_KEY?.trim() ?? process.env.NEWS_API?.trim()),
+    googleNewsRss: true,
   });
 
   if (instantMode) {

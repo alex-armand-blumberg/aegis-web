@@ -1259,29 +1259,6 @@ User question: ${q}`;
                   }
                 />
               ) : null}
-              {data.sources?.length ? (
-                <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
-                  <div className="mb-3 font-semibold text-white">Source freshness and terms</div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {data.sources.map((source) => (
-                      <div key={source.id} className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="font-medium text-white">{source.label}</span>
-                          <span className="text-xs uppercase tracking-[0.18em] text-slate-400">
-                            {source.status ?? (source.enabled ? "enabled" : "skipped")}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-xs text-slate-400">{source.attribution}</p>
-                        <p className="mt-2 text-xs text-slate-500">{source.termsNote}</p>
-                        {source.lastFetchedAt ? (
-                          <p className="mt-2 text-xs text-slate-500">Last fetched {source.lastFetchedAt.slice(0, 19)} UTC</p>
-                        ) : null}
-                        {source.error ? <p className="mt-2 text-xs text-amber-300">{source.error}</p> : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
                 </ChartFrame>
               </div>
             </section>

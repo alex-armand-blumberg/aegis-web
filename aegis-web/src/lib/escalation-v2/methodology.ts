@@ -45,7 +45,8 @@ const SOURCE_LABELS: Record<string, string> = {
   gdelt_cloud: "GDELT Cloud",
   reliefweb: "ReliefWeb",
   gdacs: "GDACS",
-  event_registry: "Event Registry / NewsAPI.ai",
+  google_news_rss: "Google News RSS",
+  cheap_news_provider: "Cheap news provider (value-gated)",
 };
 
 function monthKey(date: Date | string): string {

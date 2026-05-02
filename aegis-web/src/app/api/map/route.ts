@@ -4038,170 +4038,13 @@ async function fetchGdeltConflictEvents(rangeHours: number): Promise<{
   };
 }
 
-type EventRegistryArticle = {
-  uri?: string;
-  title?: string;
-  body?: string;
-  url?: string;
-  image?: string;
-  imageUrl?: string;
-  thumbImage?: string;
-  date?: string;
-  time?: string;
-  source?: {
-    title?: string;
-    uri?: string;
-  };
-  location?: {
-    country?: string;
-    city?: string;
-    type?: string;
-    label?: string;
-  };
-  concepts?: Array<{
-    label?: {
-      eng?: string;
-    };
-    type?: string;
-  }>;
-};
-
-function parseEventRegistryArticles(payload: unknown): EventRegistryArticle[] {
-  if (!payload || typeof payload !== "object") return [];
-  const root = payload as Record<string, unknown>;
-  const candidates = [
-    root.articles,
-    (root.articles as Record<string, unknown> | undefined)?.results,
-    root.results,
-  ];
-  for (const c of candidates) {
-    if (Array.isArray(c)) return c as EventRegistryArticle[];
-    if (c && typeof c === "object") {
-      const maybe = (c as Record<string, unknown>).results;
-      if (Array.isArray(maybe)) return maybe as EventRegistryArticle[];
-    }
-  }
-  return [];
-}
-
-function parseEventRegistryTimestamp(a: EventRegistryArticle): number {
-  const raw = `${a.date || ""} ${a.time || ""}`.trim();
-  const ts = raw ? Date.parse(raw) : Number.NaN;
-  if (Number.isFinite(ts)) return ts;
-  return Date.now();
-}
-
-async function fetchEventRegistryNews(rangeHours: number): Promise<{
+async function fetchGoogleNewsRssConflictEvents(rangeHours: number): Promise<{
   points: IntelPoint[];
   health: ProviderHealth;
 }> {
-  const apiKey = process.env.NEWS_API?.trim();
   const started = Date.now();
-  if (!apiKey) {
-    return {
-      points: [],
-      health: {
-        provider: "Event Registry",
-        ok: false,
-        updatedAt: new Date().toISOString(),
-        message: "No NEWS_API configured",
-      },
-    };
-  }
-
-  const now = new Date();
-  const from = new Date(now.getTime() - rangeHours * 3600_000);
-  const keywordSeeds = [
-    "missile strike OR projectile hit OR drone strike OR artillery strike",
-    "battle OR clashes OR skirmish OR raid OR incursion OR cross-border shelling",
-    "warship OR naval battle OR anti-ship missile OR carrier strike group OR maritime attack",
-    "(missile OR strike OR drone OR bombardment OR shelling OR artillery OR raid OR interception OR naval battle OR special operation) AND (Ukraine OR Russia OR Israel OR Iran OR Gaza OR Sudan OR Yemen OR Syria OR Lebanon OR Myanmar OR Iraq OR Somalia)",
-  ];
-
-  let parsed: EventRegistryArticle[] = [];
-  let lastMessage = "No Event Registry articles returned";
-  for (const keyword of keywordSeeds) {
-    for (let page = 1; page <= 6; page += 1) {
-      const body: Record<string, unknown> = {
-        apiKey,
-        keyword,
-        dateStart: from.toISOString().slice(0, 10),
-        dateEnd: now.toISOString().slice(0, 10),
-        lang: "eng",
-        articleCount: 100,
-        sortBy: "date",
-        resultType: "articles",
-        isDuplicateFilter: "skipDuplicates",
-        articlesPage: page,
-        fromArticle: (page - 1) * 100,
-      };
-      const res = await timedJsonFetch<unknown>(
-        "https://eventregistry.org/api/v1/article/getArticles",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify(body),
-        },
-        14000
-      );
-      if (!res.ok) {
-        lastMessage = res.message ?? lastMessage;
-        break;
-      }
-      if (res.data && typeof res.data === "object") {
-        const errObj = (res.data as Record<string, unknown>).error;
-        if (errObj && typeof errObj === "object") {
-          const maybeMsg = String(
-            (errObj as Record<string, unknown>).message ??
-              (errObj as Record<string, unknown>).description ??
-              ""
-          ).trim();
-          if (maybeMsg) lastMessage = maybeMsg;
-        }
-      }
-      const pageArticles = parseEventRegistryArticles(res.data);
-      if (!pageArticles.length) break;
-      parsed.push(...pageArticles);
-      if (parsed.length >= 2600) break;
-    }
-    if (parsed.length >= 2600) break;
-  }
-
-  if (parsed.length > 0) {
-    const byKey = new Map<string, EventRegistryArticle>();
-    for (const a of parsed) {
-      const ts = parseEventRegistryTimestamp(a);
-      const key = `${a.uri ?? ""}|${String(a.title ?? "").trim().toLowerCase()}|${new Date(ts).toISOString().slice(0, 13)}`;
-      if (!byKey.has(key)) byKey.set(key, a);
-    }
-    parsed = Array.from(byKey.values());
-  }
-
-  if (!parsed.length) {
-    const fallbackUrls = [
-      `https://eventregistry.org/api/v1/article/getArticles?apiKey=${encodeURIComponent(
-        apiKey
-      )}&keyword=${encodeURIComponent(
-        "missile strike OR drone strike OR artillery OR naval battle"
-      )}&lang=eng&articleCount=100&sortBy=date&resultType=articles`,
-      `https://newsapi.ai/api/v1/article/getArticles?apiKey=${encodeURIComponent(
-        apiKey
-      )}&keyword=${encodeURIComponent(
-        "missile strike OR drone strike OR artillery OR naval battle"
-      )}&lang=eng&articleCount=100&sortBy=date&resultType=articles`,
-    ];
-    for (const fallbackUrl of fallbackUrls) {
-      const fallbackRes = await timedJsonFetch<unknown>(fallbackUrl, undefined, 12000);
-      if (fallbackRes.ok) {
-        parsed = parseEventRegistryArticles(fallbackRes.data);
-        if (parsed.length > 0) break;
-      } else if (fallbackRes.message) {
-        lastMessage = fallbackRes.message;
-      }
-    }
-  }
-
-  if (!parsed.length) {
+  const lastMessage = "No Google News RSS conflict stories returned";
+  {
     const rssQuery = encodeURIComponent(
       "(missile OR strike OR drone OR bombardment OR artillery OR raid) (Ukraine OR Iran OR Israel OR Sudan OR Yemen OR Syria OR Lebanon)"
     );
@@ -4235,17 +4078,17 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
         const bbox = COUNTRY_BBOX[country];
         if (!bbox && !city) continue;
         points.push({
-          id: `eventreg-rss-${country}-${ts}-${points.length + 1}`,
+          id: `googlerss-${country}-${ts}-${points.length + 1}`,
           layer: "news",
           title: city
             ? `${descriptor.shortLabel} near ${city.city}`
             : `${descriptor.shortLabel} in ${country}`,
-          subtitle: "Event Registry fallback via Google News RSS",
+          subtitle: "Google News RSS conflict feed",
           lat: city?.lat ?? bbox![4],
           lon: city?.lon ?? bbox![5],
           country: normalizeCountryLabel(country),
           severity: city ? "high" : "medium",
-          source: "Event Registry fallback",
+          source: "Google News RSS",
           timestamp: new Date(ts).toISOString(),
           magnitude: city ? 7 : 4,
           confidence: city ? 0.62 : 0.52,
@@ -4263,11 +4106,11 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
         return {
           points: points.slice(0, 600),
           health: {
-            provider: "Event Registry",
+            provider: "Google News RSS",
             ok: true,
             updatedAt: new Date().toISOString(),
             latencyMs: Date.now() - started,
-            message: `Primary API empty; fallback mapped ${points.length} event-level reports`,
+            message: `Mapped ${points.length} event-level reports from Google News RSS`,
           },
         };
       }
@@ -4280,86 +4123,15 @@ async function fetchEventRegistryNews(rangeHours: number): Promise<{
     return {
       points: [],
       health: {
-        provider: "Event Registry",
+        provider: "Google News RSS",
         ok: false,
         updatedAt: new Date().toISOString(),
         latencyMs: Date.now() - started,
-        message: `Event Registry empty; fallback active (${lastMessage})`,
+        message: `Google News RSS empty (${lastMessage})`,
       },
     };
   }
 
-  const cutoff = Date.now() - rangeHours * 3600_000;
-  const points: IntelPoint[] = [];
-  for (const a of parsed) {
-    const title = String(a.title ?? "").trim();
-    const body = String(a.body ?? "").trim();
-    const fullText = `${title} ${body}`;
-    if (!title) continue;
-    const descriptor = classifyEvent(fullText);
-    if (!descriptor.isConflict) continue;
-
-    const sourceTitle = String(a.source?.title ?? "").trim();
-    const sourceUri = String(a.source?.uri ?? "").trim();
-    const trustedProbe = `${sourceTitle} ${sourceUri} ${title}`;
-    const trusted = isTrustedPublisher(trustedProbe);
-
-    const ts = parseEventRegistryTimestamp(a);
-    if (!Number.isFinite(ts) || ts < cutoff) continue;
-
-    const conceptCity = a.concepts?.find((c) => c.type === "loc" && c.label?.eng)?.label?.eng;
-    const locHint = String(a.location?.label ?? conceptCity ?? "").trim();
-    const city = extractMentionedCity(`${fullText} ${locHint}`);
-    const country =
-      city?.country ||
-      String(a.location?.country ?? "").trim() ||
-      extractMentionedCountry(`${fullText} ${locHint}`);
-    if (!country) continue;
-    const bbox = COUNTRY_BBOX[country];
-    if (!bbox && !city) continue;
-    const lat = city?.lat ?? bbox![4];
-    const lon = city?.lon ?? bbox![5];
-    const sourceUrl = String(a.url ?? "").trim();
-    const imageUrl = String(a.imageUrl ?? a.image ?? a.thumbImage ?? "").trim();
-
-    points.push({
-      id: `eventreg-${a.uri ?? `${country}-${ts}-${points.length + 1}`}`,
-      layer: "news",
-      title: city
-        ? `${descriptor.shortLabel} near ${city.city}`
-        : `${descriptor.shortLabel} in ${country}`,
-      subtitle: sourceTitle || sourceUri || "Event Registry source",
-      lat,
-      lon,
-      country: normalizeCountryLabel(country),
-      severity: city ? "high" : "medium",
-      source: "Event Registry",
-      timestamp: new Date(ts).toISOString(),
-      magnitude: city ? 8 : 5,
-      confidence: trusted ? (city ? 0.78 : 0.7) : city ? 0.64 : 0.56,
-      imageUrl: imageUrl || undefined,
-      metadata: {
-        event_type: descriptor.eventType,
-        short_label: descriptor.shortLabel,
-        publisher: sourceTitle || sourceUri || "unknown",
-        source_url: sourceUrl || null,
-        image_url: imageUrl || null,
-        original_headline: title,
-        trusted_source: trusted,
-      },
-    });
-  }
-
-  return {
-    points: dedupeEventPoints(points, 1).slice(0, 3000),
-    health: {
-      provider: "Event Registry",
-      ok: points.length > 0,
-      updatedAt: new Date().toISOString(),
-      latencyMs: Date.now() - started,
-      message: `Mapped ${points.length} event-level trusted-source reports (multi-page)`,
-    },
-  };
 }
 
 function buildActiveConflictCountries(
@@ -4610,7 +4382,6 @@ async function fetchRapidConflictSignals(rangeHours: number): Promise<{
         if (locations.length === 0) continue;
         geoMapped += locations.length;
         const publisher = extractPublisherFromTitle(title);
-        const trusted = isTrustedPublisher(publisher);
         for (let locIdx = 0; locIdx < locations.length; locIdx += 1) {
           const loc = locations[locIdx];
           const clusterKey = `${loc.country}|${loc.city ?? "country"}|${descriptor.eventType}|${normalizeHeadlineForCluster(title)}|${locIdx}`;
@@ -6603,7 +6374,7 @@ export async function GET(request: Request) {
         wantsConflicts ? fetchUcdpConflicts(rangeHours) : Promise.resolve(makeSkippedAdapter("UCDP geocoded", "Skipped (layer filter) [reason=layer_gated]")),
         wantsLiveSignals ? fetchLiveuamapEvents(rangeHours) : Promise.resolve(makeSkippedAdapter("LiveUAMap", "Skipped (layer filter) [reason=layer_gated]")),
         wantsLiveSignals ? fetchGdeltConflictEvents(rangeHours) : Promise.resolve(makeSkippedAdapter("GDELT conflict feed", "Skipped (layer filter) [reason=layer_gated]")),
-        wantsLiveSignals ? fetchEventRegistryNews(rangeHours) : Promise.resolve(makeSkippedAdapter("Event Registry conflict events", "Skipped (layer filter) [reason=layer_gated]")),
+        wantsLiveSignals ? fetchGoogleNewsRssConflictEvents(rangeHours) : Promise.resolve(makeSkippedAdapter("Google News RSS conflict events", "Skipped (layer filter) [reason=layer_gated]")),
         wantsLiveSignals ? fetchRapidConflictSignals(rangeHours) : Promise.resolve(makeSkippedAdapter("Rapid conflict feed", "Skipped (layer filter) [reason=layer_gated]")),
         wantsFlights ? fetchOpenSkyFlights() : Promise.resolve(makeSkippedAdapter("OpenSky flights", "Skipped (layer filter) [reason=layer_gated]")),
         wantsVessels ? fetchUsniFleetTrackerSignals(rangeHours) : Promise.resolve(makeSkippedAdapter("USNI fleet tracker", "Skipped (layer filter) [reason=layer_gated]")),
@@ -6653,10 +6424,10 @@ export async function GET(request: Request) {
         })
         .map((p, idx) => ({
           ...p,
-          id: `eventreg-strike-${p.id}-${idx}`,
+          id: `googlerss-strike-${p.id}-${idx}`,
           layer: "liveStrikes" as const,
           severity: p.severity === "critical" ? "critical" : "high",
-          source: "Event Registry",
+          source: "Google News RSS",
         }));
 
       const liveStrikes = [

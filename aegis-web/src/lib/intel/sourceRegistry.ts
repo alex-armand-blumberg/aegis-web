@@ -36,7 +36,7 @@ export const MAP_SOURCE_FAMILY_MATRIX: Array<{
   {
     family: "conflict-events",
     layers: ["conflicts", "liveStrikes", "news"],
-    sources: ["UCDP", "ACLED", "GDELT", "LiveUAMap", "Event Registry", "Google News RSS"],
+    sources: ["UCDP", "ACLED", "GDELT", "LiveUAMap", "Google News RSS"],
   },
   {
     family: "news-network",

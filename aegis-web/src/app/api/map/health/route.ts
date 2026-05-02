@@ -22,10 +22,14 @@ export async function GET() {
       process.env.ACLED_EMAIL?.trim() && process.env.ACLED_PASSWORD?.trim()
     ),
     ucdpToken: Boolean(process.env.UCDP_ACCESS_TOKEN?.trim()),
-    newsApi: Boolean(process.env.NEWS_API?.trim()),
+    googleNewsRss: true,
     gdeltCloud: Boolean(process.env.GDELT_CLOUD_API_KEY?.trim()),
     reliefWeb: Boolean(process.env.RELIEFWEB_APPNAME?.trim()),
     gdacs: (process.env.ESCALATION_ENABLE_GDACS ?? "true").toLowerCase() !== "false",
+    cheapNewsProviderEnabled:
+      (process.env.ENABLE_CHEAP_NEWS_PROVIDER ?? "false").toLowerCase() === "true",
+    cheapNewsProvider: (process.env.CHEAP_NEWS_PROVIDER ?? "currents").toLowerCase(),
+    cheapNewsProviderKey: Boolean(process.env.CURRENTS_API_KEY?.trim()),
     escalationV2: (process.env.ENABLE_ESCALATION_V2 ?? "true").toLowerCase() !== "false",
     relayDigest: Boolean(process.env.INTEL_RELAY_DIGEST_URL?.trim()),
     redisRest:
@@ -62,10 +66,11 @@ export async function GET() {
         "Basic OpenSky auth still works in some environments but can be blocked/rate-limited on cloud IP ranges.",
         "AIS layer requires AISSTREAM_SNAPSHOT_URL relay endpoint.",
         "UCDP adds fresher event-level conflict signals when UCDP_ACCESS_TOKEN is set.",
-        "Event Registry feed is enabled when NEWS_API is set.",
+        "Google News RSS conflict feed is enabled by default for paid-key-free news fallback coverage.",
+        "Optional cheap-news provider adapter is disabled by default and only accepted when it clears a unique-signal value gate over RSS.",
         "Escalation V2 is enabled by default; disable with ENABLE_ESCALATION_V2=false.",
         "Escalation ACLED recency is controlled by ESCALATION_ACLED_LAG_DAYS; default is 365 for researcher-tier safety.",
-        "GDELT Cloud, ReliefWeb, GDACS, and Event Registry source adapters are env-gated and include attribution/terms metadata in /api/escalation responses.",
+        "GDELT Cloud, ReliefWeb, GDACS, and Google News RSS source adapters are env-gated or free and include attribution/terms metadata in /api/escalation responses.",
         "Relay-seeded feed ingestion is enabled when INTEL_RELAY_DIGEST_URL is set.",
         "Redis tiered cache is enabled when UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set.",
         cacheRuntime.strictMode

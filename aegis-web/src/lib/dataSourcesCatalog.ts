@@ -13,7 +13,7 @@ export const DATA_SOURCES_MAP_RUNTIME: string[] = [
   "UCDP",
   "GDELT",
   "LiveUAMap",
-  "Event Registry",
+  "Google News RSS conflict search",
   "Regional rapid monitors (RSS/API)",
   "Google News RSS (site-scoped)",
   "Optional relay seed digest",

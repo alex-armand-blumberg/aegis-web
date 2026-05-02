@@ -23,6 +23,20 @@ function parseDate(value: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function extractXmlTag(block: string, tag: string): string | null {
+  const cdata = block.match(new RegExp(`<${tag}>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*<\\/${tag}>`, "i"));
+  if (cdata?.[1]) return cdata[1].trim();
+  const plain = block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  if (!plain?.[1]) return null;
+  return plain[1]
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
@@ -339,56 +353,76 @@ export async function fetchGdacsSignals(ctx: SourceFetchContext): Promise<Source
   }
 }
 
-export async function fetchEventRegistrySignals(
+export async function fetchGoogleNewsRssSignals(
   ctx: SourceFetchContext
 ): Promise<SourceFetchResult> {
-  const apiKey = process.env.EVENT_REGISTRY_API_KEY?.trim() ?? process.env.NEWS_API?.trim();
   const metadata: SourceMetadata = {
-    id: "event_registry",
-    label: "Event Registry / NewsAPI.ai",
-    enabled: Boolean(apiKey),
-    configured: Boolean(apiKey),
-    apiUrl: "https://eventregistry.org/api/v1/event/getEvents",
-    authEnvVars: ["EVENT_REGISTRY_API_KEY", "NEWS_API"],
+    id: "google_news_rss",
+    label: "Google News RSS",
+    enabled: true,
+    configured: true,
+    apiUrl: "https://news.google.com/rss/search",
+    authEnvVars: [],
     refreshIntervalHours: 3,
-    attribution: "Event Registry / NewsAPI.ai",
-    termsNote: "Use according to the configured account plan; free tiers may be non-commercial and recent-data limited.",
-    storagePolicy: "Store event metadata and links; avoid storing full article text unless plan terms allow it.",
-    reliability: 0.68,
-    freshnessHalfLifeHours: 96,
+    attribution: "Google News RSS (aggregated open headlines)",
+    termsNote: "Use only metadata/headlines and source links. Respect original publisher terms.",
+    storagePolicy: "Store headline metadata and URLs; do not store full article bodies.",
+    reliability: 0.55,
+    freshnessHalfLifeHours: 72,
   };
-  if (!apiKey) return emptyResult(metadata, "EVENT_REGISTRY_API_KEY or NEWS_API is not set.");
   try {
-    const params = new URLSearchParams({
-      resultType: "events",
-      keyword: "conflict OR military OR protest OR violence OR escalation",
-      locationUri: ctx.country,
-      dateStart: isoDate(ctx.startDate),
-      dateEnd: isoDate(ctx.endDate),
-      eventsSortBy: "date",
-      eventsCount: "100",
-      apiKey,
-    });
-    const json = await fetchJson<{ events?: { results?: Array<Record<string, unknown>> } }>(
-      `${metadata.apiUrl}?${params.toString()}`
+    const q = encodeURIComponent(
+      `(missile OR strike OR drone OR bombardment OR artillery OR clashes OR protest OR riot) ${ctx.country}`
     );
-    const signals = (json.events?.results ?? []).flatMap((event): EscalationSignal[] => {
-      const date = parseDate(event.eventDate ?? event.date);
+    const rssUrl = `${metadata.apiUrl}?q=${q}&hl=en-US&gl=US&ceid=US:en`;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+    let xml = "";
+    try {
+      const res = await fetch(rssUrl, {
+        cache: "no-store",
+        signal: ctl.signal,
+        headers: { "User-Agent": "AEGIS-escalation-index-v2" },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      xml = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+    const itemBlocks = xml.split("<item>").slice(1, 220);
+    const startMs = ctx.startDate.getTime();
+    const endMs = ctx.endDate.getTime();
+    const signals = itemBlocks.flatMap((block): EscalationSignal[] => {
+      const title = extractXmlTag(block, "title");
+      if (!title) return [];
+      const description = extractXmlTag(block, "description") ?? "";
+      const link = extractXmlTag(block, "link") ?? undefined;
+      const pubDate = extractXmlTag(block, "pubDate");
+      const date = parseDate(pubDate ?? undefined);
       if (!date) return [];
-      const articleCounts = (event.articleCounts ?? {}) as Record<string, unknown>;
-      const value = Math.max(1, Number(articleCounts.total ?? event.totalArticleCount ?? 1) || 1);
+      if (date.getTime() < startMs || date.getTime() > endMs) return [];
+      const text = `${title} ${description}`.toLowerCase();
+      const conflictBoost =
+        (text.includes("missile") ? 1 : 0) +
+        (text.includes("drone") ? 1 : 0) +
+        (text.includes("artillery") ? 1 : 0) +
+        (text.includes("battle") ? 1 : 0) +
+        (text.includes("clash") ? 1 : 0) +
+        (text.includes("riot") ? 0.6 : 0) +
+        (text.includes("protest") ? 0.4 : 0);
+      const value = Math.max(1, conflictBoost);
       return [
         {
           country: ctx.country,
           date: date.toISOString(),
           source: metadata.id,
           signalType: "story_cluster",
-          value: Math.log1p(value),
+          value,
           confidence: metadata.reliability,
           freshnessHours: hoursBetween(date, ctx.now),
-          evidenceUrl: typeof event.uri === "string" ? event.uri : undefined,
-          title: typeof event.title === "string" ? event.title : undefined,
-          sourceEventId: typeof event.uri === "string" ? event.uri : undefined,
+          evidenceUrl: link,
+          title,
+          sourceEventId: link,
           termsNote: metadata.termsNote,
         },
       ];
@@ -399,13 +433,106 @@ export async function fetchEventRegistrySignals(
   }
 }
 
+export async function fetchCheapNewsProviderSignals(
+  ctx: SourceFetchContext,
+  baselineRssSignals: EscalationSignal[]
+): Promise<SourceFetchResult> {
+  const enabled =
+    (process.env.ENABLE_CHEAP_NEWS_PROVIDER ?? "false").toLowerCase() === "true";
+  const provider = (process.env.CHEAP_NEWS_PROVIDER ?? "currents").toLowerCase();
+  const apiKey = process.env.CURRENTS_API_KEY?.trim();
+  const minUniqueSignals = Math.max(
+    1,
+    Number(process.env.CHEAP_NEWS_MIN_UNIQUE_SIGNALS ?? 15) || 15
+  );
+  const metadata: SourceMetadata = {
+    id: "cheap_news_provider",
+    label: `Cheap news provider (${provider})`,
+    enabled,
+    configured: Boolean(apiKey),
+    apiUrl: "https://api.currentsapi.services/v1/search",
+    authEnvVars: ["ENABLE_CHEAP_NEWS_PROVIDER", "CHEAP_NEWS_PROVIDER", "CURRENTS_API_KEY"],
+    refreshIntervalHours: 2,
+    attribution: "Optional low-cost provider adapter",
+    termsNote:
+      "Disabled by default. Enable only if it adds unique timely signals beyond Google News RSS and existing sources.",
+    storagePolicy: "Store metadata, URLs, and timestamps only.",
+    reliability: 0.5,
+    freshnessHalfLifeHours: 72,
+  };
+  if (!enabled) {
+    return emptyResult(
+      metadata,
+      "ENABLE_CHEAP_NEWS_PROVIDER is false; optional adapter disabled by default."
+    );
+  }
+  if (!apiKey) {
+    return emptyResult(
+      metadata,
+      "CURRENTS_API_KEY is not set while ENABLE_CHEAP_NEWS_PROVIDER=true."
+    );
+  }
+  try {
+    const params = new URLSearchParams({
+      keywords: `conflict OR strike OR battle OR protest ${ctx.country}`,
+      language: "en",
+      start_date: isoDate(ctx.startDate),
+      end_date: isoDate(ctx.endDate),
+      apiKey,
+      limit: "100",
+    });
+    const json = await fetchJson<{ news?: Array<Record<string, unknown>> }>(
+      `${metadata.apiUrl}?${params.toString()}`
+    );
+    const rssUrls = new Set(
+      baselineRssSignals.map((signal) => (signal.evidenceUrl ?? "").trim()).filter(Boolean)
+    );
+    const uniqueSignals: EscalationSignal[] = [];
+    for (const item of json.news ?? []) {
+      const url = typeof item.url === "string" ? item.url.trim() : "";
+      if (!url || rssUrls.has(url)) continue;
+      const title = typeof item.title === "string" ? item.title : undefined;
+      const date = parseDate(item.published ?? item.published_date ?? item.date);
+      if (!date) continue;
+      uniqueSignals.push({
+        country: ctx.country,
+        date: date.toISOString(),
+        source: metadata.id,
+        signalType: "story_cluster",
+        value: 1.2,
+        confidence: metadata.reliability,
+        freshnessHours: hoursBetween(date, ctx.now),
+        evidenceUrl: url,
+        title,
+        sourceEventId: url,
+        termsNote: metadata.termsNote,
+      });
+    }
+    if (uniqueSignals.length < minUniqueSignals) {
+      return {
+        metadata: withStatus(
+          metadata,
+          "skipped",
+          `Value gate failed: only ${uniqueSignals.length} unique signals (< ${minUniqueSignals}) beyond RSS baseline.`
+        ),
+        signals: [],
+      };
+    }
+    return { metadata: withStatus(metadata, "ok"), signals: uniqueSignals };
+  } catch (err) {
+    return errorResult(metadata, err);
+  }
+}
+
 export async function fetchRealtimeEscalationSignals(
   ctx: SourceFetchContext
 ): Promise<SourceFetchResult[]> {
-  return Promise.all([
+  const rssResult = await fetchGoogleNewsRssSignals(ctx);
+  const otherResults = await Promise.all([
     fetchGdeltCloudSignals(ctx),
     fetchReliefWebSignals(ctx),
     fetchGdacsSignals(ctx),
-    fetchEventRegistrySignals(ctx),
+    fetchCheapNewsProviderSignals(ctx, rssResult.signals),
   ]);
+  return [...otherResults, rssResult];
 }
