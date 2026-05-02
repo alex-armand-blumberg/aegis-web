@@ -16,6 +16,26 @@ export type SavedEscalationData = {
   escalationFlaggedMonths: string[];
   preEscalationMonths: string[];
   dataSource?: string;
+  methodologyVersion?: string;
+  modelVersion?: string;
+  sources?: Array<{
+    id: string;
+    label: string;
+    status?: "ok" | "skipped" | "error";
+    enabled: boolean;
+    configured: boolean;
+    attribution: string;
+    termsNote: string;
+    lastFetchedAt?: string;
+  }>;
+  dataFreshness?: {
+    newestSignalAt?: string;
+    oldestSignalAt?: string;
+    medianFreshnessHours?: number;
+  };
+  risk_30d?: number;
+  risk_60d?: number;
+  risk_90d?: number;
 };
 
 export type SavedPlotState = {

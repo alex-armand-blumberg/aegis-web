@@ -23,6 +23,10 @@ export async function GET() {
     ),
     ucdpToken: Boolean(process.env.UCDP_ACCESS_TOKEN?.trim()),
     newsApi: Boolean(process.env.NEWS_API?.trim()),
+    gdeltCloud: Boolean(process.env.GDELT_CLOUD_API_KEY?.trim()),
+    reliefWeb: Boolean(process.env.RELIEFWEB_APPNAME?.trim()),
+    gdacs: (process.env.ESCALATION_ENABLE_GDACS ?? "true").toLowerCase() !== "false",
+    escalationV2: (process.env.ENABLE_ESCALATION_V2 ?? "true").toLowerCase() !== "false",
     relayDigest: Boolean(process.env.INTEL_RELAY_DIGEST_URL?.trim()),
     redisRest:
       Boolean(process.env.UPSTASH_REDIS_REST_URL?.trim()) &&
@@ -59,6 +63,9 @@ export async function GET() {
         "AIS layer requires AISSTREAM_SNAPSHOT_URL relay endpoint.",
         "UCDP adds fresher event-level conflict signals when UCDP_ACCESS_TOKEN is set.",
         "Event Registry feed is enabled when NEWS_API is set.",
+        "Escalation V2 is enabled by default; disable with ENABLE_ESCALATION_V2=false.",
+        "Escalation ACLED recency is controlled by ESCALATION_ACLED_LAG_DAYS; default is 365 for researcher-tier safety.",
+        "GDELT Cloud, ReliefWeb, GDACS, and Event Registry source adapters are env-gated and include attribution/terms metadata in /api/escalation responses.",
         "Relay-seeded feed ingestion is enabled when INTEL_RELAY_DIGEST_URL is set.",
         "Redis tiered cache is enabled when UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set.",
         cacheRuntime.strictMode

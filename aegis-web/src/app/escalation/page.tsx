@@ -27,7 +27,6 @@ function DiamondDot(props: { cx?: number; cy?: number; payload?: { preEscalation
 }
 import {
   Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -55,6 +54,27 @@ type EscalationApiResponse = {
   dataSource?: string;
   datasetVersion?: string;
   generatedAt?: string;
+  methodologyVersion?: string;
+  modelVersion?: string;
+  sources?: Array<{
+    id: string;
+    label: string;
+    enabled: boolean;
+    configured: boolean;
+    status?: "ok" | "skipped" | "error";
+    attribution: string;
+    termsNote: string;
+    lastFetchedAt?: string;
+    error?: string;
+  }>;
+  dataFreshness?: {
+    newestSignalAt?: string;
+    oldestSignalAt?: string;
+    medianFreshnessHours?: number;
+  };
+  risk_30d?: number;
+  risk_60d?: number;
+  risk_90d?: number;
   cache?: {
     status: "fresh" | "stale" | "miss";
     ageMs: number;
@@ -84,6 +104,13 @@ type EscalationStreamMessage = {
   dataSource?: string;
   datasetVersion?: string;
   generatedAt?: string;
+  methodologyVersion?: string;
+  modelVersion?: string;
+  sources?: EscalationApiResponse["sources"];
+  dataFreshness?: EscalationApiResponse["dataFreshness"];
+  risk_30d?: number;
+  risk_60d?: number;
+  risk_90d?: number;
   cache?: EscalationApiResponse["cache"];
   perf?: EscalationApiResponse["perf"];
   warming?: boolean;
@@ -123,6 +150,13 @@ function messageToEscalationResponse(msg: EscalationStreamMessage): EscalationAp
     dataSource: msg.dataSource,
     datasetVersion: msg.datasetVersion,
     generatedAt: msg.generatedAt,
+    methodologyVersion: msg.methodologyVersion,
+    modelVersion: msg.modelVersion,
+    sources: msg.sources,
+    dataFreshness: msg.dataFreshness,
+    risk_30d: msg.risk_30d,
+    risk_60d: msg.risk_60d,
+    risk_90d: msg.risk_90d,
     cache: msg.cache,
     perf: msg.perf,
   };
@@ -180,9 +214,7 @@ async function readEscalationApiResponse(
 }
 
 function getDefaultEndDate(): string {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() - 1);
-  return d.toISOString().slice(0, 10);
+  return new Date().toISOString().slice(0, 10);
 }
 
 /** Format "YYYY-MM" or "YYYY-MM-DD" as "Jun 2025" for plot labels. */
@@ -208,6 +240,11 @@ type ChartPayloadPoint = {
   index_smoothed?: number;
   escalation_index?: number;
   monthKey?: string;
+  risk?: EscalationPoint["risk"];
+  components?: EscalationPoint["components"];
+  sources?: EscalationPoint["sources"];
+  evidence?: EscalationPoint["evidence"];
+  dataFreshness?: EscalationPoint["dataFreshness"];
 };
 
 function EscalationChartTooltip({
@@ -246,6 +283,13 @@ function EscalationChartTooltip({
       <div className="escalation-tooltip-index">
         Escalation Index: <strong>{point.index_smoothed != null ? point.index_smoothed.toFixed(1) : "—"}</strong>
       </div>
+      {point.risk && (
+        <div className="escalation-tooltip-rows">
+          <div className="escalation-tooltip-row"><span>30d risk</span><strong>{point.risk.risk_30d.toFixed(1)}%</strong></div>
+          <div className="escalation-tooltip-row"><span>60d risk</span><strong>{point.risk.risk_60d.toFixed(1)}%</strong></div>
+          <div className="escalation-tooltip-row"><span>90d risk</span><strong>{point.risk.risk_90d.toFixed(1)}%</strong></div>
+        </div>
+      )}
       <div className="escalation-tooltip-rows">
         <div className="escalation-tooltip-row"><span>Battles</span><strong>{(point.battles ?? 0).toLocaleString()}</strong></div>
         <div className="escalation-tooltip-row"><span>Explosions</span><strong>{(point.explosions_remote_violence ?? 0).toLocaleString()}</strong></div>
@@ -255,6 +299,28 @@ function EscalationChartTooltip({
         <div className="escalation-tooltip-row"><span>Civ. violence</span><strong>{(point.violence_against_civilians ?? 0).toLocaleString()}</strong></div>
         <div className="escalation-tooltip-row"><span>Fatalities</span><strong>{(point.fatalities ?? 0).toLocaleString()}</strong></div>
       </div>
+      {point.sources?.length ? (
+        <div className="escalation-tooltip-rows">
+          <div className="escalation-tooltip-row">
+            <span>Top sources</span>
+            <strong>{point.sources.slice(0, 3).map((source) => source.label).join(", ")}</strong>
+          </div>
+          {point.dataFreshness?.newestSignalAt ? (
+            <div className="escalation-tooltip-row">
+              <span>Newest signal</span>
+              <strong>{point.dataFreshness.newestSignalAt.slice(0, 10)}</strong>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {point.evidence?.length ? (
+        <div className="escalation-tooltip-rows">
+          <div className="escalation-tooltip-row">
+            <span>Evidence</span>
+            <strong>{point.evidence[0]?.title ?? point.evidence[0]?.label}</strong>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -540,16 +606,35 @@ export default function EscalationPage() {
 
   const componentBreakdownData = useMemo(() => {
     if (!data?.series?.length) return [];
-    return data.series.map((d) => ({
-      dateLabel: formatMonthLabel(d.event_month.slice(0, 7)),
-      "Conflict intensity (30%)": d.c_intensity * 30,
-      "Event accel. (20%)": d.c_accel * 20,
-      "Explosions (20%)": d.c_explosion * 20,
-      "Strategic devs (15%)": d.c_strategic * 15,
-      "Unrest (10%)": d.c_unrest * 10,
-      "Civilian targeting (5%)": d.c_civilian * 5,
-    }));
+    return data.series.map((d) => {
+      if (d.components) {
+        return {
+          dateLabel: formatMonthLabel(d.event_month.slice(0, 7)),
+          "Kinetic violence (26%)": d.components.kineticViolence * 26,
+          "Acceleration (18%)": d.components.acceleration * 18,
+          "Civilian targeting (14%)": d.components.civilianTargeting * 14,
+          "Information surge (12%)": d.components.informationSurge * 12,
+          "Humanitarian stress (12%)": d.components.humanitarianStress * 12,
+          "Actor mobilization (10%)": d.components.actorMobilization * 10,
+          "Diffusion (8%)": d.components.diffusion * 8,
+        };
+      }
+      return {
+        dateLabel: formatMonthLabel(d.event_month.slice(0, 7)),
+        "Conflict intensity (30%)": d.c_intensity * 30,
+        "Event accel. (20%)": d.c_accel * 20,
+        "Explosions (20%)": d.c_explosion * 20,
+        "Strategic devs (15%)": d.c_strategic * 15,
+        "Unrest (10%)": d.c_unrest * 10,
+        "Civilian targeting (5%)": d.c_civilian * 5,
+      };
+    });
   }, [data]);
+
+  const componentBreakdownKeys = useMemo(
+    () => Object.keys(componentBreakdownData[0] ?? {}).filter((key) => key !== "dateLabel"),
+    [componentBreakdownData]
+  );
 
   const drillOptions = useMemo(() => {
     if (!data?.series?.length) return [];
@@ -652,18 +737,30 @@ Please summarize and explain this escalation index plot in 3–5 sentences. Tie 
     const first = s[0];
     const last = s[s.length - 1];
     const peak = [...s].sort((a, b) => (b.index_smoothed ?? 0) - (a.index_smoothed ?? 0))[0];
+    const sourceSummary = data.sources?.length
+      ? data.sources
+          .map((source) => `${source.label}:${source.status ?? "unknown"}`)
+          .join(", ")
+      : "legacy ACLED-only response";
+    const latestEvidence = last?.evidence?.slice(0, 5).map((item) => item.title ?? item.url ?? item.label).join("; ");
     return `Country: ${country.trim()}
 Date range: ${startDate} to ${endDate}
 Escalation threshold: ${data.escalationThreshold}
+Methodology: ${data.methodologyVersion ?? "legacy"}
+Model: ${data.modelVersion ?? "legacy trend model"}
+Sources: ${sourceSummary}
+Data freshness: newest=${data.dataFreshness?.newestSignalAt ?? "unknown"}, median freshness hours=${data.dataFreshness?.medianFreshnessHours ?? "unknown"}
 
 Plot summary:
 - ${data.series.length} months of data
 - First month (${first?.event_month?.slice(0, 7)}): smoothed index ${first?.index_smoothed?.toFixed(1) ?? "—"}
 - Last month (${last?.event_month?.slice(0, 7)}): smoothed index ${last?.index_smoothed?.toFixed(1) ?? "—"}
+- Latest 30/60/90-day risk: ${data.risk_30d?.toFixed(1) ?? "—"}% / ${data.risk_60d?.toFixed(1) ?? "—"}% / ${data.risk_90d?.toFixed(1) ?? "—"}%
 - Peak month: ${peak?.event_month?.slice(0, 7)} with index ${peak?.index_smoothed?.toFixed(1) ?? "—"}
 - Escalation-flagged months: ${data.escalationFlaggedMonths.join(", ")}
 - Pre-escalation warning months: ${data.preEscalationMonths.join(", ")}
 - Total recorded fatalities: ${data.series.reduce((sum, r) => sum + (r.fatalities ?? 0), 0).toLocaleString()}
+- Latest evidence: ${latestEvidence || "none returned"}
 ${data.forecast?.length ? `- 3-month forecast: next projected index ${data.forecast[0]?.projected_index?.toFixed(1) ?? "—"}` : ""}`;
   }
 
@@ -900,7 +997,7 @@ User question: ${q}`;
                 />
               </label>
               <label className="control-field control-field-dates">
-                <span className="control-label">To (default: 1 year ago)</span>
+                <span className="control-label">To (default: today)</span>
                 <input
                   type="date"
                   value={endDate}
@@ -978,6 +1075,11 @@ User question: ${q}`;
                         Data source: {data.dataSource}
                         {data.series.length > 0 ? ` · ${data.series.length} country-month rows` : ""}
                         {data.datasetVersion ? ` · dataset ${data.datasetVersion}` : ""}
+                        {data.methodologyVersion ? ` · ${data.methodologyVersion}` : ""}
+                        {data.risk_30d != null ? ` · latest 30d risk ${data.risk_30d.toFixed(1)}%` : ""}
+                        {data.dataFreshness?.newestSignalAt
+                          ? ` · newest signal ${data.dataFreshness.newestSignalAt.slice(0, 10)}`
+                          : ""}
                         {data.cache
                           ? ` · cache ${data.cache.status} (${Math.round(data.cache.ageMs / 1000)}s old)`
                           : ""}
@@ -990,12 +1092,14 @@ User question: ${q}`;
                       className="mt-4"
                       items={[
                         <>
-                          Monthly country aggregates through the selected end date (typically one year before today),
-                          from researcher-tier historical conflict data.
+                          V2 combines verified historical conflict data with configured real-time source adapters;
+                          unavailable sources are skipped and listed in the source metadata.
                         </>,
-                        <>Forecast band reflects a simple trend projection from the last six smoothed points — not a
-                          calibrated prediction model.</>,
-                        <>Alert threshold and smoothing window materially change which months appear flagged.</>,
+                        <>
+                          Latest risk probabilities are calibrated from transparent feature families and should be
+                          treated as early warning estimates, not verified outcomes.
+                        </>,
+                        <>Alert threshold, smoothing window, source availability, and cache age materially change what appears flagged.</>,
                       ]}
                     />
                   }
@@ -1155,6 +1259,29 @@ User question: ${q}`;
                   }
                 />
               ) : null}
+              {data.sources?.length ? (
+                <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
+                  <div className="mb-3 font-semibold text-white">Source freshness and terms</div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {data.sources.map((source) => (
+                      <div key={source.id} className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-medium text-white">{source.label}</span>
+                          <span className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                            {source.status ?? (source.enabled ? "enabled" : "skipped")}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-400">{source.attribution}</p>
+                        <p className="mt-2 text-xs text-slate-500">{source.termsNote}</p>
+                        {source.lastFetchedAt ? (
+                          <p className="mt-2 text-xs text-slate-500">Last fetched {source.lastFetchedAt.slice(0, 19)} UTC</p>
+                        ) : null}
+                        {source.error ? <p className="mt-2 text-xs text-amber-300">{source.error}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
                 </ChartFrame>
               </div>
             </section>
@@ -1183,12 +1310,17 @@ User question: ${q}`;
                       <Tooltip
                         contentStyle={{ backgroundColor: "#020617", borderColor: "#1e293b", borderRadius: 8, fontSize: 11 }}
                       />
-                      <Bar dataKey="Conflict intensity (30%)" stackId="a" fill="#ef4444" isAnimationActive animationDuration={1000} animationEasing="ease-out" />
-                      <Bar dataKey="Event accel. (20%)" stackId="a" fill="#f59e0b" isAnimationActive animationDuration={1000} animationEasing="ease-out" />
-                      <Bar dataKey="Explosions (20%)" stackId="a" fill="#f97316" isAnimationActive animationDuration={1000} animationEasing="ease-out" />
-                      <Bar dataKey="Strategic devs (15%)" stackId="a" fill="#60a5fa" isAnimationActive animationDuration={1000} animationEasing="ease-out" />
-                      <Bar dataKey="Unrest (10%)" stackId="a" fill="#a78bfa" isAnimationActive animationDuration={1000} animationEasing="ease-out" />
-                      <Bar dataKey="Civilian targeting (5%)" stackId="a" fill="#fde047" isAnimationActive animationDuration={1000} animationEasing="ease-out" />
+                      {componentBreakdownKeys.map((key, idx) => (
+                        <Bar
+                          key={key}
+                          dataKey={key}
+                          stackId="a"
+                          fill={["#ef4444", "#f59e0b", "#fde047", "#60a5fa", "#22c55e", "#a78bfa", "#f97316"][idx % 7]}
+                          isAnimationActive
+                          animationDuration={1000}
+                          animationEasing="ease-out"
+                        />
+                      ))}
                       <Legend formatter={(v) => <span className="text-[#e2e8f0] text-xs">{v}</span>} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -1208,10 +1340,10 @@ User question: ${q}`;
                   showDivider
                 />
                 <ul className="escalation-signals-list">
-                  <li><span className="font-semibold text-[#60a5fa]">Blue line</span> — smoothed escalation index (0–100) combining six conflict indicators.</li>
+                  <li><span className="font-semibold text-[#60a5fa]">Blue line</span> — smoothed escalation index (0–100) combining verified conflict history, real-time source signals, country-relative anomaly, and global severity.</li>
                   <li><span className="font-semibold text-[#ef4444]">Red dots</span> — months where the index exceeded your alert threshold.</li>
                   <li><span className="font-semibold text-[#f97316]">Orange diamonds</span> — pre-escalation warnings when leading indicators spike before the index crosses the threshold.</li>
-                  <li><span className="font-semibold text-[#a78bfa]">Purple dotted line</span> — 3-month forecast from the last 6 months.</li>
+                  <li><span className="font-semibold text-[#a78bfa]">Purple dotted line</span> — 3-month forecast from the last 6 months; latest 30/60/90-day risks appear in tooltips when v2 data is available.</li>
                 </ul>
               </div>
             </section>

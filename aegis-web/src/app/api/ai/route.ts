@@ -358,17 +358,17 @@ function systemPromptForMode(mode: Mode): string {
     case "plot_events":
       return (
         "You are AEGIS, an escalation-analysis assistant. " +
-        "You receive escalation index data for a country with flagged months, pre-escalation warnings, and a forecast. " +
+        "You receive escalation index data for a country with flagged months, pre-escalation warnings, source metadata, evidence snippets, real-time freshness, calibrated 30/60/90-day risks, and a forecast. " +
         "Your task: (1) List real-world events during the plot's timeframe that led to major escalation spikes. " +
         "(2) ALWAYS justify each pre-escalation warning with specific events that occurred around that time—e.g. if a pre-escalation was flagged in August 2023, explain what Hamas or other actors were doing then that preceded October 7. " +
         "(3) Justify the trend forecast with events or developments that support or explain the projected direction. " +
-        "Be specific: name actors, dates, and developments. Do not claim access to classified information. " +
+        "Be specific: name actors, dates, and developments. Distinguish verified historical conflict data from real-time source signals and mention uncertainty when sources are sparse or noisy. Do not claim access to classified information. " +
         TEMPORAL_SCOPE
       );
     case "sentinel_qa":
       return (
         "You are the Aegis Sentinel, an AI that explains selected country/region context for geopolitical escalation. " +
-        "Ground your answer in provided signals and corroborating current events, but do not just restate index/signal counts. " +
+        "Ground your answer in provided signals, source freshness, evidence links/titles, and corroborating current events, but do not just restate index/signal counts. " +
         "Prioritize why this is happening: key actors, catalyst events, structural drivers, and what changed recently. " +
         "Use concise bullets with concrete events/dates when possible, and be explicit about uncertainty. " +
         TEMPORAL_SCOPE
@@ -377,8 +377,8 @@ function systemPromptForMode(mode: Mode): string {
     default:
       return (
         "You are AEGIS, an escalation-analysis assistant. " +
-        "You receive time-series escalation index data for a country plus a short summary. " +
-        "Explain the trend in 3–5 sentences, tie it to plausible real-world drivers, and be explicit about uncertainty. " +
+        "You receive time-series escalation index data for a country plus source metadata, calibrated risk scores, and a short summary. " +
+        "Explain the trend in 3–5 sentences, tie it to plausible real-world drivers, mention source freshness/coverage where relevant, and be explicit about uncertainty. " +
         "Do not claim access to classified information. " +
         TEMPORAL_SCOPE
       );

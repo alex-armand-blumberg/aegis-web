@@ -29,6 +29,48 @@ export type EscalationPoint = {
   c_strategic: number;
   c_unrest: number;
   c_civilian: number;
+  methodologyVersion?: string;
+  modelVersion?: string;
+  risk?: {
+    risk_30d: number;
+    risk_60d: number;
+    risk_90d: number;
+    band_low: number;
+    band_high: number;
+  };
+  components?: {
+    kineticViolence: number;
+    civilianTargeting: number;
+    acceleration: number;
+    diffusion: number;
+    actorMobilization: number;
+    informationSurge: number;
+    humanitarianStress: number;
+    countryAnomaly: number;
+    globalSeverity: number;
+  };
+  sources?: Array<{
+    source: string;
+    label: string;
+    signalCount: number;
+    weightedSignal: number;
+    lastEventDate?: string;
+  }>;
+  evidence?: Array<{
+    month: string;
+    source: string;
+    label: string;
+    url?: string;
+    title?: string;
+    signalType: string;
+    value: number;
+    confidence: number;
+  }>;
+  dataFreshness?: {
+    newestSignalAt?: string;
+    oldestSignalAt?: string;
+    medianFreshnessHours?: number;
+  };
 };
 
 export type EscalationForecastPoint = {

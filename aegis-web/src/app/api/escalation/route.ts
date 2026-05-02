@@ -12,6 +12,12 @@ import {
   hasAcledEnv,
 } from "@/lib/acled-api";
 import {
+  acledSourceMetadata,
+  buildEscalationV2Series,
+  fetchRealtimeEscalationSignals,
+  type SourceMetadata,
+} from "@/lib/escalation-v2";
+import {
   buildCacheKey,
   readTieredCache,
   writeTieredCache,
@@ -69,6 +75,14 @@ type CanonicalEscalationArtifact = {
   generatedAt: string;
   dataSource: string;
   canonicalSeries: EscalationPoint[];
+  methodologyVersion?: string;
+  modelVersion?: string;
+  sources?: SourceMetadata[];
+  dataFreshness?: {
+    newestSignalAt?: string;
+    oldestSignalAt?: string;
+    medianFreshnessHours?: number;
+  };
 };
 
 type EscalationResponsePayload = {
@@ -80,13 +94,29 @@ type EscalationResponsePayload = {
   dataSource: string;
   datasetVersion: string;
   generatedAt: string;
+  methodologyVersion?: string;
+  modelVersion?: string;
+  sources?: SourceMetadata[];
+  dataFreshness?: CanonicalEscalationArtifact["dataFreshness"];
+  risk_30d?: number;
+  risk_60d?: number;
+  risk_90d?: number;
 };
 
-/** Default end date for ACLED research tier: one year ago. */
-function getDefaultEndDate(): Date {
+function isEscalationV2Enabled(): boolean {
+  return (process.env.ENABLE_ESCALATION_V2 ?? "true").toLowerCase() !== "false";
+}
+
+/** Default end date for verified ACLED data; researcher-tier deployments usually lag by one year. */
+function getAcledEndDate(): Date {
   const d = new Date();
-  d.setFullYear(d.getFullYear() - 1);
+  const lagDays = Math.max(0, Number(process.env.ESCALATION_ACLED_LAG_DAYS ?? 365) || 0);
+  d.setDate(d.getDate() - lagDays);
   return d;
+}
+
+function getRequestDefaultEndDate(v2Enabled: boolean): Date {
+  return v2Enabled ? new Date() : getAcledEndDate();
 }
 
 function parseDateParam(value: string | null, fallback: Date): Date {
@@ -188,7 +218,9 @@ function progressPct(fetched: number, total: number | null): number {
 async function buildCanonicalArtifact(
   country: string,
   datasetVersion: string,
-  defaultEnd: Date,
+  acledEnd: Date,
+  realtimeEnd: Date,
+  v2Enabled: boolean,
   onProgress?: (fetched: number, total: number | null) => void
 ): Promise<CanonicalEscalationArtifact> {
   let allRows: AcledMonthlyRecord[];
@@ -196,7 +228,7 @@ async function buildCanonicalArtifact(
   if (hasAcledEnv()) {
     try {
       const fullStart = new Date("2018-01-01");
-      allRows = await fetchAcledCountryMonthly(country, fullStart, defaultEnd, onProgress);
+      allRows = await fetchAcledCountryMonthly(country, fullStart, acledEnd, onProgress);
       dataSource = "ACLED API (full history)";
     } catch (acledErr) {
       console.error("ACLED API failed, falling back to ArcGIS", acledErr);
@@ -210,6 +242,56 @@ async function buildCanonicalArtifact(
       onProgress?.(fetched, null);
     });
     dataSource = "ACLED ArcGIS";
+  }
+
+  if (v2Enabled) {
+    const realtimeLookbackDays = Math.max(
+      7,
+      Number(process.env.ESCALATION_REALTIME_LOOKBACK_DAYS ?? 180) || 180
+    );
+    const realtimeStart = new Date(realtimeEnd);
+    realtimeStart.setDate(realtimeStart.getDate() - realtimeLookbackDays);
+    const realtimeResults = await fetchRealtimeEscalationSignals({
+      country,
+      startDate: realtimeStart,
+      endDate: realtimeEnd,
+      now: new Date(),
+    });
+    const sourceMetadata: SourceMetadata[] = [
+      {
+        ...acledSourceMetadata(hasAcledEnv()),
+        enabled: true,
+        configured: hasAcledEnv(),
+        status: "ok",
+        lastFetchedAt: new Date().toISOString(),
+      },
+      ...realtimeResults.map((result) => result.metadata),
+    ];
+    const v2Result = buildEscalationV2Series({
+      country,
+      acledRows: allRows,
+      externalSignals: realtimeResults.flatMap((result) => result.signals),
+      sourceMetadata,
+      now: new Date(),
+    });
+    if (!v2Result.series.length) {
+      throw new Error(`No data available for country '${country}'.`);
+    }
+    const liveSourceLabels = sourceMetadata
+      .filter((source) => source.status === "ok" && source.id !== "acled")
+      .map((source) => source.label);
+    return {
+      datasetVersion,
+      generatedAt: new Date().toISOString(),
+      dataSource: liveSourceLabels.length
+        ? `Escalation V2 (${["ACLED", ...liveSourceLabels].join(", ")})`
+        : "Escalation V2 (ACLED + configured real-time sources)",
+      canonicalSeries: v2Result.series,
+      methodologyVersion: v2Result.methodologyVersion,
+      modelVersion: v2Result.modelVersion,
+      sources: v2Result.sourceMetadata,
+      dataFreshness: v2Result.dataFreshness,
+    };
   }
 
   const result = computeEscalationIndex(allRows, country, 1, 45);
@@ -253,6 +335,13 @@ function buildResponsePayload(
     dataSource: artifact.dataSource,
     datasetVersion: artifact.datasetVersion,
     generatedAt: artifact.generatedAt,
+    methodologyVersion: artifact.methodologyVersion,
+    modelVersion: artifact.modelVersion,
+    sources: artifact.sources,
+    dataFreshness: artifact.dataFreshness,
+    risk_30d: filteredSeries[filteredSeries.length - 1]?.risk?.risk_30d,
+    risk_60d: filteredSeries[filteredSeries.length - 1]?.risk?.risk_60d,
+    risk_90d: filteredSeries[filteredSeries.length - 1]?.risk?.risk_90d,
   };
 }
 
@@ -266,6 +355,7 @@ export async function GET(req: NextRequest) {
   const endParam = searchParams.get("end");
   const refreshMode = (searchParams.get("refresh") ?? "").toLowerCase();
   const instantMode = ["1", "true", "yes"].includes((searchParams.get("instant") ?? "").toLowerCase());
+  const v2Enabled = isEscalationV2Enabled();
 
   if (!country) {
     return NextResponse.json(
@@ -276,16 +366,24 @@ export async function GET(req: NextRequest) {
 
   const smoothWindow = smoothParam ? Number(smoothParam) || 3 : 3;
   const threshold = thresholdParam ? Math.max(0, Math.min(100, Number(thresholdParam) || 45)) : 45;
-  const defaultEnd = getDefaultEndDate();
+  const acledEnd = getAcledEndDate();
+  const defaultEnd = getRequestDefaultEndDate(v2Enabled);
   const startDate = parseDateParam(startParam, new Date("2018-01-01"));
   let endDate = parseDateParam(endParam, defaultEnd);
   if (endDate > defaultEnd) endDate = defaultEnd;
 
   const datasetVersion = datasetMonthVersion(defaultEnd);
-  const canonicalCacheKey = buildCacheKey("escalation:canonical:v1", {
+  const canonicalCacheKey = buildCacheKey(v2Enabled ? "escalation:canonical:v2" : "escalation:canonical:v1", {
     country: country.toLowerCase(),
     datasetVersion,
     hasAcledEnv: hasAcledEnv(),
+    v2Enabled,
+    acledLagDays: Math.max(0, Number(process.env.ESCALATION_ACLED_LAG_DAYS ?? 365) || 0),
+    realtimeLookbackDays: Math.max(7, Number(process.env.ESCALATION_REALTIME_LOOKBACK_DAYS ?? 180) || 180),
+    gdelt: Boolean(process.env.GDELT_CLOUD_API_KEY?.trim()),
+    reliefweb: Boolean(process.env.RELIEFWEB_APPNAME?.trim()),
+    gdacs: (process.env.ESCALATION_ENABLE_GDACS ?? "true").toLowerCase() !== "false",
+    eventRegistry: Boolean(process.env.EVENT_REGISTRY_API_KEY?.trim() ?? process.env.NEWS_API?.trim()),
   });
 
   if (instantMode) {
@@ -326,7 +424,7 @@ export async function GET(req: NextRequest) {
     if (ESCALATION_FAST_CACHE_ENABLED) {
       after(async () => {
         try {
-          const nextValue = await buildCanonicalArtifact(country, datasetVersion, defaultEnd);
+          const nextValue = await buildCanonicalArtifact(country, datasetVersion, acledEnd, defaultEnd, v2Enabled);
           await writeTieredCache(
             canonicalCacheKey,
             nextValue,
@@ -404,7 +502,7 @@ export async function GET(req: NextRequest) {
           !refreshWhenStale
         ) {
           cached = { value: cachedRead.envelope.value, meta: cachedRead.meta };
-          void buildCanonicalArtifact(country, datasetVersion, defaultEnd)
+          void buildCanonicalArtifact(country, datasetVersion, acledEnd, defaultEnd, v2Enabled)
             .then((nextValue) =>
               writeTieredCache(
                 canonicalCacheKey,
@@ -416,7 +514,7 @@ export async function GET(req: NextRequest) {
             .catch(() => undefined);
         } else {
           try {
-            const value = await buildCanonicalArtifact(country, datasetVersion, defaultEnd, progress);
+            const value = await buildCanonicalArtifact(country, datasetVersion, acledEnd, defaultEnd, v2Enabled, progress);
             if (ESCALATION_FAST_CACHE_ENABLED) {
               await writeTieredCache(
                 canonicalCacheKey,

@@ -6,7 +6,7 @@ This is the Next.js implementation of **AEGIS — Advanced Early-Warning & Geost
 It exposes:
 
 - A Palantir-style landing page with video background.
-- An **Escalation Index** page backed by ACLED data and TypeScript index computation.
+- An **Escalation Index** page backed by ACLED plus optional real-time source adapters and TypeScript index computation.
 - An **Interactive Map** view using ACLED’s public ArcGIS layer.
 - AI analysis endpoints backed by Groq (Llama 3).
 
@@ -34,8 +34,17 @@ Copy `.env.example` to `.env.local` and set:
 - `WARM_ESCALATION_COUNTRIES` — comma-separated country list warmed by `/api/internal/warm`; set to `all` to batch through every country in the local autocomplete list.
 - `MAP_FAST_CACHE_STALE_MS` — optional map stale-cache window. Defaults to seven days so users get an immediate cached map while live feeds refresh.
 - `ESCALATION_FAST_CACHE_STALE_MS` — optional escalation stale-cache window. Defaults to thirty days for canonical ACLED country artifacts.
+- `ENABLE_ESCALATION_V2` — optional toggle for the multi-source transparent index (defaults to enabled).
+- `ESCALATION_ACLED_LAG_DAYS` — optional ACLED recency lag. Defaults to `365` for researcher-tier safety; set to `0` only if your ACLED plan permits current data.
+- `ESCALATION_REALTIME_LOOKBACK_DAYS` — optional lookback for real-time source adapters. Defaults to `180`.
+- `GDELT_CLOUD_API_KEY` — optional; enables GDELT Cloud real-time conflict events and story clusters.
+- `RELIEFWEB_APPNAME` — optional; enables ReliefWeb humanitarian report signals. ReliefWeb requires a pre-approved appname.
+- `ESCALATION_ENABLE_GDACS` — optional toggle for GDACS disaster-stress alerts (defaults to enabled).
+- `EVENT_REGISTRY_API_KEY` or `NEWS_API` — optional; enables Event Registry / NewsAPI.ai event clusters according to your plan terms.
 
-**ACLED (full-history data):** If `ACLED_EMAIL` and `ACLED_PASSWORD` are set, the escalation index uses ACLED’s authenticated API for data from 2018 up to one year ago. If missing, the app falls back to the public ArcGIS layer (limited history).
+**Escalation Index V2:** The API now keeps ACLED as the verified historical base and adds env-gated real-time signals from GDELT Cloud, ReliefWeb, GDACS, and optional paid news-event APIs. Every source adapter returns attribution, terms, freshness, and status metadata in the `/api/escalation` response. If a source is not configured or fails, the index degrades gracefully to the remaining sources.
+
+**ACLED (full-history data):** If `ACLED_EMAIL` and `ACLED_PASSWORD` are set, the escalation index uses ACLED’s authenticated API for data from 2018 through `ESCALATION_ACLED_LAG_DAYS` before today. If missing, the app falls back to the public ArcGIS layer (limited history).
 
 ### Strategic escalation source pack (free/open + free-key)
 
