@@ -32,6 +32,9 @@ export function AppRouteNav({ className = "", variant = "default" }: AppRouteNav
       <Link href="/map" className={linkCls("/map")} onClick={() => setMenuOpen(false)}>
         Map
       </Link>
+      <Link href="/impact" className={linkCls("/impact")} onClick={() => setMenuOpen(false)}>
+        Impact
+      </Link>
       <Link href="/limitations" className={linkCls("/limitations")} onClick={() => setMenuOpen(false)}>
         Limitations
       </Link>

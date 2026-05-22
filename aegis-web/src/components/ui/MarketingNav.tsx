@@ -64,6 +64,9 @@ export function MarketingNav({ onContactClick, extraLinks, className = "" }: Mar
               <Link href="/map" className={navActiveClass(pathname, "/map")}>
                 Map
               </Link>
+              <Link href="/impact" className={navActiveClass(pathname, "/impact")}>
+                Impact
+              </Link>
               <Link href="/escalation" className={navActiveClass(pathname, "/escalation")}>
                 Escalation
               </Link>

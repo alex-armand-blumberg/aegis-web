@@ -57,6 +57,7 @@ export function CommandPalette() {
 
     nav("/", "Home", "Marketing");
     nav("/map", "Interactive map", "Product");
+    nav("/impact", "Impact layer", "Product");
     nav("/escalation", "Escalation index", "Demo");
     nav("/limitations", "Limitations & methodology notes", "Trust");
 

@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-type Mode = "country_trend" | "map_insight" | "news_summary" | "plot_events" | "sentinel_qa";
+type Mode =
+  | "country_trend"
+  | "map_insight"
+  | "news_summary"
+  | "plot_events"
+  | "sentinel_qa"
+  | "asset_impact";
 
 const TEMPORAL_SCOPE =
   "Use your knowledge of real-world conflict events from 2018 through the present and earlier. " +
@@ -372,6 +378,22 @@ function systemPromptForMode(mode: Mode): string {
         "Prioritize why this is happening: key actors, catalyst events, structural drivers, and what changed recently. " +
         "Use concise bullets with concrete events/dates when possible, and be explicit about uncertainty. " +
         TEMPORAL_SCOPE
+      );
+    case "asset_impact":
+      return (
+        "You are AEGIS, an analyst assistant for source-grounded geopolitical exposure alerts. " +
+        "Use only the provided asset, exposure score, level, confidence, score breakdown, caps applied, uncertainty, watch-next items, and evidence items. " +
+        "Do not invent sources or facts. Do not claim classified access. " +
+        "Do not give evacuation, legal, security, or military orders. " +
+        "Do not describe the score as a probability or prediction. Do not recalculate, rescore, or contradict the provided exposure score, level, or confidence. " +
+        "Separate confirmed facts (directly grounded in the listed evidence) from inferred analyst context. " +
+        "Output exactly five sections in this order, each header on its own line and with concise content under it:\n" +
+        "1. Situation\n" +
+        "2. Why this asset is exposed\n" +
+        "3. Evidence\n" +
+        "4. Uncertainty\n" +
+        "5. What to watch next\n" +
+        "Keep a neutral analyst tone. Mention data limitations and uncertainty plainly."
       );
     case "country_trend":
     default:

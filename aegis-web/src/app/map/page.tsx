@@ -1250,7 +1250,7 @@ export default function MapPage() {
 
           <div className="map-world-gauge">
             <div className="map-world-gauge-header">
-              <span>World Stability Gauge</span>
+              <span title="Open-source signal pressure in the selected time window — not a probability of global war.">Open-Source Signal Pressure</span>
               <strong>{worldStateRisk.percent}% risk</strong>
             </div>
             <div className="map-world-gauge-track">
