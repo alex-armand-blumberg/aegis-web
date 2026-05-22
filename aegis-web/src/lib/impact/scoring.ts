@@ -5,6 +5,7 @@ import type {
   MapApiResponse,
   ProviderHealth,
 } from "@/lib/intel/types";
+import { countriesMatch } from "@/lib/countryDisplay";
 import { clusterSignals } from "./clustering";
 import { getDistanceKm } from "./distance";
 import { normalizeSignals } from "./normalizeSignals";
@@ -16,6 +17,11 @@ import {
   LOW_CONFIDENCE_CAP,
   MODEL_ONLY_CAP,
   NEWS_ONLY_CAP,
+  NEWS_ONLY_INDEPENDENT_SOURCES_75,
+  NEWS_ONLY_INDEPENDENT_SOURCES_80,
+  NEWS_ONLY_MIN_CLUSTERS_80,
+  NEWS_ONLY_RELAXED_CAP_75,
+  NEWS_ONLY_RELAXED_CAP_80,
   NEWS_ONLY_STRONG_FAMILY_THRESHOLD,
   OLDER_THAN_30D_CAP,
   OLDER_THAN_7D_CAP,
@@ -60,7 +66,7 @@ export function flattenMapPoints(data: MapApiResponse): IntelPoint[] {
 
 function countryMatches(asset: UserAsset, clusterCountry: string | undefined): boolean {
   if (!clusterCountry || !asset.country) return false;
-  return clusterCountry.trim().toLowerCase() === asset.country.trim().toLowerCase();
+  return countriesMatch(clusterCountry, asset.country);
 }
 
 type ClusterScoreParts = {
@@ -137,8 +143,7 @@ export function calculateCountryContextLift(
 }
 
 function countryMatchString(a: string | undefined, b: string | undefined): boolean {
-  if (!a || !b) return false;
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
+  return countriesMatch(a, b);
 }
 
 function scaleActiveCountry(c: ActiveConflictCountry): number {
@@ -174,9 +179,6 @@ function clusterAllowedAsEvidence(
   if (officeLike) {
     if (cluster.eventClass === "maritime_activity") return false;
     if (cluster.eventClass === "aviation_activity") return false;
-  }
-  if (cluster.eventClass === "model_risk_context") {
-    return false;
   }
   return true;
 }
@@ -267,8 +269,24 @@ export function applyCaps(
     const strong =
       families.length >= NEWS_ONLY_STRONG_FAMILY_THRESHOLD || hasOfficialOrStructured;
     if (!strong) {
-      score = Math.min(score, NEWS_ONLY_CAP);
-      caps.push("News-only evidence without strong corroboration — capped at high.");
+      const uniqueSources = unique(
+        ctx.evidence.flatMap((e) =>
+          e.sources.map((s) => s.trim()).filter((s) => s.length > 0)
+        )
+      );
+      if (
+        uniqueSources.length >= NEWS_ONLY_INDEPENDENT_SOURCES_80 &&
+        evidenceCount >= NEWS_ONLY_MIN_CLUSTERS_80
+      ) {
+        score = Math.min(score, NEWS_ONLY_RELAXED_CAP_80);
+        caps.push("News-only evidence: capped at 80 despite broad independent reporting.");
+      } else if (uniqueSources.length >= NEWS_ONLY_INDEPENDENT_SOURCES_75) {
+        score = Math.min(score, NEWS_ONLY_RELAXED_CAP_75);
+        caps.push("News-only evidence: capped at 75 despite multiple independent publishers.");
+      } else {
+        score = Math.min(score, NEWS_ONLY_CAP);
+        caps.push("News-only evidence without strong corroboration — capped at high.");
+      }
     }
   }
 
@@ -492,7 +510,8 @@ function buildUncertainty(
   topParts: ClusterScoreParts[],
   caps: string[],
   cacheStale: boolean,
-  providerFailures: number
+  providerFailures: number,
+  failingProviders: string[]
 ): string {
   const reasons: string[] = [];
   const families = unique(evidence.flatMap((e) => e.sourceFamilies));
@@ -528,7 +547,18 @@ function buildUncertainty(
     reasons.push("Underlying map cache is stale; freshness of provider data is uncertain.");
   }
   if (providerFailures > 0) {
-    reasons.push(`${providerFailures} provider${providerFailures === 1 ? "" : "s"} reported failures — coverage may be incomplete.`);
+    const named = failingProviders.slice(0, 3);
+    const remaining = Math.max(0, failingProviders.length - named.length);
+    if (named.length > 0) {
+      const suffix = remaining > 0 ? `, and ${remaining} more` : "";
+      reasons.push(
+        `Provider coverage is degraded: ${named.join(", ")}${suffix} reported failures.`
+      );
+    } else {
+      reasons.push(
+        `${providerFailures} provider${providerFailures === 1 ? "" : "s"} reported failures — coverage may be incomplete.`
+      );
+    }
   }
   for (const c of caps) reasons.push(c);
   if (reasons.length === 0) {
@@ -623,6 +653,20 @@ function providerFailureCount(health: ProviderHealth[] | undefined): number {
   return health.filter((p) => p && p.ok === false).length;
 }
 
+function providerFailureNames(health: ProviderHealth[] | undefined): string[] {
+  if (!Array.isArray(health)) return [];
+  const names: string[] = [];
+  for (const provider of health) {
+    if (!provider || provider.ok !== false) continue;
+    const base = typeof provider.provider === "string" ? provider.provider.trim() : "";
+    const message = typeof provider.message === "string" ? provider.message.trim() : "";
+    const label = base || message;
+    if (!label) continue;
+    if (!names.includes(label)) names.push(label);
+  }
+  return names;
+}
+
 function isCacheStale(mapData: MapApiResponse): boolean {
   const cache = mapData.cache;
   if (!cache) return false;
@@ -649,6 +693,7 @@ export function buildExposureAlerts(args: BuildAlertsArgs): ExposureAlert[] {
   const clusters = clusterSignals(signals);
   const cacheStale = isCacheStale(mapData);
   const providerFailures = providerFailureCount(mapData.providerHealth);
+  const failingProviderNames = providerFailureNames(mapData.providerHealth);
 
   const generatedAt = new Date(now).toISOString();
   const alerts: ExposureAlert[] = [];
@@ -723,7 +768,14 @@ export function buildExposureAlerts(args: BuildAlertsArgs): ExposureAlert[] {
       headline: buildHeadline(asset, level),
       whyItMatters: buildWhyItMatters(asset, evidence),
       whatChanged: buildWhatChanged(evidence, topParts),
-      uncertainty: buildUncertainty(evidence, topParts, capsApplied, cacheStale, providerFailures),
+      uncertainty: buildUncertainty(
+        evidence,
+        topParts,
+        capsApplied,
+        cacheStale,
+        providerFailures,
+        failingProviderNames
+      ),
       watchNext: buildWatchNext(evidence),
       breakdown,
       evidence,

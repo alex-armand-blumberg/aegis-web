@@ -305,6 +305,11 @@ export function assetLayerRelevance(
 
 export const NEWS_ONLY_CAP = 65;
 export const NEWS_ONLY_STRONG_FAMILY_THRESHOLD = 3;
+export const NEWS_ONLY_RELAXED_CAP_75 = 75;
+export const NEWS_ONLY_RELAXED_CAP_80 = 80;
+export const NEWS_ONLY_INDEPENDENT_SOURCES_75 = 5;
+export const NEWS_ONLY_INDEPENDENT_SOURCES_80 = 8;
+export const NEWS_ONLY_MIN_CLUSTERS_80 = 3;
 export const SAME_COUNTRY_ONLY_CAP = 45;
 export const COUNTRY_OR_MODEL_ONLY_CAP = 39;
 export const MODEL_ONLY_CAP = 40;

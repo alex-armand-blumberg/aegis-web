@@ -522,7 +522,7 @@ export async function POST(req: NextRequest) {
     const hasWebSearchKey = Boolean(
       process.env.TAVILY_API_KEY?.trim() || process.env.SERPER_API_KEY?.trim()
     );
-    if (hasWebSearchKey) {
+    if (hasWebSearchKey && mode !== "asset_impact") {
       const webQuery = buildWebSearchQuery(prompt, mode);
       const webSnippets = await fetchWebSearchSnippets(webQuery);
       if (webSnippets.length > 0) {

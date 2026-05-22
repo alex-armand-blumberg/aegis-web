@@ -336,10 +336,16 @@ export function inferGeoPrecision(point: IntelPoint): GeoPrecision {
   if (
     point.layer === "conflictsBattles" ||
     point.layer === "conflictsExplosions" ||
-    point.layer === "conflictsCivilians" ||
-    point.layer === "liveStrikes"
+    point.layer === "conflictsCivilians"
   ) {
     return "city";
+  }
+  if (point.layer === "liveStrikes") {
+    const source = lc(point.source);
+    if (includesAny(source, ["acled", "ucdp", "battles dataset", "structured conflict"])) {
+      return "city";
+    }
+    return "region";
   }
 
   if (point.lat === 0 && point.lon === 0) return "unknown";

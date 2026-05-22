@@ -1,4 +1,5 @@
 import type { IntelLayerKey, IntelSeverity } from "@/lib/intel/types";
+import { countriesMatch } from "@/lib/countryDisplay";
 import { getDistanceKm } from "./distance";
 import type {
   EvidenceCluster,
@@ -127,7 +128,7 @@ function shouldJoinCluster(
   const ageHours = Math.abs(cluster.latestTime - sigTime) / HOUR_MS;
   if (ageHours > CLUSTER_WINDOW_HOURS) return false;
 
-  const sameCountry = signal.country && rep.country && signal.country === rep.country;
+  const sameCountry = countriesMatch(signal.country, rep.country);
   const distance = getDistanceKm({ lat: signal.lat, lon: signal.lon }, { lat: rep.lat, lon: rep.lon });
 
   if (distance > CLUSTER_DISTANCE_KM && !sameCountry) return false;

@@ -16,10 +16,72 @@ function safeParse<T>(text: string | null): T | null {
   }
 }
 
+const VALID_ASSET_TYPES = new Set([
+  "supplier",
+  "facility",
+  "port",
+  "route",
+  "office",
+  "school_program",
+  "personnel",
+  "field_site",
+  "infrastructure",
+  "region",
+  "other",
+]);
+
+const VALID_IMPORTANCE = new Set(["low", "medium", "high", "critical"]);
+const VALID_FEEDBACK_VALUES = new Set([
+  "useful",
+  "not_useful",
+  "false_positive",
+  "needs_better_sources",
+]);
+
+function isValidAsset(value: unknown): value is UserAsset {
+  if (!value || typeof value !== "object") return false;
+  const asset = value as Record<string, unknown>;
+  return (
+    typeof asset.id === "string" &&
+    asset.id.length > 0 &&
+    typeof asset.name === "string" &&
+    asset.name.length > 0 &&
+    typeof asset.country === "string" &&
+    asset.country.length > 0 &&
+    typeof asset.lat === "number" &&
+    Number.isFinite(asset.lat) &&
+    asset.lat >= -90 &&
+    asset.lat <= 90 &&
+    typeof asset.lon === "number" &&
+    Number.isFinite(asset.lon) &&
+    asset.lon >= -180 &&
+    asset.lon <= 180 &&
+    typeof asset.type === "string" &&
+    VALID_ASSET_TYPES.has(asset.type) &&
+    typeof asset.importance === "string" &&
+    VALID_IMPORTANCE.has(asset.importance)
+  );
+}
+
+function isValidFeedback(value: unknown): value is AlertFeedback {
+  if (!value || typeof value !== "object") return false;
+  const feedback = value as Record<string, unknown>;
+  return (
+    typeof feedback.alertId === "string" &&
+    feedback.alertId.length > 0 &&
+    typeof feedback.assetId === "string" &&
+    feedback.assetId.length > 0 &&
+    typeof feedback.createdAt === "string" &&
+    feedback.createdAt.length > 0 &&
+    typeof feedback.value === "string" &&
+    VALID_FEEDBACK_VALUES.has(feedback.value)
+  );
+}
+
 export function loadAssets(): UserAsset[] {
   if (!hasStorage()) return [];
-  const parsed = safeParse<UserAsset[]>(window.localStorage.getItem(ASSETS_KEY));
-  return Array.isArray(parsed) ? parsed : [];
+  const parsed = safeParse<unknown[]>(window.localStorage.getItem(ASSETS_KEY));
+  return Array.isArray(parsed) ? parsed.filter(isValidAsset) : [];
 }
 
 export function saveAssets(assets: UserAsset[]): void {
@@ -42,8 +104,8 @@ export function clearAssets(): void {
 
 export function loadFeedback(): AlertFeedback[] {
   if (!hasStorage()) return [];
-  const parsed = safeParse<AlertFeedback[]>(window.localStorage.getItem(FEEDBACK_KEY));
-  return Array.isArray(parsed) ? parsed : [];
+  const parsed = safeParse<unknown[]>(window.localStorage.getItem(FEEDBACK_KEY));
+  return Array.isArray(parsed) ? parsed.filter(isValidFeedback) : [];
 }
 
 export function saveFeedback(feedback: AlertFeedback[]): void {
