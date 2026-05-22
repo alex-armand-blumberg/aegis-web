@@ -15,6 +15,7 @@ export function AssetUploadPanel({ assetCount, onAssetsChange }: Props) {
   const [errors, setErrors] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const compactFileRef = useRef<HTMLInputElement>(null);
 
   const handleParse = useCallback(
     (csv: string, label: string) => {
@@ -42,6 +43,7 @@ export function AssetUploadPanel({ assetCount, onAssetsChange }: Props) {
         setStatus(null);
       } finally {
         if (fileRef.current) fileRef.current.value = "";
+        if (compactFileRef.current) compactFileRef.current.value = "";
       }
     },
     [handleParse]
@@ -95,49 +97,9 @@ export function AssetUploadPanel({ assetCount, onAssetsChange }: Props) {
     setStatus("Sample CSV downloaded.");
   }, []);
 
-  return (
-    <section className="impact-upload">
-      <header className="impact-upload-head">
-        <span className="impact-eyebrow">Assets</span>
-        <h2>Bring your own assets</h2>
-        <p className="impact-upload-sub">
-          {assetCount > 0
-            ? `${assetCount} asset${assetCount === 1 ? "" : "s"} loaded locally.`
-            : "No assets loaded yet. Add some to start scoring exposure."}
-        </p>
-      </header>
-
-      <div className="impact-upload-actions">
-        <button type="button" className="impact-btn impact-btn-primary" onClick={handleLoadSample}>
-          Load sample assets
-        </button>
-        <label className="impact-btn impact-btn-secondary impact-file-label">
-          Upload CSV
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv,text/csv,text/plain"
-            onChange={handleFile}
-            className="impact-file-input"
-          />
-        </label>
-        <button type="button" className="impact-btn impact-btn-secondary" onClick={handleCopySample}>
-          Copy sample CSV
-        </button>
-        <button type="button" className="impact-btn impact-btn-secondary" onClick={handleDownloadSample}>
-          Download sample CSV
-        </button>
-        <button
-          type="button"
-          className="impact-btn impact-btn-ghost"
-          onClick={handleClear}
-          disabled={assetCount === 0}
-        >
-          Clear assets
-        </button>
-      </div>
-
-      <details className="impact-upload-schema">
+  const sharedExtras = (
+    <>
+      <details className="impact-disclosure">
         <summary>Expected CSV format</summary>
         <pre>{`name,type,country,city,lat,lon,importance,owner,tags,notes
 Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics;shipping","Fictional demo supplier"`}</pre>
@@ -148,10 +110,8 @@ Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics
         </ul>
       </details>
 
-      <div className="impact-paste">
-        <label className="impact-paste-label" htmlFor="impact-paste">
-          Paste CSV
-        </label>
+      <details className="impact-disclosure">
+        <summary>Paste CSV manually</summary>
         <textarea
           id="impact-paste"
           className="impact-paste-input"
@@ -175,7 +135,7 @@ Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics
             </button>
           ) : null}
         </div>
-      </div>
+      </details>
 
       {status ? <p className="impact-upload-status">{status}</p> : null}
       {errors.length > 0 ? (
@@ -188,8 +148,115 @@ Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics
           </ul>
         </div>
       ) : null}
-      <p className="impact-privacy-note">
-        Assets stay in your browser. Do not upload sensitive or confidential asset lists into this prototype.
+    </>
+  );
+
+  if (assetCount === 0) {
+    return (
+      <section className="impact-portfolio-empty">
+        <span className="impact-eyebrow">Asset Portfolio</span>
+        <h2 className="impact-empty-title">Start with a demo portfolio</h2>
+        <p className="impact-empty-body">
+          Load fictional sample assets to see how AEGIS ranks exposure against live public-source
+          signals, or upload your own CSV.
+        </p>
+        <div className="impact-empty-actions">
+          <button
+            type="button"
+            className="impact-btn impact-btn-primary impact-btn-lg"
+            onClick={handleLoadSample}
+          >
+            Load sample assets
+          </button>
+          <label className="impact-btn impact-btn-secondary impact-btn-lg impact-file-label">
+            Upload CSV
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              onChange={handleFile}
+              className="impact-file-input"
+            />
+          </label>
+        </div>
+        <div className="impact-empty-utils">
+          <button type="button" className="impact-link-btn" onClick={handleCopySample}>
+            Copy sample CSV
+          </button>
+          <span className="impact-link-sep">·</span>
+          <button type="button" className="impact-link-btn" onClick={handleDownloadSample}>
+            Download sample CSV
+          </button>
+        </div>
+        {sharedExtras}
+        <p className="impact-privacy-note">
+          Assets stay in your browser. Do not upload sensitive or confidential asset lists into
+          this prototype.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="impact-portfolio-loaded">
+      <header className="impact-portfolio-head">
+        <div>
+          <span className="impact-eyebrow">Asset Portfolio</span>
+          <p className="impact-portfolio-count">
+            {assetCount} asset{assetCount === 1 ? "" : "s"} loaded locally
+          </p>
+        </div>
+        <div className="impact-portfolio-toolbar">
+          <button
+            type="button"
+            className="impact-btn impact-btn-secondary impact-btn-sm"
+            onClick={handleLoadSample}
+            title="Replace with the fictional demo portfolio"
+          >
+            Sample
+          </button>
+          <label
+            className="impact-btn impact-btn-secondary impact-btn-sm impact-file-label"
+            title="Upload a CSV"
+          >
+            Upload
+            <input
+              ref={compactFileRef}
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              onChange={handleFile}
+              className="impact-file-input"
+            />
+          </label>
+          <button
+            type="button"
+            className="impact-btn impact-btn-secondary impact-btn-sm"
+            onClick={handleCopySample}
+            title="Copy sample CSV to clipboard"
+          >
+            Copy
+          </button>
+          <button
+            type="button"
+            className="impact-btn impact-btn-secondary impact-btn-sm"
+            onClick={handleDownloadSample}
+            title="Download sample CSV"
+          >
+            Download
+          </button>
+          <button
+            type="button"
+            className="impact-btn impact-btn-ghost impact-btn-sm"
+            onClick={handleClear}
+            title="Clear all assets"
+          >
+            Clear
+          </button>
+        </div>
+      </header>
+      {sharedExtras}
+      <p className="impact-privacy-note impact-privacy-note-sm">
+        Assets stay in your browser. Do not upload sensitive or confidential lists.
       </p>
     </section>
   );

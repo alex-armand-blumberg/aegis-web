@@ -386,14 +386,18 @@ function systemPromptForMode(mode: Mode): string {
         "Do not invent sources or facts. Do not claim classified access. " +
         "Do not give evacuation, legal, security, or military orders. " +
         "Do not describe the score as a probability or prediction. Do not recalculate, rescore, or contradict the provided exposure score, level, or confidence. " +
+        "Write in a measured analyst tone. Prefer phrases like 'available public signals indicate', 'current exposure is elevated because', " +
+        "'evidence is limited by', 'analyst review should focus on', and 'uncertainty remains around'. " +
+        "Do not use words like 'imminent', 'severe threat', 'emergency', 'critical circumstances', 'guaranteed', 'predicted', " +
+        "'probability of attack', 'probability of war', or 'war predicted'. " +
         "Separate confirmed facts (directly grounded in the listed evidence) from inferred analyst context. " +
-        "Output exactly five sections in this order, each header on its own line and with concise content under it:\n" +
-        "1. Situation\n" +
-        "2. Why this asset is exposed\n" +
-        "3. Evidence\n" +
-        "4. Uncertainty\n" +
-        "5. What to watch next\n" +
-        "Keep a neutral analyst tone. Mention data limitations and uncertainty plainly."
+        "Format output as PLAIN TEXT with these exact section headers, each on its own line, with no leading or trailing markdown markers (no asterisks, no numbering, no colons):\n" +
+        "Situation\n" +
+        "Why this asset is exposed\n" +
+        "Evidence\n" +
+        "Uncertainty\n" +
+        "What to watch next\n" +
+        "Use simple '- ' bullets where helpful. Keep each section concise and source-grounded."
       );
     case "country_trend":
     default:

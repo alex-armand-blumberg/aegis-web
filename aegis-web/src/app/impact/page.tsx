@@ -58,26 +58,23 @@ export default function ImpactPage() {
     saveAssets(assets);
   }, [assets]);
 
-  const fetchMap = useCallback(
-    async (r: RangeOption) => {
-      setLoadState("loading");
-      setLoadError(null);
-      try {
-        const url = buildMapDataUrl(r, IMPACT_LAYERS);
-        const res = await fetch(url, { cache: "no-store" });
-        const data = (await res.json()) as MapApiResponse & { error?: string };
-        if (!res.ok || data.error) {
-          throw new Error(data.error ?? `Failed to fetch map data (HTTP ${res.status})`);
-        }
-        setMapData(data);
-        setLoadState("ready");
-      } catch (err) {
-        setLoadError(err instanceof Error ? err.message : "Failed to fetch map data.");
-        setLoadState("error");
+  const fetchMap = useCallback(async (r: RangeOption) => {
+    setLoadState("loading");
+    setLoadError(null);
+    try {
+      const url = buildMapDataUrl(r, IMPACT_LAYERS);
+      const res = await fetch(url, { cache: "no-store" });
+      const data = (await res.json()) as MapApiResponse & { error?: string };
+      if (!res.ok || data.error) {
+        throw new Error(data.error ?? `Failed to fetch map data (HTTP ${res.status})`);
       }
-    },
-    []
-  );
+      setMapData(data);
+      setLoadState("ready");
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to fetch map data.");
+      setLoadState("error");
+    }
+  }, []);
 
   useEffect(() => {
     void fetchMap(range);
@@ -127,41 +124,43 @@ export default function ImpactPage() {
 
   const providerFailures =
     mapData?.providerHealth?.filter((p) => p && p.ok === false).length ?? 0;
-  const cacheStatus = mapData?.cache?.status ?? "unknown";
+  const cacheStatus = mapData?.cache?.status ?? "—";
   const cacheAgeMs = mapData?.cache?.ageMs;
-  const cacheAgeLabel =
-    typeof cacheAgeMs === "number" ? formatAge(cacheAgeMs) : null;
+  const cacheAgeLabel = typeof cacheAgeMs === "number" ? formatAge(cacheAgeMs) : null;
+  const updatedLabel = mapData?.updatedAt
+    ? new Date(mapData.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "—";
+
+  const statusLabel =
+    loadState === "loading"
+      ? "Loading signals…"
+      : loadState === "ready"
+      ? `Updated ${updatedLabel}`
+      : loadState === "error"
+      ? "Signals failed to load"
+      : "Idle";
 
   return (
     <div className="impact-page">
       <MarketingNav />
 
       <main className="impact-main">
-        <header className="impact-hero">
-          <span className="impact-eyebrow">Phase 1 MVP · prototype</span>
-          <h1>AEGIS Impact Layer</h1>
-          <p className="impact-hero-sub">
-            Map public geopolitical signals against the assets, suppliers, facilities, routes, and
-            regions you care about.
-          </p>
-          <p className="impact-hero-explainer">
-            Upload a simple asset list or load a demo portfolio. AEGIS compares each asset with
-            public conflict, news, infrastructure, maritime, humanitarian, disaster, and
-            escalation-context signals, then produces source-backed exposure alerts.
-          </p>
-          <p className="impact-hero-disclaimer">
-            Exposure scores are <strong>not predictions or probabilities</strong>. They rank
-            public-source signal pressure and evidence quality for analyst review.
-          </p>
-          <p className="impact-hero-privacy">
-            For this prototype, asset lists are processed locally in your browser. Do not upload
-            sensitive or confidential asset lists.
-          </p>
-        </header>
-
-        <section className="impact-control-panel">
-          <div className="impact-control-group">
-            <span className="impact-eyebrow">Range</span>
+        <header className="impact-mission">
+          <div className="impact-mission-title">
+            <span className="impact-mission-brand">AEGIS · Impact Layer</span>
+            <span className="impact-mission-sub">
+              Source-backed exposure alerts for user-defined assets, suppliers, facilities, routes,
+              and regions.
+            </span>
+          </div>
+          <div className="impact-mission-pills">
+            <span className="impact-mission-pill">Phase 1 MVP</span>
+            <span className="impact-mission-pill">Assets stay local</span>
+            <span className="impact-mission-pill">Score ≠ prediction</span>
+            <span className="impact-mission-pill">Public sources</span>
+            <span className="impact-mission-pill">AI explains · code scores</span>
+          </div>
+          <div className="impact-mission-controls">
             <div className="impact-range-buttons" role="tablist" aria-label="Time range">
               {RANGE_OPTIONS.map((r) => (
                 <button
@@ -176,85 +175,89 @@ export default function ImpactPage() {
                 </button>
               ))}
             </div>
-          </div>
-          <div className="impact-control-group">
-            <span className="impact-eyebrow">Signals</span>
-            <div className="impact-signals-status">
+            <button
+              type="button"
+              className="impact-btn impact-btn-secondary impact-btn-sm"
+              onClick={() => void fetchMap(range)}
+              disabled={loadState === "loading"}
+            >
+              Refresh
+            </button>
+            <div className="impact-mission-telemetry">
               <span className={`impact-status-dot impact-status-${loadState}`} aria-hidden />
-              <span>
-                {loadState === "loading"
-                  ? "Loading public signals…"
-                  : loadState === "ready"
-                  ? `Updated ${mapData?.updatedAt ? new Date(mapData.updatedAt).toLocaleTimeString() : ""}`
-                  : loadState === "error"
-                  ? "Signals failed to load"
-                  : "Idle"}
+              <span>{statusLabel}</span>
+              <span className="impact-mission-telemetry-sep">·</span>
+              <span title="Map data cache status from /api/map">
+                cache {cacheStatus}
+                {cacheAgeLabel ? ` ${cacheAgeLabel}` : ""}
               </span>
-              <button
-                type="button"
-                className="impact-btn impact-btn-secondary"
-                onClick={() => void fetchMap(range)}
-                disabled={loadState === "loading"}
-              >
-                Refresh signals
-              </button>
-            </div>
-            {loadError ? <p className="impact-load-error">{loadError}</p> : null}
-            <div className="impact-telemetry">
-              <span>Cache: {cacheStatus}{cacheAgeLabel ? ` · ${cacheAgeLabel}` : ""}</span>
+              <span className="impact-mission-telemetry-sep">·</span>
               <span>
-                Providers:{" "}
+                providers{" "}
                 {providerFailures > 0
-                  ? `${providerFailures} reporting failures`
+                  ? `${providerFailures} failing`
                   : mapData
-                  ? "all reporting"
+                  ? "ok"
                   : "—"}
               </span>
-              {mapData?.range ? <span>Window: {mapData.range}</span> : null}
             </div>
           </div>
-        </section>
+        </header>
 
-        <div className="impact-workspace">
-          <section className="impact-col impact-col-assets">
+        {loadError ? <p className="impact-load-error">{loadError}</p> : null}
+
+        <div className="impact-console">
+          <aside className="impact-console-col impact-console-portfolio">
             <AssetUploadPanel assetCount={assets.length} onAssetsChange={handleAssetsChange} />
-            <AssetTable
-              assets={assets}
-              alertsByAsset={alertsByAsset}
-              selectedAssetId={selectedAssetId}
-              onSelect={handleSelectAsset}
-            />
-          </section>
+            {assets.length > 0 ? (
+              <AssetTable
+                assets={assets}
+                alertsByAsset={alertsByAsset}
+                selectedAssetId={selectedAssetId}
+                onSelect={handleSelectAsset}
+              />
+            ) : null}
+          </aside>
 
-          <section className="impact-col impact-col-watchlist">
-            <header className="impact-col-head">
-              <span className="impact-eyebrow">Exposure watchlist</span>
-              <h2>Ranked by exposure score</h2>
-            </header>
+          <section className="impact-console-col impact-console-watch">
             <ImpactWatchlist
               alerts={alerts}
               selectedAlertId={selectedAlert?.id ?? null}
               onSelect={handleSelectAlert}
             />
-            <div className="impact-map-placeholder">
-              <span className="impact-eyebrow">Visualization</span>
-              <p>
-                Map visualization will be added in Phase 2. Phase 1 focuses on the exposure
-                methodology, evidence cards, and analyst workflow.
-              </p>
+            <div className="impact-map-placeholder" aria-label="Phase 2 operational map placeholder">
+              <div className="impact-map-placeholder-grid" aria-hidden />
+              <div className="impact-map-placeholder-body">
+                <span className="impact-eyebrow">Phase 2 · Operational Map</span>
+                <p>
+                  Phase 2 will add an operational map showing asset markers, nearby evidence
+                  clusters, route exposure, and alert geometry. Phase 1 focuses on scoring,
+                  evidence, and analyst workflow.
+                </p>
+                <div className="impact-map-placeholder-chips">
+                  <span className="impact-map-chip">Asset markers</span>
+                  <span className="impact-map-chip">Evidence clusters</span>
+                  <span className="impact-map-chip">Route exposure</span>
+                  <span className="impact-map-chip impact-map-chip-muted">Map layer pending</span>
+                </div>
+              </div>
             </div>
           </section>
 
-          <section className="impact-col impact-col-detail">
-            <ExposureCard
-              alert={selectedAlert}
-              feedback={feedback}
-              onFeedback={setFeedback}
-            />
-          </section>
+          <aside className="impact-console-col impact-console-detail">
+            <div className="impact-detail-sticky">
+              <ExposureCard
+                alert={selectedAlert}
+                feedback={feedback}
+                onFeedback={setFeedback}
+              />
+            </div>
+          </aside>
         </div>
 
-        <ImpactMethodologyPanel />
+        <footer className="impact-foot-strip">
+          <ImpactMethodologyPanel />
+        </footer>
       </main>
 
       <SiteFooter />
@@ -263,9 +266,9 @@ export default function ImpactPage() {
 }
 
 function formatAge(ageMs: number): string {
-  if (!Number.isFinite(ageMs) || ageMs < 0) return "—";
-  if (ageMs < 60 * 1000) return `${Math.round(ageMs / 1000)}s old`;
-  if (ageMs < 60 * 60 * 1000) return `${Math.round(ageMs / (60 * 1000))}m old`;
-  if (ageMs < 24 * 60 * 60 * 1000) return `${Math.round(ageMs / (60 * 60 * 1000))}h old`;
-  return `${Math.round(ageMs / (24 * 60 * 60 * 1000))}d old`;
+  if (!Number.isFinite(ageMs) || ageMs < 0) return "";
+  if (ageMs < 60 * 1000) return `${Math.round(ageMs / 1000)}s`;
+  if (ageMs < 60 * 60 * 1000) return `${Math.round(ageMs / (60 * 1000))}m`;
+  if (ageMs < 24 * 60 * 60 * 1000) return `${Math.round(ageMs / (60 * 60 * 1000))}h`;
+  return `${Math.round(ageMs / (24 * 60 * 60 * 1000))}d`;
 }

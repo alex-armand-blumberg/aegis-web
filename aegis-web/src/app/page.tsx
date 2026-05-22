@@ -20,6 +20,9 @@ export default function Home() {
     router.prefetch("/map");
     void prefetchMapExperience();
   }, [router]);
+  const warmImpact = useCallback(() => {
+    router.prefetch("/impact");
+  }, [router]);
 
   useEffect(() => {
     const revealObs = new IntersectionObserver(
@@ -99,6 +102,9 @@ export default function Home() {
           </Link>
           <Link href="/map" className="btn-secondary" onMouseEnter={warmMap} onFocus={warmMap}>
             Interactive Map
+          </Link>
+          <Link href="/impact" className="btn-secondary" onMouseEnter={warmImpact} onFocus={warmImpact}>
+            Impact Layer
           </Link>
           <a href="#features" className="btn-secondary btn-learn-more">
             Learn More
@@ -180,6 +186,23 @@ export default function Home() {
                 and receive a specific, data-grounded answer.
               </div>
               <span className="feature-tag">Groq · Llama 3.1</span>
+            </Link>
+            <Link
+              href="/impact"
+              className="feature-card"
+              style={{ "--accent": "#34d399" } as React.CSSProperties}
+              onMouseEnter={warmImpact}
+              onFocus={warmImpact}
+            >
+              <div className="feature-icon">◆</div>
+              <div className="feature-title">Impact Layer</div>
+              <div className="feature-desc">
+                Map public geopolitical signals against user-defined assets,
+                suppliers, facilities, routes, and regions, then generate
+                explainable exposure alerts with source-backed evidence and an
+                optional AI analyst brief.
+              </div>
+              <span className="feature-tag">Phase 1 · Beta</span>
             </Link>
           </div>
         </div>
