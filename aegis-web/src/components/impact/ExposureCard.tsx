@@ -114,6 +114,14 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
   const [showBrief, setShowBrief] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
 
+  useEffect(() => {
+    if (!alert) return;
+    setActiveTab("summary");
+    setShowUncertainty(false);
+    setShowBrief(false);
+    setShowFeedback(false);
+  }, [alert?.id]);
+
   const handleBrief = useCallback(async () => {
     if (!alert) return;
     setBriefStatus("loading");
@@ -160,13 +168,6 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
       </div>
     );
   }
-
-  useEffect(() => {
-    setActiveTab("summary");
-    setShowUncertainty(false);
-    setShowBrief(false);
-    setShowFeedback(false);
-  }, [alert.id]);
 
   const bars = breakdownBars(alert.breakdown);
   const capsCount = alert.breakdown.capsApplied.length;
