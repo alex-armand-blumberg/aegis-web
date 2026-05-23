@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, {
   Layer,
   Popup,
@@ -11,10 +11,20 @@ import Map, {
 } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { ExposureAlert, UserAsset } from "@/lib/impact/types";
+import type { IntelSeverity, MapApiResponse } from "@/lib/intel/types";
+import type { EvidenceItem, ExposureAlert, UserAsset } from "@/lib/impact/types";
+import {
+  DEFAULT_SEVERITY_FILTERS,
+  DEFAULT_SIGNAL_CATEGORIES,
+  SIGNAL_CATEGORY_LABELS,
+  buildBackgroundSignals,
+  signalCategoryForLayer,
+  type SignalCategoryKey,
+} from "@/lib/impact/mapSignals";
 import {
   BASEMAP_STYLE,
   buildAssetGeoJson,
+  buildBackgroundSignalGeoJson,
   buildEvidenceGeoJson,
   buildLinkGeoJson,
   computeBounds,
@@ -29,6 +39,7 @@ type Props = {
   alertsByAsset: Record<string, ExposureAlert>;
   selectedAssetId: string | null;
   selectedAlert: ExposureAlert | null;
+  mapData: MapApiResponse | null;
   range: string;
   rangeOptions: readonly string[];
   onRangeChange: (range: string) => void;
@@ -41,12 +52,41 @@ type Props = {
 };
 
 type HoverState = {
-  kind: "asset" | "evidence";
+  kind: "asset" | "evidence" | "signal";
   lon: number;
   lat: number;
   title: string;
   subtitle: string;
 } | null;
+
+type DisplayFilters = {
+  assets: boolean;
+  selectedEvidence: boolean;
+  nearbySignals: boolean;
+  relationshipLines: boolean;
+  labels: boolean;
+};
+
+const DEFAULT_DISPLAY_FILTERS: DisplayFilters = {
+  assets: true,
+  selectedEvidence: true,
+  nearbySignals: true,
+  relationshipLines: true,
+  labels: true,
+};
+
+const SIGNAL_TYPE_ORDER: SignalCategoryKey[] = [
+  "conflict",
+  "explosions",
+  "unrest",
+  "infrastructure",
+  "news",
+  "maritime",
+  "aviation",
+  "modelContext",
+];
+
+const SEVERITY_ORDER: IntelSeverity[] = ["critical", "high", "medium", "low"];
 
 const INITIAL_VIEW_STATE = {
   longitude: 0,
@@ -59,6 +99,10 @@ const INITIAL_VIEW_STATE = {
 const ASSET_LAYER_ID = "impact-assets";
 const EVIDENCE_LAYER_ID = "impact-evidence";
 const EVIDENCE_MODEL_LAYER_ID = "impact-evidence-model-context";
+const EVIDENCE_SELECTED_RING_ID = "impact-evidence-selected-ring";
+const BACKGROUND_SIGNAL_LAYER_ID = "impact-background-signals";
+const BACKGROUND_MODEL_LAYER_ID = "impact-background-model-context";
+const BACKGROUND_SELECTED_RING_ID = "impact-background-selected-ring";
 const LINK_LAYER_ID = "impact-links";
 const SELECTED_RING_OUTER_ID = "impact-selected-ring-outer";
 const SELECTED_RING_MID_ID = "impact-selected-ring-mid";
@@ -117,12 +161,12 @@ const EVIDENCE_LAYER: LayerProps = {
       "match",
       ["get", "severity"],
       "critical",
-      3.8,
+      3.9,
       "high",
-      3.4,
+      3.5,
       "medium",
-      3,
-      2.6,
+      3.1,
+      2.7,
     ],
     "circle-color": [
       "match",
@@ -135,9 +179,9 @@ const EVIDENCE_LAYER: LayerProps = {
       "#64748b",
       "#546070",
     ],
-    "circle-stroke-color": "rgba(8,11,18,0.85)",
-    "circle-stroke-width": 0.7,
-    "circle-opacity": 0.88,
+    "circle-stroke-color": "rgba(8,11,18,0.92)",
+    "circle-stroke-width": 0.8,
+    "circle-opacity": 0.92,
   },
 };
 
@@ -151,6 +195,97 @@ const EVIDENCE_MODEL_LAYER: LayerProps = {
     "circle-stroke-color": "rgba(148,163,184,0.75)",
     "circle-stroke-width": 1,
     "circle-opacity": 0.85,
+  },
+};
+
+const EVIDENCE_SELECTED_RING_LAYER: LayerProps = {
+  id: EVIDENCE_SELECTED_RING_ID,
+  type: "circle",
+  filter: ["==", ["get", "selected"], true],
+  paint: {
+    "circle-radius": [
+      "match",
+      ["get", "severity"],
+      "critical",
+      8.2,
+      "high",
+      7.4,
+      "medium",
+      6.8,
+      6.2,
+    ],
+    "circle-color": "rgba(0,0,0,0)",
+    "circle-stroke-color": "rgba(241,245,249,0.45)",
+    "circle-stroke-width": 1.1,
+    "circle-opacity": 0.9,
+  },
+};
+
+const BACKGROUND_SIGNAL_LAYER: LayerProps = {
+  id: BACKGROUND_SIGNAL_LAYER_ID,
+  type: "circle",
+  filter: ["==", ["get", "isModelContext"], false],
+  paint: {
+    "circle-radius": [
+      "match",
+      ["get", "severity"],
+      "critical",
+      3.2,
+      "high",
+      2.9,
+      "medium",
+      2.6,
+      2.3,
+    ],
+    "circle-color": [
+      "match",
+      ["get", "severity"],
+      "critical",
+      "rgba(184,80,80,0.85)",
+      "high",
+      "rgba(107,130,153,0.78)",
+      "medium",
+      "rgba(100,116,139,0.7)",
+      "rgba(84,96,112,0.64)",
+    ],
+    "circle-stroke-color": "rgba(8,11,18,0.62)",
+    "circle-stroke-width": 0.6,
+    "circle-opacity": [
+      "case",
+      ["<=", ["get", "distanceKm"], 80],
+      0.72,
+      ["<=", ["get", "distanceKm"], 200],
+      0.56,
+      ["<=", ["get", "distanceKm"], 350],
+      0.4,
+      0.28,
+    ],
+  },
+};
+
+const BACKGROUND_MODEL_LAYER: LayerProps = {
+  id: BACKGROUND_MODEL_LAYER_ID,
+  type: "circle",
+  filter: ["==", ["get", "isModelContext"], true],
+  paint: {
+    "circle-radius": 4.2,
+    "circle-color": "rgba(0,0,0,0)",
+    "circle-stroke-color": "rgba(148,163,184,0.5)",
+    "circle-stroke-width": 0.9,
+    "circle-opacity": 0.55,
+  },
+};
+
+const BACKGROUND_SELECTED_RING_LAYER: LayerProps = {
+  id: BACKGROUND_SELECTED_RING_ID,
+  type: "circle",
+  filter: ["==", ["get", "selected"], true],
+  paint: {
+    "circle-radius": 7,
+    "circle-color": "rgba(0,0,0,0)",
+    "circle-stroke-color": "rgba(241,245,249,0.42)",
+    "circle-stroke-width": 1.1,
+    "circle-opacity": 0.8,
   },
 };
 
@@ -256,6 +391,33 @@ function evidenceSubtitle(alert: ExposureAlert, properties: Record<string, unkno
   return `${severity} severity · ${distance} · ${alert.asset.name}`;
 }
 
+function signalSubtitle(properties: Record<string, unknown>): string {
+  const severity = typeof properties.severity === "string" ? properties.severity : "low";
+  const category =
+    typeof properties.category === "string"
+      ? SIGNAL_CATEGORY_LABELS[properties.category as SignalCategoryKey] ?? properties.category
+      : "Signals";
+  const distance =
+    typeof properties.distanceKm === "number" && Number.isFinite(properties.distanceKm)
+      ? properties.distanceKm < 100
+        ? `${properties.distanceKm.toFixed(1)} km`
+        : `${Math.round(properties.distanceKm)} km`
+      : "distance —";
+  return `${category} · ${severity} · ${distance}`;
+}
+
+function evidenceMatchesFilters(
+  evidence: EvidenceItem,
+  signalTypeFilters: Record<SignalCategoryKey, boolean>,
+  severityFilters: Record<IntelSeverity, boolean>
+): boolean {
+  if (!severityFilters[evidence.severity]) return false;
+  for (const layer of evidence.layers) {
+    if (signalTypeFilters[signalCategoryForLayer(layer)]) return true;
+  }
+  return false;
+}
+
 export function ImpactMapPanel({
   assets,
   visibleAssetIds,
@@ -263,6 +425,7 @@ export function ImpactMapPanel({
   alertsByAsset,
   selectedAssetId,
   selectedAlert,
+  mapData,
   range,
   rangeOptions,
   onRangeChange,
@@ -274,21 +437,89 @@ export function ImpactMapPanel({
   flyToCoord,
 }: Props) {
   const mapPanelRef = useRef<HTMLElement | null>(null);
+  const signalPopoverRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapRef | null>(null);
   const userHasMoved = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [hover, setHover] = useState<HoverState>(null);
-  const [showEvidence, setShowEvidence] = useState(true);
   const [lastMapCoord, setLastMapCoord] = useState<{ lat: number; lon: number } | null>(null);
+  const [selectedEvidenceCoord, setSelectedEvidenceCoord] = useState<{
+    lat: number;
+    lon: number;
+  } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showSignalPopover, setShowSignalPopover] = useState(false);
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
+  const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
+  const [displayFilters, setDisplayFilters] = useState<DisplayFilters>(DEFAULT_DISPLAY_FILTERS);
+  const [signalTypeFilters, setSignalTypeFilters] = useState<Record<SignalCategoryKey, boolean>>(
+    () => ({ ...DEFAULT_SIGNAL_CATEGORIES })
+  );
+  const [severityFilters, setSeverityFilters] = useState<Record<IntelSeverity, boolean>>(() => ({
+    ...DEFAULT_SEVERITY_FILTERS,
+  }));
 
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === selectedAssetId) ?? null,
     [assets, selectedAssetId]
   );
 
-  const selectedEvidence = selectedAlert?.evidence ?? [];
+  const selectedEvidenceAll = selectedAlert?.evidence ?? [];
+  const selectedEvidence = useMemo(
+    () =>
+      selectedEvidenceAll.filter((item) =>
+        evidenceMatchesFilters(item, signalTypeFilters, severityFilters)
+      ),
+    [selectedEvidenceAll, signalTypeFilters, severityFilters]
+  );
+
+  const selectedEvidencePointIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const item of selectedEvidenceAll) {
+      for (const pointId of item.pointIds) ids.add(pointId);
+    }
+    return ids;
+  }, [selectedEvidenceAll]);
+
+  const backgroundSignalsAll = useMemo(
+    () =>
+      buildBackgroundSignals({
+        mapData,
+        assets,
+        visibleAssetIds,
+        selectedAssetId,
+        selectedEvidencePointIds,
+      }),
+    [assets, mapData, selectedAssetId, selectedEvidencePointIds, visibleAssetIds]
+  );
+
+  const backgroundSignals = useMemo(
+    () =>
+      backgroundSignalsAll.filter(
+        (signal) => signalTypeFilters[signal.category] && severityFilters[signal.severity]
+      ),
+    [backgroundSignalsAll, severityFilters, signalTypeFilters]
+  );
+
+  const signalTypeCounts = useMemo(() => {
+    const counts = Object.fromEntries(
+      SIGNAL_TYPE_ORDER.map((key) => [key, 0])
+    ) as Record<SignalCategoryKey, number>;
+    for (const signal of backgroundSignalsAll) counts[signal.category] += 1;
+    return counts;
+  }, [backgroundSignalsAll]);
+
+  const severityCounts = useMemo(() => {
+    const counts: Record<IntelSeverity, number> = {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+    };
+    for (const signal of backgroundSignalsAll) counts[signal.severity] += 1;
+    return counts;
+  }, [backgroundSignalsAll]);
 
   const assetGeoJson = useMemo(
     () =>
@@ -301,23 +532,49 @@ export function ImpactMapPanel({
     [assets, alertsByAsset, selectedAssetId, visibleAssetIds]
   );
   const evidenceGeoJson = useMemo(
-    () => buildEvidenceGeoJson(selectedEvidence),
-    [selectedEvidence]
+    () => buildEvidenceGeoJson(selectedEvidence, selectedEvidenceId),
+    [selectedEvidence, selectedEvidenceId]
   );
   const linkGeoJson = useMemo(
     () => buildLinkGeoJson({ asset: selectedAsset, evidence: selectedEvidence }),
     [selectedAsset, selectedEvidence]
   );
+  const backgroundGeoJson = useMemo(
+    () =>
+      buildBackgroundSignalGeoJson({
+        signals: backgroundSignals,
+        selectedSignalId,
+      }),
+    [backgroundSignals, selectedSignalId]
+  );
 
-  useEffect(() => {
-    if (!mapLoaded || !mapRef.current) return;
-    if (userHasMoved.current) return;
-    const visibleAssets = assets.filter(
-      (asset) => visibleAssetIds.has(asset.id) || asset.id === selectedAssetId
-    );
+  const fitVisiblePoints = useCallback(() => {
+      if (!mapRef.current) return;
+      const visibleAssets = assets.filter(
+        (asset) => visibleAssetIds.has(asset.id) || asset.id === selectedAssetId
+      );
+      const points = [
+        ...visibleAssets.map((asset) => ({ lat: asset.lat, lon: asset.lon })),
+        ...selectedEvidence.map((item) => ({ lat: item.lat, lon: item.lon })),
+      ];
+      const bounds = computeBounds(points);
+      if (!bounds) return;
+      mapRef.current.fitBounds(bounds, {
+        padding: 56,
+        duration: 700,
+        maxZoom: 6,
+      });
+    },
+    [assets, selectedAssetId, selectedEvidence, visibleAssetIds]
+  );
+
+  const fitSelectedContext = useCallback(() => {
+    if (!mapRef.current) return;
+    const focusAsset = assets.find((asset) => asset.id === selectedAssetId);
+    if (!focusAsset) return;
     const points = [
-      ...visibleAssets.map((asset) => ({ lat: asset.lat, lon: asset.lon })),
-      ...selectedEvidence.map((item) => ({ lat: item.lat, lon: item.lon })),
+      { lat: focusAsset.lat, lon: focusAsset.lon },
+      ...selectedEvidenceAll.map((item) => ({ lat: item.lat, lon: item.lon })),
     ];
     const bounds = computeBounds(points);
     if (!bounds) return;
@@ -326,22 +583,54 @@ export function ImpactMapPanel({
       duration: 700,
       maxZoom: 6,
     });
-  }, [assets, mapLoaded, selectedEvidence, selectedAssetId, visibleAssetIds]);
+  }, [assets, selectedAssetId, selectedEvidenceAll]);
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    if (userHasMoved.current) return;
+    fitVisiblePoints();
+  }, [fitVisiblePoints, mapLoaded]);
 
   useEffect(() => {
     userHasMoved.current = false;
   }, [selectedAssetId]);
 
   useEffect(() => {
+    setSelectedEvidenceCoord(null);
+    setSelectedEvidenceId(null);
+    setSelectedSignalId(null);
+  }, [selectedAlert?.id]);
+
+  useEffect(() => {
     if (!mapLoaded || !mapRef.current || !flyToCoord) return;
+    const flyIntent = flyToCoord.id.split(":")[0];
+    if (flyIntent === "asset" || flyIntent === "alert") {
+      userHasMoved.current = false;
+      fitSelectedContext();
+      setSelectedEvidenceCoord(null);
+      setSelectedEvidenceId(null);
+      setSelectedSignalId(null);
+      setLastMapCoord({ lat: flyToCoord.lat, lon: flyToCoord.lon });
+      return;
+    }
     userHasMoved.current = true;
     mapRef.current.flyTo({
       center: [flyToCoord.lon, flyToCoord.lat],
       zoom: Math.max(mapRef.current.getZoom(), 7.5),
       duration: 650,
     });
+    const matchedEvidence = selectedEvidenceAll.find(
+      (item) =>
+        Math.abs(item.lat - flyToCoord.lat) <= 0.0001 &&
+        Math.abs(item.lon - flyToCoord.lon) <= 0.0001
+    );
+    setSelectedEvidenceId(matchedEvidence?.id ?? null);
+    setSelectedEvidenceCoord(
+      matchedEvidence ? { lat: flyToCoord.lat, lon: flyToCoord.lon } : null
+    );
+    setSelectedSignalId(null);
     setLastMapCoord({ lat: flyToCoord.lat, lon: flyToCoord.lon });
-  }, [flyToCoord, mapLoaded]);
+  }, [fitSelectedContext, flyToCoord, mapLoaded, selectedEvidenceAll]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -353,32 +642,96 @@ export function ImpactMapPanel({
     };
   }, []);
 
-  const interactiveLayerIds = showEvidence
-    ? [ASSET_LAYER_ID, EVIDENCE_LAYER_ID, EVIDENCE_MODEL_LAYER_ID]
-    : [ASSET_LAYER_ID];
+  useEffect(() => {
+    if (!showSignalPopover) return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (!signalPopoverRef.current) return;
+      if (!signalPopoverRef.current.contains(event.target as Node)) {
+        setShowSignalPopover(false);
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+    };
+  }, [showSignalPopover]);
+
+  useEffect(() => {
+    if (!showSignalPopover) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowSignalPopover(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showSignalPopover]);
+
+  const interactiveLayerIds = useMemo(() => {
+    const ids: string[] = [];
+    if (displayFilters.assets) ids.push(ASSET_LAYER_ID);
+    if (displayFilters.selectedEvidence) {
+      ids.push(EVIDENCE_LAYER_ID, EVIDENCE_MODEL_LAYER_ID);
+    }
+    if (displayFilters.nearbySignals) {
+      ids.push(BACKGROUND_SIGNAL_LAYER_ID, BACKGROUND_MODEL_LAYER_ID);
+    }
+    return ids;
+  }, [displayFilters.assets, displayFilters.nearbySignals, displayFilters.selectedEvidence]);
 
   const handleMapClick = (event: MapLayerMouseEvent) => {
     const feature = event.features?.[0];
     if (!feature || !feature.properties) return;
     const layerId = feature.layer?.id;
     const properties = feature.properties as Record<string, unknown>;
+    const [lon, lat] =
+      feature.geometry.type === "Point" ? feature.geometry.coordinates : [event.lngLat.lng, event.lngLat.lat];
+
+    setLastMapCoord({ lat, lon });
 
     if (layerId === ASSET_LAYER_ID && typeof properties.assetId === "string") {
-      const [lon, lat] =
-        feature.geometry.type === "Point" ? feature.geometry.coordinates : [event.lngLat.lng, event.lngLat.lat];
-      setLastMapCoord({ lat, lon });
+      setSelectedSignalId(null);
+      setSelectedEvidenceId(null);
+      setSelectedEvidenceCoord(null);
       onSelectAsset(properties.assetId);
       return;
     }
 
     if (
       (layerId === EVIDENCE_LAYER_ID || layerId === EVIDENCE_MODEL_LAYER_ID) &&
-      typeof selectedAlert?.id === "string"
+      typeof properties.evidenceId === "string"
     ) {
-      const [lon, lat] =
-        feature.geometry.type === "Point" ? feature.geometry.coordinates : [event.lngLat.lng, event.lngLat.lat];
-      setLastMapCoord({ lat, lon });
-      onSelectAlert(selectedAlert.id);
+      setSelectedEvidenceId(properties.evidenceId);
+      setSelectedEvidenceCoord({ lat, lon });
+      setSelectedSignalId(null);
+      if (typeof selectedAlert?.id === "string") {
+        onSelectAlert(selectedAlert.id);
+      }
+      if (mapRef.current) {
+        mapRef.current.flyTo({
+          center: [lon, lat],
+          zoom: Math.max(mapRef.current.getZoom(), 7),
+          duration: 500,
+        });
+      }
+      return;
+    }
+
+    if (
+      (layerId === BACKGROUND_SIGNAL_LAYER_ID || layerId === BACKGROUND_MODEL_LAYER_ID) &&
+      typeof properties.signalId === "string"
+    ) {
+      setSelectedSignalId(properties.signalId);
+      setSelectedEvidenceId(null);
+      if (mapRef.current) {
+        mapRef.current.flyTo({
+          center: [lon, lat],
+          zoom: Math.max(mapRef.current.getZoom(), 6.5),
+          duration: 500,
+        });
+      }
     }
   };
 
@@ -421,25 +774,21 @@ export function ImpactMapPanel({
       return;
     }
 
-    setHover(null);
-  };
+    if (
+      (layerId === BACKGROUND_SIGNAL_LAYER_ID || layerId === BACKGROUND_MODEL_LAYER_ID) &&
+      typeof properties.title === "string"
+    ) {
+      setHover({
+        kind: "signal",
+        lon,
+        lat,
+        title: properties.title,
+        subtitle: signalSubtitle(properties),
+      });
+      return;
+    }
 
-  const fitVisiblePoints = () => {
-    if (!mapRef.current) return;
-    const visibleAssets = assets.filter(
-      (asset) => visibleAssetIds.has(asset.id) || asset.id === selectedAssetId
-    );
-    const points = [
-      ...visibleAssets.map((asset) => ({ lat: asset.lat, lon: asset.lon })),
-      ...selectedEvidence.map((item) => ({ lat: item.lat, lon: item.lon })),
-    ];
-    const bounds = computeBounds(points);
-    if (!bounds) return;
-    mapRef.current.fitBounds(bounds, {
-      padding: 56,
-      duration: 700,
-      maxZoom: 6,
-    });
+    setHover(null);
   };
 
   const handleResetView = () => {
@@ -459,6 +808,24 @@ export function ImpactMapPanel({
 
   const handleMapLoad = () => {
     setMapLoaded(true);
+  };
+
+  const toggleDisplayFilter = (key: keyof DisplayFilters) => {
+    setDisplayFilters((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const toggleSignalType = (key: SignalCategoryKey) => {
+    setSignalTypeFilters((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const toggleSeverity = (key: IntelSeverity) => {
+    setSeverityFilters((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const resetSignalFilters = () => {
+    setDisplayFilters(DEFAULT_DISPLAY_FILTERS);
+    setSignalTypeFilters({ ...DEFAULT_SIGNAL_CATEGORIES });
+    setSeverityFilters({ ...DEFAULT_SEVERITY_FILTERS });
   };
 
   if (assets.length === 0) {
@@ -495,12 +862,16 @@ export function ImpactMapPanel({
       <div className="impact-map-overlay">
         <div className="impact-map-title-block">
           <span className="impact-eyebrow">Global Impact Map</span>
-          <p>Real-time exposure visualization.</p>
+          <p>Asset-centered public signal exposure.</p>
         </div>
         <div className="impact-map-telemetry">
           <span>{assets.length} assets</span>
           <span>·</span>
-          <span>{selectedEvidence.length} evidence clusters</span>
+          <span>{alerts.length} alerts</span>
+          <span>·</span>
+          <span>{selectedEvidence.length} selected evidence</span>
+          <span>·</span>
+          <span>{backgroundSignals.length} nearby signals</span>
           <span>·</span>
           <span>{range}</span>
           {updatedLabel ? (
@@ -513,13 +884,106 @@ export function ImpactMapPanel({
       </div>
 
       <div className="impact-map-controls-top">
-        <button
-          type="button"
-          className={`impact-map-control-chip${showEvidence ? " is-active" : ""}`}
-          onClick={() => setShowEvidence((value) => !value)}
-        >
-          Layers
-        </button>
+        <div className="impact-map-filter-wrap" ref={signalPopoverRef}>
+          <button
+            type="button"
+            className={`impact-map-control-chip${showSignalPopover ? " is-active" : ""}`}
+            onClick={() => setShowSignalPopover((value) => !value)}
+            aria-expanded={showSignalPopover}
+            aria-haspopup="dialog"
+          >
+            Signals
+          </button>
+          {showSignalPopover ? (
+            <div className="impact-map-signal-popover" role="dialog" aria-label="Signal filters">
+              <div className="impact-map-signal-popover-head">
+                <span>Filter signals</span>
+                <button
+                  type="button"
+                  className="impact-map-control-chip impact-map-control-chip-sm"
+                  onClick={resetSignalFilters}
+                >
+                  Reset
+                </button>
+              </div>
+
+              <div className="impact-map-signal-group">
+                <h4>Display</h4>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={displayFilters.assets}
+                    onChange={() => toggleDisplayFilter("assets")}
+                  />
+                  Assets
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={displayFilters.selectedEvidence}
+                    onChange={() => toggleDisplayFilter("selectedEvidence")}
+                  />
+                  Selected evidence
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={displayFilters.nearbySignals}
+                    onChange={() => toggleDisplayFilter("nearbySignals")}
+                  />
+                  Nearby signals
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={displayFilters.relationshipLines}
+                    onChange={() => toggleDisplayFilter("relationshipLines")}
+                  />
+                  Relationship lines
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={displayFilters.labels}
+                    onChange={() => toggleDisplayFilter("labels")}
+                  />
+                  Labels
+                </label>
+              </div>
+
+              <div className="impact-map-signal-group">
+                <h4>Signal types</h4>
+                {SIGNAL_TYPE_ORDER.map((typeKey) => (
+                  <label key={typeKey}>
+                    <input
+                      type="checkbox"
+                      checked={signalTypeFilters[typeKey]}
+                      onChange={() => toggleSignalType(typeKey)}
+                    />
+                    <span>{SIGNAL_CATEGORY_LABELS[typeKey]}</span>
+                    <span className="impact-map-signal-count">{signalTypeCounts[typeKey]}</span>
+                  </label>
+                ))}
+              </div>
+
+              <div className="impact-map-signal-group">
+                <h4>Severity</h4>
+                {SEVERITY_ORDER.map((severityKey) => (
+                  <label key={severityKey}>
+                    <input
+                      type="checkbox"
+                      checked={severityFilters[severityKey]}
+                      onChange={() => toggleSeverity(severityKey)}
+                    />
+                    <span>{severityKey}</span>
+                    <span className="impact-map-signal-count">{severityCounts[severityKey]}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
         <div className="impact-map-range-group" role="tablist" aria-label="Map range">
           {rangeOptions.map((option) => (
             <button
@@ -534,11 +998,7 @@ export function ImpactMapPanel({
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className="impact-map-control-chip"
-          onClick={handleResetView}
-        >
+        <button type="button" className="impact-map-control-chip" onClick={handleResetView}>
           Reset view
         </button>
         <button
@@ -559,6 +1019,7 @@ export function ImpactMapPanel({
           attributionControl={false}
           interactiveLayerIds={interactiveLayerIds}
           reuseMaps
+          doubleClickZoom
           onLoad={handleMapLoad}
           onError={(event) => {
             const message =
@@ -583,25 +1044,44 @@ export function ImpactMapPanel({
           onMouseLeave={() => setHover(null)}
           cursor={hover ? "pointer" : "grab"}
         >
-          <Source id="impact-asset-source" type="geojson" data={assetGeoJson}>
-            <Layer {...SELECTED_RING_OUTER} />
-            <Layer {...SELECTED_RING_MID} />
-            <Layer {...SELECTED_RING_INNER} />
-            <Layer {...ASSET_LAYER} />
-            <Layer {...SELECTED_STAR_LAYER} />
-            <Layer {...SELECTED_LABEL_LAYER} />
-          </Source>
+          {displayFilters.assets || displayFilters.labels ? (
+            <Source id="impact-asset-source" type="geojson" data={assetGeoJson}>
+              {displayFilters.assets ? (
+                <>
+                  <Layer {...SELECTED_RING_OUTER} />
+                  <Layer {...SELECTED_RING_MID} />
+                  <Layer {...SELECTED_RING_INNER} />
+                  <Layer {...ASSET_LAYER} />
+                </>
+              ) : null}
+              {displayFilters.labels ? (
+                <>
+                  <Layer {...SELECTED_STAR_LAYER} />
+                  <Layer {...SELECTED_LABEL_LAYER} />
+                </>
+              ) : null}
+            </Source>
+          ) : null}
 
-          {showEvidence ? (
+          {displayFilters.relationshipLines && displayFilters.selectedEvidence ? (
             <Source id="impact-link-source" type="geojson" data={linkGeoJson}>
               <Layer {...LINK_LAYER} />
             </Source>
           ) : null}
 
-          {showEvidence ? (
+          {displayFilters.selectedEvidence ? (
             <Source id="impact-evidence-source" type="geojson" data={evidenceGeoJson}>
+              <Layer {...EVIDENCE_SELECTED_RING_LAYER} />
               <Layer {...EVIDENCE_LAYER} />
               <Layer {...EVIDENCE_MODEL_LAYER} />
+            </Source>
+          ) : null}
+
+          {displayFilters.nearbySignals ? (
+            <Source id="impact-background-signal-source" type="geojson" data={backgroundGeoJson}>
+              <Layer {...BACKGROUND_SELECTED_RING_LAYER} />
+              <Layer {...BACKGROUND_SIGNAL_LAYER} />
+              <Layer {...BACKGROUND_MODEL_LAYER} />
             </Source>
           ) : null}
 
@@ -623,7 +1103,7 @@ export function ImpactMapPanel({
         </Map>
 
         <div className="impact-map-legend-inset">
-          <span className="impact-map-legend-title">Risk Level</span>
+          <span className="impact-map-legend-title">Risk level</span>
           <span className="impact-map-legend-row">
             <i className="impact-map-sym impact-map-sym-critical" aria-hidden />
             Critical
@@ -641,17 +1121,17 @@ export function ImpactMapPanel({
             Low
           </span>
           <span className="impact-map-legend-row">
-            <i className="impact-map-sym impact-map-sym-unknown" aria-hidden />
-            Unknown
-          </span>
-          <span className="impact-map-legend-row">
             <i className="impact-map-sym impact-map-sym-model" aria-hidden />
-            Model Context
+            Model context
           </span>
         </div>
 
         <div className="impact-map-status-inset">
-          {selectedAsset ? (
+          {selectedEvidenceCoord ? (
+            <span>
+              {formatCoordLat(selectedEvidenceCoord.lat)} | {formatCoordLon(selectedEvidenceCoord.lon)}
+            </span>
+          ) : selectedAsset ? (
             <span>
               {formatCoordLat(selectedAsset.lat)} | {formatCoordLon(selectedAsset.lon)}
             </span>
@@ -676,7 +1156,7 @@ export function ImpactMapPanel({
       </div>
 
       {selectedAlert && selectedEvidence.length === 0 ? (
-        <div className="impact-map-note">No matched evidence clusters for current range.</div>
+        <div className="impact-map-note">No selected-asset evidence matches the active signal filters.</div>
       ) : null}
     </section>
   );

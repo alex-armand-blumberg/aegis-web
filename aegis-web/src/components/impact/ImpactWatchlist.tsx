@@ -18,7 +18,7 @@ type Props = {
 };
 
 export type FilterMode = "all" | "critical" | "high" | "elevated" | "low";
-type SortMode = "score" | "confidence";
+type SortMode = "score" | "confidence" | "evidenceCount" | "assetName";
 type SortDirection = "asc" | "desc";
 
 const CONFIDENCE_RANK: Record<ConfidenceLevel, number> = {
@@ -114,6 +114,16 @@ export function ImpactWatchlist({
         if (byConfidence !== 0) return byConfidence;
         return (a.score - b.score) * direction;
       }
+      if (sort === "evidenceCount") {
+        const byEvidence = (a.evidence.length - b.evidence.length) * direction;
+        if (byEvidence !== 0) return byEvidence;
+        return (a.score - b.score) * direction;
+      }
+      if (sort === "assetName") {
+        const byName = a.asset.name.localeCompare(b.asset.name) * direction;
+        if (byName !== 0) return byName;
+        return (a.score - b.score) * -1;
+      }
       const byScore = (a.score - b.score) * direction;
       if (byScore !== 0) return byScore;
       return a.asset.name.localeCompare(b.asset.name);
@@ -153,11 +163,19 @@ export function ImpactWatchlist({
             <span>Sort by</span>
             <select
               value={sort}
-              onChange={(e) => setSort(e.target.value as SortMode)}
+              onChange={(e) => {
+                const nextSort = e.target.value as SortMode;
+                setSort(nextSort);
+                if (nextSort === "assetName" && sortDirection !== "asc") {
+                  setSortDirection("asc");
+                }
+              }}
               className="impact-sort-select"
             >
               <option value="score">Score</option>
               <option value="confidence">Confidence</option>
+              <option value="evidenceCount">Most Evidence</option>
+              <option value="assetName">Asset Name</option>
             </select>
             <button
               type="button"
@@ -165,7 +183,13 @@ export function ImpactWatchlist({
               aria-label={`Sort ${sortDirection === "desc" ? "descending" : "ascending"}`}
               onClick={() => setSortDirection((value) => (value === "desc" ? "asc" : "desc"))}
             >
-              {sort === "score" ? "Score" : "Confidence"}{" "}
+              {sort === "score"
+                ? "Score"
+                : sort === "confidence"
+                  ? "Confidence"
+                  : sort === "evidenceCount"
+                    ? "Evidence"
+                    : "Name"}{" "}
               {sortDirection === "desc" ? "↓" : "↑"}
             </button>
           </label>
@@ -203,31 +227,27 @@ export function ImpactWatchlist({
               const overflow = Math.max(0, allFamilyCount - families.length);
               return (
                 <li key={alert.id} className="impact-watch-li">
-                  <div
-                    className={`impact-watch-row${selected ? " is-selected" : ""}`}
+                  <button
+                    type="button"
+                    className={`impact-watch-row impact-watch-row-select${selected ? " is-selected" : ""}`}
                     data-level={alert.level}
+                    onClick={() => onSelect(alert.id)}
                   >
-                    <button
-                      type="button"
-                      className="impact-watch-row-select"
-                      onClick={() => onSelect(alert.id)}
-                    >
-                      <span className="impact-watch-stripe" aria-hidden />
-                      <span className="impact-watch-rank">{idx + 1}</span>
-                      <span className="impact-watch-main">
-                        <span className="impact-watch-name">{alert.asset.name}</span>
+                    <span className="impact-watch-stripe" aria-hidden />
+                    <span className="impact-watch-rank">{idx + 1}</span>
+                    <span className="impact-watch-main">
+                      <span className="impact-watch-name">{alert.asset.name}</span>
+                    </span>
+                    <span className="impact-watch-location">
+                      {alert.asset.city ? `${alert.asset.city}, ` : ""}
+                      {alert.asset.country}
+                    </span>
+                    <span className="impact-watch-meta">
+                      <span className={`impact-score-chip impact-level-${alert.level}`}>
+                        <span className="impact-score-value">{alert.score}</span>
                       </span>
-                      <span className="impact-watch-location">
-                        {alert.asset.city ? `${alert.asset.city}, ` : ""}
-                        {alert.asset.country}
-                      </span>
-                      <span className="impact-watch-meta">
-                        <span className={`impact-score-chip impact-level-${alert.level}`}>
-                          <span className="impact-score-value">{alert.score}</span>
-                        </span>
-                      </span>
-                    </button>
-                    <div className="impact-watch-drivers">
+                    </span>
+                    <span className="impact-watch-drivers">
                       {families.length > 0 ? (
                         <span className="impact-watch-driver-icons">
                           {families.map((f) => (
@@ -236,6 +256,7 @@ export function ImpactWatchlist({
                               className="impact-driver-icon"
                               data-label={familyLabel(f)}
                               aria-label={familyLabel(f)}
+                              title={familyLabel(f)}
                             >
                               {familyIcon(f)}
                             </span>
@@ -247,8 +268,8 @@ export function ImpactWatchlist({
                       ) : (
                         <span className="impact-watch-evidence">—</span>
                       )}
-                    </div>
-                  </div>
+                    </span>
+                  </button>
                 </li>
               );
             })}

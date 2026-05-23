@@ -35,6 +35,7 @@ const IMPACT_LAYERS = [
   "conflictsProtests",
   "conflictsRiots",
   "liveStrikes",
+  "flights",
   "vessels",
   "carriers",
   "news",
@@ -360,10 +361,21 @@ export default function ImpactPage() {
     }
   }, []);
 
-  const handleSelectAsset = useCallback((id: string) => {
-    setSelectionDismissed(false);
-    setSelectedAssetId(id);
-  }, []);
+  const handleSelectAsset = useCallback(
+    (id: string) => {
+      setSelectionDismissed(false);
+      setSelectedAssetId(id);
+      const asset = assets.find((item) => item.id === id);
+      if (asset) {
+        setFlyToCoord({
+          lat: asset.lat,
+          lon: asset.lon,
+          id: `asset:${asset.id}:${Date.now()}`,
+        });
+      }
+    },
+    [assets]
+  );
 
   const handleSelectAlert = useCallback(
     (alertId: string) => {
@@ -371,6 +383,12 @@ export default function ImpactPage() {
       if (found) {
         setSelectionDismissed(false);
         setSelectedAssetId(found.asset.id);
+        const topEvidence = found.evidence[0];
+        setFlyToCoord({
+          lat: topEvidence?.lat ?? found.asset.lat,
+          lon: topEvidence?.lon ?? found.asset.lon,
+          id: `alert:${found.id}:${Date.now()}`,
+        });
       }
     },
     [alerts]
@@ -385,7 +403,7 @@ export default function ImpactPage() {
     setFlyToCoord({
       lat,
       lon,
-      id: `${lat.toFixed(5)}:${lon.toFixed(5)}:${Date.now()}`,
+      id: `evidence:${lat.toFixed(5)}:${lon.toFixed(5)}:${Date.now()}`,
     });
   }, []);
 
@@ -548,6 +566,7 @@ export default function ImpactPage() {
               alertsByAsset={alertsByAsset}
               selectedAssetId={selectedAssetId}
               selectedAlert={selectedAlert}
+              mapData={mapData}
               onSelectAsset={handleSelectAsset}
               onSelectAlert={handleSelectAlert}
               range={range}

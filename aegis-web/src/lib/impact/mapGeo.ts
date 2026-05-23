@@ -1,6 +1,7 @@
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
 import type { ExposureAlert, EvidenceItem, ExposureLevel, UserAsset } from "./types";
 import type { IntelSeverity } from "@/lib/intel/types";
+import type { ImpactBackgroundSignal } from "./mapSignals";
 
 export type LonLatBounds = [[number, number], [number, number]];
 
@@ -155,10 +156,12 @@ type EvidenceProps = {
   distanceKm: number | null;
   eventClass: EvidenceItem["eventClass"];
   isModelContext: boolean;
+  selected: boolean;
 };
 
 export function buildEvidenceGeoJson(
-  evidence: EvidenceItem[]
+  evidence: EvidenceItem[],
+  selectedEvidenceId?: string | null
 ): FeatureCollection<Point, EvidenceProps> {
   const features: Array<Feature<Point, EvidenceProps>> = [];
   for (const item of evidence) {
@@ -178,9 +181,54 @@ export function buildEvidenceGeoJson(
         distanceKm: Number.isFinite(item.distanceKm) ? item.distanceKm ?? null : null,
         eventClass: item.eventClass,
         isModelContext,
+        selected: item.id === selectedEvidenceId,
       },
     });
   }
+  return { type: "FeatureCollection", features };
+}
+
+type BackgroundSignalProps = {
+  signalId: string;
+  title: string;
+  severity: IntelSeverity;
+  category: string;
+  layer: string;
+  eventClass: string;
+  distanceKm: number;
+  isModelContext: boolean;
+  selected: boolean;
+};
+
+export function buildBackgroundSignalGeoJson(args: {
+  signals: ImpactBackgroundSignal[];
+  selectedSignalId?: string | null;
+}): FeatureCollection<Point, BackgroundSignalProps> {
+  const { signals, selectedSignalId } = args;
+  const features: Array<Feature<Point, BackgroundSignalProps>> = [];
+
+  for (const signal of signals) {
+    if (!isValidPoint(signal)) continue;
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [signal.lon, signal.lat],
+      },
+      properties: {
+        signalId: signal.id,
+        title: signal.title,
+        severity: signal.severity,
+        category: signal.category,
+        layer: signal.layer,
+        eventClass: signal.eventClass,
+        distanceKm: signal.distanceKm,
+        isModelContext: signal.isModelContext,
+        selected: signal.id === selectedSignalId,
+      },
+    });
+  }
+
   return { type: "FeatureCollection", features };
 }
 

@@ -3964,29 +3964,32 @@ footer {
   align-items: center;
   justify-content: center;
   padding: 0 2px;
-  background: rgba(8, 8, 10, 0.96);
+  background: rgba(8, 8, 10, 0.98);
   border-left: 1px solid rgba(148, 163, 184, 0.16);
   border-right: 1px solid rgba(148, 163, 184, 0.12);
   user-select: none;
+}
+.impact-console-divider:hover {
+  background: rgba(12, 12, 16, 0.98);
 }
 .impact-console-divider-right {
   border-left: 1px solid rgba(148, 163, 184, 0.12);
   border-right: 1px solid rgba(148, 163, 184, 0.16);
 }
 .impact-console-collapse-btn {
-  width: 10px;
-  min-width: 10px;
-  height: 44px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(2, 6, 17, 0.85);
+  width: 18px;
+  min-width: 18px;
+  height: 56px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 17, 0.92);
   color: rgba(226, 232, 240, 0.88);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1;
   cursor: grab;
   touch-action: none;
 }
 .impact-console-collapse-btn:active { cursor: grabbing; }
-.impact-console-collapse-btn:hover { border-color: rgba(148, 163, 184, 0.42); }
+.impact-console-collapse-btn:hover { border-color: rgba(226, 232, 240, 0.42); }
 .impact-watch-divider {
   display: flex;
   align-items: center;
@@ -3997,6 +4000,13 @@ footer {
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
   background: rgba(8, 8, 10, 0.96);
   user-select: none;
+}
+.impact-watch-divider .impact-console-collapse-btn {
+  width: 56px;
+  min-width: 56px;
+  height: 16px;
+  font-size: 12px;
+  cursor: ns-resize;
 }
 .impact-console-col.is-collapsed { overflow: hidden; }
 .impact-console-col.is-collapsed > * {
@@ -4079,7 +4089,13 @@ footer {
 }
 .impact-empty-body { font-size: 12px; color: rgba(203, 213, 225, 0.9); line-height: 1.4; }
 .impact-empty-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.impact-empty-utils { font-size: 11.5px; color: rgba(148, 163, 184, 0.85); }
+.impact-empty-utils {
+  font-size: 11.5px;
+  color: rgba(148, 163, 184, 0.85);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 
 .impact-disclosure {
   min-width: 0;
@@ -4120,7 +4136,8 @@ footer {
   padding: 7px;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(2, 6, 17, 0.7);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 .impact-csv-sample-line {
   display: block;
@@ -4397,10 +4414,74 @@ footer {
   border-radius: 0;
   cursor: pointer;
 }
+.impact-map-control-chip-sm {
+  font-size: 8.5px;
+  padding: 2px 6px;
+}
 .impact-map-control-chip.is-active {
   background: rgba(15, 23, 42, 0.96);
   border-color: rgba(248, 250, 252, 0.5);
   color: #f8fafc;
+}
+.impact-map-filter-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.impact-map-signal-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 240px;
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  background: rgba(2, 6, 17, 0.96);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 10px 25px rgba(2, 6, 17, 0.45);
+}
+.impact-map-signal-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-barlow-condensed);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 9.5px;
+  color: rgba(226, 232, 240, 0.92);
+}
+.impact-map-signal-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.impact-map-signal-group h4 {
+  margin: 0 0 2px;
+  font-family: var(--font-barlow-condensed);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 9px;
+  color: rgba(148, 163, 184, 0.92);
+}
+.impact-map-signal-group label {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: rgba(226, 232, 240, 0.9);
+}
+.impact-map-signal-group input[type="checkbox"] {
+  margin: 0;
+  accent-color: #94a3b8;
+}
+.impact-map-signal-count {
+  font-family: var(--font-barlow-condensed);
+  letter-spacing: 0.06em;
+  color: rgba(148, 163, 184, 0.82);
 }
 .impact-map-canvas {
   position: relative;
@@ -4610,7 +4691,7 @@ footer {
 .impact-watch-table-head,
 .impact-watch-row {
   display: grid;
-  grid-template-columns: 3px 24px minmax(120px, 1.1fr) minmax(110px, 0.9fr) 44px minmax(90px, 0.8fr);
+  grid-template-columns: 3px 26px minmax(120px, 1.05fr) minmax(120px, 0.95fr) 52px minmax(110px, 0.9fr);
   gap: 6px;
   align-items: center;
 }
@@ -4628,29 +4709,18 @@ footer {
 .impact-watch-list { list-style: none; display: flex; flex-direction: column; }
 .impact-watch-li { padding: 0; border-top: 1px solid rgba(148, 163, 184, 0.08); }
 .impact-watch-row {
-  display: grid;
-  grid-template-columns: 3px 24px minmax(120px, 1.1fr) minmax(110px, 0.9fr) 44px minmax(90px, 0.8fr);
-  gap: 6px;
-  align-items: center;
   width: 100%;
   text-align: left;
   background: transparent;
   border: 0;
   color: #e2e8f0;
   cursor: pointer;
+  padding: 4px 0;
 }
 .impact-watch-row-select {
-  display: grid;
-  grid-column: 1 / 6;
-  grid-template-columns: subgrid;
-  align-items: center;
-  width: 100%;
-  text-align: left;
-  padding: 4px 0 4px 0;
-  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
   border: 0;
-  color: inherit;
-  cursor: pointer;
 }
 .impact-watch-row.is-selected { background: rgba(255, 255, 255, 0.04); }
 .impact-watch-stripe { width: 2px; height: 24px; background: rgba(148, 163, 184, 0.35); }
@@ -4662,10 +4732,11 @@ footer {
 .impact-watch-rank { font-family: var(--font-bebas); font-size: 14px; color: rgba(226, 232, 240, 0.55); text-align: center; }
 .impact-watch-main, .impact-watch-location, .impact-watch-meta { min-width: 0; }
 .impact-watch-drivers {
-  grid-column: 6;
   min-width: 0;
-  padding: 4px 10px 4px 0;
+  padding: 0 10px 0 0;
   overflow: visible;
+  display: inline-flex;
+  align-items: center;
 }
 .impact-watch-name { color: #f1f5f9; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .impact-watch-location { color: rgba(148, 163, 184, 0.78); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

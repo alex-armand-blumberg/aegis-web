@@ -104,7 +104,7 @@ function aiBriefPrompt(alert: ExposureAlert): string {
   return lines.join("\n");
 }
 
-const EVIDENCE_PREVIEW_LIMIT = 2;
+const EVIDENCE_PREVIEW_LIMIT = 3;
 const EVIDENCE_LINK_LIMIT = 2;
 
 export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }: Props) {
