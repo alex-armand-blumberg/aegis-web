@@ -10,13 +10,35 @@ export const EVIDENCE_RELATION_LABEL: Record<EvidenceRelation, string> = {
 };
 
 const DIRECT_DISTANCE_KM = 150;
-const DIRECT_SAME_COUNTRY_DISTANCE_KM = 350;
 
 function isConcreteEventClass(item: EvidenceItem): boolean {
   if (item.eventClass === "model_risk_context") return false;
   if (item.eventClass === "news_report") return false;
   if (item.eventClass === "other") return false;
   return true;
+}
+
+function normalizeToken(value: string | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isLocalitySpecific(item: EvidenceItem, asset: UserAsset): boolean {
+  const city = normalizeToken(asset.city);
+  if (city.length < 4) return false;
+  const title = normalizeToken(item.title);
+  if (!title) return false;
+  if (title.includes(city)) return true;
+  const metadata = item.metadata;
+  if (!metadata || typeof metadata !== "object") return false;
+  const metadataHaystack = Object.values(metadata)
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => normalizeToken(value))
+    .join(" ");
+  return metadataHaystack.includes(city);
 }
 
 export function classifyEvidenceRelation(
@@ -38,9 +60,10 @@ export function classifyEvidenceRelation(
 
   if (typeof distance === "number" && Number.isFinite(distance)) {
     if (distance <= DIRECT_DISTANCE_KM && concrete) return "direct";
-    if (sameCountry && distance <= DIRECT_SAME_COUNTRY_DISTANCE_KM && concrete) {
-      return "direct";
-    }
+  }
+
+  if (concrete && sameCountry && isLocalitySpecific(item, asset)) {
+    return "direct";
   }
 
   return "regional_context";

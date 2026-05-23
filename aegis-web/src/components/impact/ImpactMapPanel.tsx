@@ -21,6 +21,7 @@ import {
   signalCategoryForLayer,
   type SignalCategoryKey,
 } from "@/lib/impact/mapSignals";
+import { classifyEvidenceRelation } from "@/lib/impact/evidenceRelation";
 import {
   BASEMAP_STYLE,
   buildAssetGeoJson,
@@ -115,6 +116,7 @@ const ASSET_SOURCE_ID = "impact-asset-source";
 const EVIDENCE_SOURCE_ID = "impact-evidence-source";
 const BACKGROUND_SIGNAL_SOURCE_ID = "impact-background-signal-source";
 const LINK_SOURCE_ID = "impact-link-source";
+const BACKGROUND_SIGNAL_CAP = 600;
 
 const SELECTED_ACCENT_OUTER = "rgba(232,191,122,0.22)";
 const SELECTED_ACCENT_MID = "rgba(232,191,122,0.42)";
@@ -288,35 +290,35 @@ const BACKGROUND_SIGNAL_LAYER: LayerProps = {
       "match",
       ["get", "severity"],
       "critical",
-      2.6,
+      2.9,
       "high",
-      2.3,
+      2.5,
       "medium",
+      2.2,
       2.0,
-      1.8,
     ],
     "circle-color": [
       "match",
       ["get", "severity"],
       "critical",
-      "rgba(160,90,90,0.7)",
+      "rgba(170,96,96,0.78)",
       "high",
-      "rgba(100,120,140,0.65)",
+      "rgba(108,126,146,0.72)",
       "medium",
-      "rgba(95,108,128,0.6)",
-      "rgba(80,90,108,0.55)",
+      "rgba(98,112,132,0.68)",
+      "rgba(86,98,116,0.62)",
     ],
-    "circle-stroke-color": "rgba(8,11,18,0.55)",
-    "circle-stroke-width": 0.5,
+    "circle-stroke-color": "rgba(8,11,18,0.62)",
+    "circle-stroke-width": 0.55,
     "circle-opacity": [
       "case",
       ["<=", ["get", "distanceKm"], 80],
-      0.55,
+      0.62,
       ["<=", ["get", "distanceKm"], 200],
-      0.4,
+      0.48,
       ["<=", ["get", "distanceKm"], 350],
-      0.28,
-      0.18,
+      0.34,
+      0.24,
     ],
   },
 };
@@ -327,11 +329,11 @@ const BACKGROUND_MODEL_LAYER: LayerProps = {
   source: BACKGROUND_SIGNAL_SOURCE_ID,
   filter: ["==", ["get", "isModelContext"], true],
   paint: {
-    "circle-radius": 4.2,
+    "circle-radius": 4.4,
     "circle-color": "rgba(0,0,0,0)",
-    "circle-stroke-color": "rgba(148,163,184,0.5)",
+    "circle-stroke-color": "rgba(148,163,184,0.56)",
     "circle-stroke-width": 0.9,
-    "circle-opacity": 0.55,
+    "circle-opacity": 0.62,
   },
 };
 
@@ -659,16 +661,45 @@ export function ImpactMapPanel({
     if (!mapRef.current) return;
     const focusAsset = assets.find((asset) => asset.id === selectedAssetId);
     if (!focusAsset) return;
+    const rankedEvidence = selectedEvidenceAll
+      .map((item) => {
+        const relation = classifyEvidenceRelation(item, focusAsset);
+        const distanceKm =
+          typeof item.distanceKm === "number" && Number.isFinite(item.distanceKm)
+            ? item.distanceKm
+            : Number.POSITIVE_INFINITY;
+        return { item, relation, distanceKm };
+      })
+      .sort((a, b) => {
+        const relationRank = (value: "direct" | "regional_context" | "model_context") => {
+          if (value === "direct") return 0;
+          if (value === "regional_context") return 1;
+          return 2;
+        };
+        const relationDelta = relationRank(a.relation) - relationRank(b.relation);
+        if (relationDelta !== 0) return relationDelta;
+        return a.distanceKm - b.distanceKm;
+      });
+    const scopedEvidence = rankedEvidence
+      .filter(
+        (entry) =>
+          entry.relation === "direct" ||
+          (Number.isFinite(entry.distanceKm) && entry.distanceKm <= 350)
+      )
+      .slice(0, 8);
+    const focusEvidence = (scopedEvidence.length ? scopedEvidence : rankedEvidence.slice(0, 4)).map(
+      (entry) => entry.item
+    );
     const points = [
       { lat: focusAsset.lat, lon: focusAsset.lon },
-      ...selectedEvidenceAll.map((item) => ({ lat: item.lat, lon: item.lon })),
+      ...focusEvidence.map((item) => ({ lat: item.lat, lon: item.lon })),
     ];
     const bounds = computeBounds(points);
     if (!bounds) return;
     mapRef.current.fitBounds(bounds, {
-      padding: 56,
+      padding: { top: 72, right: 56, bottom: 48, left: 56 },
       duration: 700,
-      maxZoom: 6,
+      maxZoom: 6.8,
     });
   }, [assets, selectedAssetId, selectedEvidenceAll]);
 
@@ -962,7 +993,9 @@ export function ImpactMapPanel({
           <span>·</span>
           <span>{selectedEvidence.length} selected evidence</span>
           <span>·</span>
-          <span>{backgroundSignals.length} nearby signals</span>
+          <span>
+            {backgroundSignals.length} nearby signals shown · cap {BACKGROUND_SIGNAL_CAP}
+          </span>
           <span>·</span>
           <span>{range}</span>
           {updatedLabel ? (
@@ -1207,12 +1240,13 @@ export function ImpactMapPanel({
           </span>
           <span className="impact-map-legend-row">
             <i className="impact-map-sym impact-map-sym-bg" aria-hidden />
-            Background signal
+            Background context (not scored)
           </span>
           <span className="impact-map-legend-row">
             <i className="impact-map-sym impact-map-sym-model" aria-hidden />
             Model context
           </span>
+          <span className="impact-map-legend-note">Background points support context only.</span>
         </div>
 
         <div className="impact-map-status-inset">

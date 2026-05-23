@@ -6,6 +6,7 @@ import type {
   EvidenceItem,
   ExposureAlert,
   ExposureScoreBreakdown,
+  SourceFamily,
   UserAsset,
 } from "@/lib/impact/types";
 import { countryDisplay } from "@/lib/impact/countryDisplay";
@@ -47,6 +48,100 @@ function formatDistance(distanceKm: number | undefined): string {
   if (distanceKm < 1) return "<1 km";
   if (distanceKm < 100) return `${distanceKm.toFixed(1)} km`;
   return `${Math.round(distanceKm)} km`;
+}
+
+function eventClassLabel(eventClass: EvidenceItem["eventClass"]): string {
+  switch (eventClass) {
+    case "armed_conflict":
+      return "Armed conflict";
+    case "strike_or_explosion":
+      return "Strike / explosion";
+    case "civilian_harm":
+      return "Civilian harm";
+    case "protest_or_unrest":
+      return "Protest / unrest";
+    case "strategic_development":
+      return "Strategic development";
+    case "humanitarian_stress":
+      return "Humanitarian stress";
+    case "natural_disaster":
+      return "Natural disaster";
+    case "sanctions_or_economic":
+      return "Sanctions / economic";
+    case "maritime_activity":
+      return "Maritime activity";
+    case "aviation_activity":
+      return "Aviation activity";
+    case "infrastructure_disruption":
+      return "Infrastructure disruption";
+    case "news_report":
+      return "News report";
+    case "model_risk_context":
+      return "Model context";
+    default:
+      return "Other";
+  }
+}
+
+function sourceFamilyLabel(family: SourceFamily | undefined): string {
+  switch (family) {
+    case "structured_conflict":
+      return "Structured";
+    case "official":
+      return "Official";
+    case "humanitarian":
+      return "Humanitarian";
+    case "disaster":
+      return "Disaster";
+    case "sanctions":
+      return "Sanctions";
+    case "maritime":
+      return "Maritime";
+    case "aviation":
+      return "Aviation";
+    case "infrastructure":
+      return "Infrastructure";
+    case "news":
+      return "News";
+    case "market":
+      return "Market";
+    case "model_context":
+      return "Model";
+    default:
+      return "Unknown";
+  }
+}
+
+function joinWithAnd(values: string[]): string {
+  if (values.length === 0) return "";
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
+}
+
+function buildHighScoreDriverLine(alert: ExposureAlert): string | null {
+  if (alert.level !== "high" && alert.level !== "critical") return null;
+  const drivers: string[] = [];
+  const directEvidence = alert.evidence.filter(
+    (item) => classifyEvidenceRelation(item, alert.asset) === "direct"
+  );
+  const topEvidence = directEvidence[0] ?? alert.evidence[0];
+  if (topEvidence) {
+    const eventLabel = eventClassLabel(topEvidence.eventClass).toLowerCase();
+    const prefix = directEvidence.length > 0 ? "nearby" : "priority";
+    drivers.push(`${prefix} ${eventLabel} evidence`);
+  }
+  if (alert.breakdown.severity >= 10) {
+    drivers.push("high-severity signals");
+  }
+  if (alert.breakdown.sourceDiversity > 0) {
+    drivers.push("source diversity");
+  }
+  if (alert.breakdown.countryContext > 0) {
+    drivers.push("active country context");
+  }
+  if (drivers.length === 0) return null;
+  return `Score drivers: ${joinWithAnd(drivers)}.`;
 }
 
 function breakdownBars(breakdown: ExposureScoreBreakdown) {
@@ -192,6 +287,7 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }
   const hiddenCount = Math.max(0, alert.evidence.length - previewCount);
   const country = countryDisplay(alert.asset.country);
   const primaryWatchNext = alert.watchNext[0] ?? null;
+  const highScoreDriverLine = buildHighScoreDriverLine(alert);
 
   return (
     <article className="impact-detail" data-level={alert.level}>
@@ -275,6 +371,9 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }
             <p className="impact-detail-line">
               {alert.whyItMatters}
             </p>
+            {highScoreDriverLine ? (
+              <p className="impact-detail-line impact-detail-driver-line">{highScoreDriverLine}</p>
+            ) : null}
           </section>
 
           <section className="impact-detail-section">
@@ -443,6 +542,12 @@ const RELATION_HINT: Record<EvidenceRelation, string> = {
   model_context: "Aggregate or model context — not a concrete incident.",
 };
 
+const RELATION_DESCRIPTION: Record<EvidenceRelation, string> = {
+  direct: "Concrete nearby incidents most likely to affect this asset.",
+  regional_context: "Relevant country or regional signals, not direct incidents.",
+  model_context: "Aggregate/model indicators, not concrete incidents.",
+};
+
 function buildPreviewGroups(groups: EvidenceGroup[], limit: number): EvidenceGroup[] {
   if (limit <= 0) return [];
   const out: EvidenceGroup[] = [];
@@ -485,13 +590,16 @@ function GroupedEvidenceList({
           className={`impact-evidence-group impact-evidence-group-${group.relation}`}
         >
           <header className="impact-evidence-group-head">
-            <span
-              className={`impact-relation-chip impact-relation-${group.relation}`}
-              title={RELATION_HINT[group.relation]}
-            >
-              {EVIDENCE_RELATION_LABEL[group.relation]}
-            </span>
-            <span className="impact-evidence-group-count">{group.items.length}</span>
+            <div className="impact-evidence-group-titleline">
+              <span
+                className={`impact-relation-chip impact-relation-${group.relation}`}
+                title={RELATION_HINT[group.relation]}
+              >
+                {EVIDENCE_RELATION_LABEL[group.relation]}
+              </span>
+              <span className="impact-evidence-group-count">{group.items.length}</span>
+            </div>
+            <p className="impact-evidence-group-desc">{RELATION_DESCRIPTION[group.relation]}</p>
           </header>
           <EvidenceList
             items={group.items}
@@ -532,6 +640,9 @@ function EvidenceList({
     >
       {items.map((e) => {
         const relation = classifyEvidenceRelation(e, asset);
+        const source = e.sources[0] || "Unknown source";
+        const sourceFamily = sourceFamilyLabel(e.sourceFamilies[0]);
+        const distance = formatDistance(e.distanceKm);
         return (
           <li
             key={e.id}
@@ -561,21 +672,18 @@ function EvidenceList({
                 </span>
               </span>
             </div>
-            {preview ? (
-              <div className="impact-evidence-preview-meta">
-                <span>{e.sources[0] || "Unknown source"}</span>
-                <span>·</span>
-                <span>{formatRelative(e.timestamp)}</span>
-              </div>
-            ) : (
-              <div className="impact-evidence-meta">
-                <span>{e.eventClass.replace(/_/g, " ")}</span>
-                <span>{e.sources.slice(0, 2).join(", ") || "—"}</span>
-                <span>{formatTimestamp(e.timestamp)}</span>
-                {!compact ? <span>{formatDistance(e.distanceKm)}</span> : null}
-                <span>{(e.sourceReliability * 100).toFixed(0)}% rel</span>
-              </div>
-            )}
+            <div
+              className={`impact-evidence-meta impact-evidence-meta-compact${
+                preview ? " impact-evidence-preview-meta" : ""
+              }`}
+            >
+              <span>{eventClassLabel(e.eventClass)}</span>
+              <span>{EVIDENCE_RELATION_LABEL[relation]}</span>
+              {distance !== "—" ? <span>{distance}</span> : null}
+              <span>{source}</span>
+              <span>{sourceFamily}</span>
+              <span>{preview ? formatRelative(e.timestamp) : formatTimestamp(e.timestamp)}</span>
+            </div>
             {!compact && e.urls && e.urls.length > 0 ? (
               <ul className="impact-evidence-links">
                 {e.urls.slice(0, EVIDENCE_LINK_LIMIT).map((u) => (
