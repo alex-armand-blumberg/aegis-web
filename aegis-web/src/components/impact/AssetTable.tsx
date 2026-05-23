@@ -8,10 +8,6 @@ type Props = {
   alertsByAsset: Record<string, ExposureAlert>;
   selectedAssetId: string | null;
   onSelect: (assetId: string) => void;
-  search?: string;
-  typeFilter?: "all" | UserAsset["type"];
-  importanceFilter?: "all" | UserAsset["importance"];
-  regionFilter?: "all" | string;
 };
 
 export function AssetTable({
@@ -19,34 +15,12 @@ export function AssetTable({
   alertsByAsset,
   selectedAssetId,
   onSelect,
-  search = "",
-  typeFilter = "all",
-  importanceFilter = "all",
-  regionFilter = "all",
 }: Props) {
   if (assets.length === 0) return null;
-  const query = search.trim().toLowerCase();
-  const filtered = assets.filter((asset) => {
-    if (typeFilter !== "all" && asset.type !== typeFilter) return false;
-    if (importanceFilter !== "all" && asset.importance !== importanceFilter) return false;
-    if (regionFilter !== "all" && asset.country !== regionFilter) return false;
-    if (!query) return true;
-    return `${asset.name} ${asset.city ?? ""} ${asset.country} ${asset.type} ${asset.importance}`
-      .toLowerCase()
-      .includes(query);
-  });
-
-  if (filtered.length === 0) {
-    return (
-      <div className="impact-asset-list impact-asset-list-empty">
-        <p>No assets match current portfolio filters.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="impact-asset-list" role="list">
-      {filtered.map((asset) => {
+      {assets.map((asset) => {
         const alert = alertsByAsset[asset.id];
         const selected = asset.id === selectedAssetId;
         const level = alert?.level ?? "none";

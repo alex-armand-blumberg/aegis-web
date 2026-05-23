@@ -5,7 +5,7 @@ import type { IntelSeverity } from "@/lib/intel/types";
 export type LonLatBounds = [[number, number], [number, number]];
 
 export const BASEMAP_STYLE =
-  "https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json";
+  "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
 const LEVEL_COLOR: Record<ExposureLevel, string> = {
   critical: "#8b1a1a",
@@ -119,10 +119,13 @@ export function buildAssetGeoJson(args: {
   assets: UserAsset[];
   alertsByAsset: Record<string, ExposureAlert>;
   selectedAssetId: string | null;
+  visibleAssetIds?: Set<string>;
 }): FeatureCollection<Point, AssetProps> {
-  const { assets, alertsByAsset, selectedAssetId } = args;
+  const { assets, alertsByAsset, selectedAssetId, visibleAssetIds } = args;
   const features: Array<Feature<Point, AssetProps>> = [];
   for (const asset of assets) {
+    const shouldShow = !visibleAssetIds || visibleAssetIds.has(asset.id) || asset.id === selectedAssetId;
+    if (!shouldShow) continue;
     if (!isValidPoint(asset)) continue;
     const alert = alertsByAsset[asset.id];
     features.push({

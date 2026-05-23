@@ -16,6 +16,7 @@ type Props = {
   feedback: AlertFeedback[];
   onFeedback: (feedback: AlertFeedback[]) => void;
   onDismiss?: () => void;
+  onFlyTo?: (lat: number, lon: number) => void;
 };
 
 function formatTimestamp(iso: string): string {
@@ -105,7 +106,7 @@ function aiBriefPrompt(alert: ExposureAlert): string {
 
 const EVIDENCE_PREVIEW_LIMIT = 2;
 
-export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) {
+export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }: Props) {
   const [briefStatus, setBriefStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
   const [briefContent, setBriefContent] = useState<string | null>(null);
   const [briefError, setBriefError] = useState<string | null>(null);
@@ -159,6 +160,12 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
       setBriefError("AI brief unavailable (network error).");
     }
   }, [alert]);
+
+  const handleClearBrief = useCallback(() => {
+    setBriefStatus("idle");
+    setBriefContent(null);
+    setBriefError(null);
+  }, []);
 
   if (!alert) {
     return (
@@ -264,7 +271,7 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
 
           <section className="impact-detail-section">
             <span className="impact-eyebrow">Evidence summary</span>
-            <EvidenceList items={previewEvidence} compact preview />
+            <EvidenceList items={previewEvidence} compact preview onItemClick={onFlyTo} />
             {hiddenCount > 0 ? (
               <button
                 type="button"
@@ -313,6 +320,15 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
                     ? "Regenerate brief"
                     : "Generate brief"}
                 </button>
+                {briefStatus === "ok" || briefStatus === "error" ? (
+                  <button
+                    type="button"
+                    className="impact-btn impact-btn-ghost impact-btn-sm"
+                    onClick={handleClearBrief}
+                  >
+                    Clear brief
+                  </button>
+                ) : null}
               </header>
               {briefStatus === "error" && briefError ? (
                 <p className="impact-brief-error" role="alert">
@@ -336,7 +352,7 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
 
       {activeTab === "evidence" ? (
         <section className="impact-detail-section">
-          <EvidenceList items={alert.evidence} />
+          <EvidenceList items={alert.evidence} onItemClick={onFlyTo} />
         </section>
       ) : null}
 
@@ -405,10 +421,12 @@ function EvidenceList({
   items,
   compact = false,
   preview = false,
+  onItemClick,
 }: {
   items: EvidenceItem[];
   compact?: boolean;
   preview?: boolean;
+  onItemClick?: (lat: number, lon: number) => void;
 }) {
   if (items.length === 0) {
     return (
@@ -422,7 +440,19 @@ function EvidenceList({
       className={`impact-evidence-list${compact ? " impact-evidence-list-compact" : ""}${preview ? " impact-evidence-list-preview" : ""}`}
     >
       {items.map((e) => (
-        <li key={e.id} className="impact-evidence-item">
+        <li
+          key={e.id}
+          className="impact-evidence-item"
+          onClick={() => onItemClick?.(e.lat, e.lon)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onItemClick?.(e.lat, e.lon);
+            }
+          }}
+          role={onItemClick ? "button" : undefined}
+          tabIndex={onItemClick ? 0 : undefined}
+        >
           <div className="impact-evidence-head">
             <span className="impact-evidence-title">{e.title}</span>
             <span className={`impact-severity-chip impact-severity-${e.severity}`}>

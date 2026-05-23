@@ -24,6 +24,7 @@ import {
 
 type Props = {
   assets: UserAsset[];
+  visibleAssetIds: Set<string>;
   alerts: ExposureAlert[];
   alertsByAsset: Record<string, ExposureAlert>;
   selectedAssetId: string | null;
@@ -36,6 +37,7 @@ type Props = {
   updatedLabel: string | null;
   onSelectAsset: (assetId: string) => void;
   onSelectAlert: (alertId: string) => void;
+  flyToCoord?: { lat: number; lon: number; id: string } | null;
 };
 
 type HoverState = {
@@ -45,8 +47,6 @@ type HoverState = {
   title: string;
   subtitle: string;
 } | null;
-
-type SourceLayerSpec = { "source-layer"?: string };
 
 const INITIAL_VIEW_STATE = {
   longitude: 0,
@@ -65,7 +65,6 @@ const SELECTED_RING_MID_ID = "impact-selected-ring-mid";
 const SELECTED_RING_INNER_ID = "impact-selected-ring-inner";
 const SELECTED_STAR_LAYER_ID = "impact-selected-star";
 const SELECTED_LABEL_LAYER_ID = "impact-selected-label";
-const COUNTRY_LABEL_LAYER_ID = "impact-country-labels";
 
 const ASSET_LAYER: LayerProps = {
   id: ASSET_LAYER_ID,
@@ -259,6 +258,7 @@ function evidenceSubtitle(alert: ExposureAlert, properties: Record<string, unkno
 
 export function ImpactMapPanel({
   assets,
+  visibleAssetIds,
   alerts,
   alertsByAsset,
   selectedAssetId,
@@ -271,13 +271,17 @@ export function ImpactMapPanel({
   updatedLabel,
   onSelectAsset,
   onSelectAlert,
+  flyToCoord,
 }: Props) {
+  const mapPanelRef = useRef<HTMLElement | null>(null);
   const mapRef = useRef<MapRef | null>(null);
+  const userHasMoved = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [hover, setHover] = useState<HoverState>(null);
   const [showEvidence, setShowEvidence] = useState(true);
   const [lastMapCoord, setLastMapCoord] = useState<{ lat: number; lon: number } | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === selectedAssetId) ?? null,
@@ -287,8 +291,14 @@ export function ImpactMapPanel({
   const selectedEvidence = selectedAlert?.evidence ?? [];
 
   const assetGeoJson = useMemo(
-    () => buildAssetGeoJson({ assets, alertsByAsset, selectedAssetId }),
-    [assets, alertsByAsset, selectedAssetId]
+    () =>
+      buildAssetGeoJson({
+        assets,
+        alertsByAsset,
+        selectedAssetId,
+        visibleAssetIds,
+      }),
+    [assets, alertsByAsset, selectedAssetId, visibleAssetIds]
   );
   const evidenceGeoJson = useMemo(
     () => buildEvidenceGeoJson(selectedEvidence),
@@ -301,8 +311,12 @@ export function ImpactMapPanel({
 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
+    if (userHasMoved.current) return;
+    const visibleAssets = assets.filter(
+      (asset) => visibleAssetIds.has(asset.id) || asset.id === selectedAssetId
+    );
     const points = [
-      ...assets.map((asset) => ({ lat: asset.lat, lon: asset.lon })),
+      ...visibleAssets.map((asset) => ({ lat: asset.lat, lon: asset.lon })),
       ...selectedEvidence.map((item) => ({ lat: item.lat, lon: item.lon })),
     ];
     const bounds = computeBounds(points);
@@ -312,7 +326,32 @@ export function ImpactMapPanel({
       duration: 700,
       maxZoom: 6,
     });
-  }, [assets, mapLoaded, selectedEvidence, selectedAssetId]);
+  }, [assets, mapLoaded, selectedEvidence, selectedAssetId, visibleAssetIds]);
+
+  useEffect(() => {
+    userHasMoved.current = false;
+  }, [selectedAssetId]);
+
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current || !flyToCoord) return;
+    userHasMoved.current = true;
+    mapRef.current.flyTo({
+      center: [flyToCoord.lon, flyToCoord.lat],
+      zoom: Math.max(mapRef.current.getZoom(), 7.5),
+      duration: 650,
+    });
+    setLastMapCoord({ lat: flyToCoord.lat, lon: flyToCoord.lon });
+  }, [flyToCoord, mapLoaded]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === mapPanelRef.current);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+    };
+  }, []);
 
   const interactiveLayerIds = showEvidence
     ? [ASSET_LAYER_ID, EVIDENCE_LAYER_ID, EVIDENCE_MODEL_LAYER_ID]
@@ -379,61 +418,41 @@ export function ImpactMapPanel({
     setHover(null);
   };
 
+  const fitVisiblePoints = () => {
+    if (!mapRef.current) return;
+    const visibleAssets = assets.filter(
+      (asset) => visibleAssetIds.has(asset.id) || asset.id === selectedAssetId
+    );
+    const points = [
+      ...visibleAssets.map((asset) => ({ lat: asset.lat, lon: asset.lon })),
+      ...selectedEvidence.map((item) => ({ lat: item.lat, lon: item.lon })),
+    ];
+    const bounds = computeBounds(points);
+    if (!bounds) return;
+    mapRef.current.fitBounds(bounds, {
+      padding: 56,
+      duration: 700,
+      maxZoom: 6,
+    });
+  };
+
+  const handleResetView = () => {
+    userHasMoved.current = false;
+    fitVisiblePoints();
+  };
+
+  const handleToggleFullscreen = () => {
+    const panel = mapPanelRef.current;
+    if (!panel) return;
+    if (!document.fullscreenElement) {
+      void panel.requestFullscreen?.();
+      return;
+    }
+    void document.exitFullscreen?.();
+  };
+
   const handleMapLoad = () => {
     setMapLoaded(true);
-    const map = mapRef.current?.getMap();
-    if (!map) return;
-    const style = map.getStyle();
-    if (!style || !style.sources) return;
-
-    const sourceEntry = Object.entries(style.sources).find(([, source]) => {
-      const sourceType = (source as { type?: string }).type;
-      return sourceType === "vector";
-    });
-    if (!sourceEntry) return;
-
-    const [sourceId] = sourceEntry;
-    let hasCountryLayer = false;
-    try {
-      const sourceLayers = map
-        .getStyle()
-        .layers?.map((layer) => (layer as SourceLayerSpec)["source-layer"])
-        .filter((value): value is string => Boolean(value));
-      hasCountryLayer = sourceLayers?.includes("place_label") ?? false;
-    } catch {
-      hasCountryLayer = false;
-    }
-    if (!hasCountryLayer) return;
-    if (map.getLayer(COUNTRY_LABEL_LAYER_ID)) return;
-
-    try {
-      map.addLayer({
-        id: COUNTRY_LABEL_LAYER_ID,
-        type: "symbol",
-        source: sourceId,
-        "source-layer": "place_label",
-        filter: [
-          "all",
-          ["==", ["get", "class"], "country"],
-        ],
-        minzoom: 3,
-        layout: {
-          "text-field": ["upcase", ["coalesce", ["get", "name_en"], ["get", "name"]]],
-          "text-size": 9,
-          "text-letter-spacing": 0.15,
-          "text-font": ["Open Sans Semibold"],
-          "symbol-placement": "point",
-          "text-allow-overlap": false,
-        },
-        paint: {
-          "text-color": "rgba(148,163,184,0.55)",
-          "text-halo-color": "rgba(0,0,0,0.82)",
-          "text-halo-width": 0.8,
-        },
-      });
-    } catch {
-      // Keep no-label basemap if layer/source assumptions differ.
-    }
   };
 
   if (assets.length === 0) {
@@ -462,7 +481,11 @@ export function ImpactMapPanel({
   }
 
   return (
-    <section className="impact-map-panel" aria-label="Operational map panel">
+    <section
+      ref={mapPanelRef}
+      className={`impact-map-panel${isFullscreen ? " is-fullscreen" : ""}`}
+      aria-label="Operational map panel"
+    >
       <div className="impact-map-overlay">
         <div className="impact-map-title-block">
           <span className="impact-eyebrow">Global Impact Map</span>
@@ -505,6 +528,20 @@ export function ImpactMapPanel({
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          className="impact-map-control-chip"
+          onClick={handleResetView}
+        >
+          Reset view
+        </button>
+        <button
+          type="button"
+          className={`impact-map-control-chip${isFullscreen ? " is-active" : ""}`}
+          onClick={handleToggleFullscreen}
+        >
+          {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        </button>
       </div>
 
       <div className="impact-map-canvas">
@@ -528,6 +565,14 @@ export function ImpactMapPanel({
           onMouseMove={handleHover}
           onMove={(event) => {
             setLastMapCoord({ lat: event.viewState.latitude, lon: event.viewState.longitude });
+          }}
+          onDragEnd={() => {
+            if (!mapLoaded) return;
+            userHasMoved.current = true;
+          }}
+          onZoomEnd={() => {
+            if (!mapLoaded) return;
+            userHasMoved.current = true;
           }}
           onMouseLeave={() => setHover(null)}
           cursor={hover ? "pointer" : "grab"}

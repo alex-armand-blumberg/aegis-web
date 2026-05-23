@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { MapApiResponse } from "@/lib/intel/types";
 import { buildMapDataUrl } from "@/lib/instantLoad";
 import { buildExposureAlerts } from "@/lib/impact/scoring";
@@ -15,7 +15,7 @@ import type { AlertFeedback, ExposureAlert, UserAsset } from "@/lib/impact/types
 import { ImpactWorkspaceNav } from "@/components/impact/ImpactWorkspaceNav";
 import { AssetUploadPanel, PortfolioManagePanel } from "@/components/impact/AssetUploadPanel";
 import { AssetTable } from "@/components/impact/AssetTable";
-import { ImpactWatchlist } from "@/components/impact/ImpactWatchlist";
+import { ImpactWatchlist, type FilterMode } from "@/components/impact/ImpactWatchlist";
 import { ExposureCard } from "@/components/impact/ExposureCard";
 import { ImpactMethodologyPanel } from "@/components/impact/ImpactMethodologyPanel";
 
@@ -43,6 +43,37 @@ const IMPACT_LAYERS = [
 ].join(",");
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type DragSide = "left" | "right" | null;
+
+const LEFT_PANEL_WIDTH = { min: 220, max: 520, default: 272, collapsed: 36 } as const;
+const RIGHT_PANEL_WIDTH = { min: 280, max: 620, default: 400, collapsed: 36 } as const;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function loadPanelWidth(key: "left" | "right", fallback: number, min: number, max: number): number {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(`impact-panel-width-${key}`);
+    if (!raw) return fallback;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return fallback;
+    return clamp(parsed, min, max);
+  } catch {
+    return fallback;
+  }
+}
+
+function loadPanelCollapsed(key: "left" | "right"): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = window.localStorage.getItem(`impact-panel-collapsed-${key}`);
+    return raw === "1";
+  } catch {
+    return false;
+  }
+}
 
 export default function ImpactPage() {
   const [assets, setAssets] = useState<UserAsset[]>([]);
@@ -57,6 +88,21 @@ export default function ImpactPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [selectionDismissed, setSelectionDismissed] = useState(false);
+  const [watchlistFilter, setWatchlistFilter] = useState<FilterMode>("all");
+  const [flyToCoord, setFlyToCoord] = useState<{ lat: number; lon: number; id: string } | null>(
+    null
+  );
+  const [leftWidth, setLeftWidth] = useState(() =>
+    loadPanelWidth("left", LEFT_PANEL_WIDTH.default, LEFT_PANEL_WIDTH.min, LEFT_PANEL_WIDTH.max)
+  );
+  const [rightWidth, setRightWidth] = useState(() =>
+    loadPanelWidth("right", RIGHT_PANEL_WIDTH.default, RIGHT_PANEL_WIDTH.min, RIGHT_PANEL_WIDTH.max)
+  );
+  const [leftCollapsed, setLeftCollapsed] = useState(() => loadPanelCollapsed("left"));
+  const [rightCollapsed, setRightCollapsed] = useState(() => loadPanelCollapsed("right"));
+  const [dragSide, setDragSide] = useState<DragSide>(null);
+  const [dragOriginX, setDragOriginX] = useState(0);
+  const [dragOriginWidth, setDragOriginWidth] = useState(0);
 
   useEffect(() => {
     setAssets(loadAssets());
@@ -66,6 +112,71 @@ export default function ImpactPage() {
   useEffect(() => {
     saveAssets(assets);
   }, [assets]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("impact-panel-width-left", String(leftWidth));
+    } catch {
+      // Ignore storage errors to keep dashboard functional.
+    }
+  }, [leftWidth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("impact-panel-width-right", String(rightWidth));
+    } catch {
+      // Ignore storage errors to keep dashboard functional.
+    }
+  }, [rightWidth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("impact-panel-collapsed-left", leftCollapsed ? "1" : "0");
+    } catch {
+      // Ignore storage errors to keep dashboard functional.
+    }
+  }, [leftCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("impact-panel-collapsed-right", rightCollapsed ? "1" : "0");
+    } catch {
+      // Ignore storage errors to keep dashboard functional.
+    }
+  }, [rightCollapsed]);
+
+  useEffect(() => {
+    if (!dragSide) return;
+    const onMouseMove = (event: MouseEvent) => {
+      if (dragSide === "left") {
+        const next = clamp(
+          dragOriginWidth + (event.clientX - dragOriginX),
+          LEFT_PANEL_WIDTH.min,
+          LEFT_PANEL_WIDTH.max
+        );
+        setLeftWidth(next);
+      } else if (dragSide === "right") {
+        const next = clamp(
+          dragOriginWidth - (event.clientX - dragOriginX),
+          RIGHT_PANEL_WIDTH.min,
+          RIGHT_PANEL_WIDTH.max
+        );
+        setRightWidth(next);
+      }
+    };
+    const onMouseUp = () => setDragSide(null);
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [dragOriginWidth, dragOriginX, dragSide]);
 
   const fetchMap = useCallback(async (r: RangeOption) => {
     setLoadState("loading");
@@ -110,6 +221,38 @@ export default function ImpactPage() {
   }, [alerts, assets, selectedAssetId, selectionDismissed]);
 
   const selectedAlert = selectedAssetId ? alertsByAsset[selectedAssetId] ?? null : null;
+
+  const filteredAssets = useMemo(() => {
+    const query = assetSearch.trim().toLowerCase();
+    return assets.filter((asset) => {
+      if (typeFilter !== "all" && asset.type !== typeFilter) return false;
+      if (importanceFilter !== "all" && asset.importance !== importanceFilter) return false;
+      if (regionFilter !== "all" && asset.country !== regionFilter) return false;
+      if (!query) return true;
+      return `${asset.name} ${asset.city ?? ""} ${asset.country} ${asset.type} ${asset.importance}`
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [assetSearch, assets, importanceFilter, regionFilter, typeFilter]);
+
+  const watchlistVisibleAlerts = useMemo(() => {
+    if (watchlistFilter === "all") return alerts;
+    return alerts.filter((a) => {
+      if (watchlistFilter === "low") return a.level === "low" || a.level === "guarded";
+      return a.level === watchlistFilter;
+    });
+  }, [alerts, watchlistFilter]);
+
+  const visibleAssetIds = useMemo(() => {
+    const portfolioSet = new Set(filteredAssets.map((asset) => asset.id));
+    if (watchlistFilter === "all") return portfolioSet;
+    const watchSet = new Set(watchlistVisibleAlerts.map((a) => a.asset.id));
+    const intersect = new Set<string>();
+    for (const id of portfolioSet) {
+      if (watchSet.has(id)) intersect.add(id);
+    }
+    return intersect;
+  }, [filteredAssets, watchlistFilter, watchlistVisibleAlerts]);
 
   const regionOptions = useMemo(() => {
     const set = new Set<string>();
@@ -156,11 +299,28 @@ export default function ImpactPage() {
     setSelectedAssetId(null);
   }, []);
 
+  const handleFlyToEvidence = useCallback((lat: number, lon: number) => {
+    setFlyToCoord({
+      lat,
+      lon,
+      id: `${lat.toFixed(5)}:${lon.toFixed(5)}:${Date.now()}`,
+    });
+  }, []);
+
   const providerFailures =
     mapData?.providerHealth?.filter((p) => p && p.ok === false).length ?? 0;
   const updatedLabel = mapData?.updatedAt
     ? new Date(mapData.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : null;
+
+  const consoleStyle = useMemo(
+    () =>
+      ({
+        "--impact-left-col": `${leftCollapsed ? LEFT_PANEL_WIDTH.collapsed : leftWidth}px`,
+        "--impact-right-col": `${rightCollapsed ? RIGHT_PANEL_WIDTH.collapsed : rightWidth}px`,
+      }) as CSSProperties,
+    [leftCollapsed, leftWidth, rightCollapsed, rightWidth]
+  );
 
   return (
     <div className="impact-page">
@@ -169,8 +329,13 @@ export default function ImpactPage() {
       <main className="impact-main">
         {loadError ? <p className="impact-load-error">{loadError}</p> : null}
 
-        <div className="impact-console">
-          <aside className="impact-console-col impact-console-portfolio">
+        <div
+          className={`impact-console${leftCollapsed ? " is-left-collapsed" : ""}${rightCollapsed ? " is-right-collapsed" : ""}`}
+          style={consoleStyle}
+        >
+          <aside
+            className={`impact-console-col impact-console-portfolio${leftCollapsed ? " is-collapsed" : ""}`}
+          >
             <div className="impact-portfolio-shell">
             <AssetUploadPanel assetCount={assets.length} onAssetsChange={handleAssetsChange} />
             {assets.length > 0 ? (
@@ -237,25 +402,50 @@ export default function ImpactPage() {
             ) : null}
             {assets.length > 0 ? (
               <AssetTable
-                assets={assets}
+                assets={filteredAssets}
                 alertsByAsset={alertsByAsset}
                 selectedAssetId={selectedAssetId}
                 onSelect={handleSelectAsset}
-                search={assetSearch}
-                typeFilter={typeFilter}
-                importanceFilter={importanceFilter}
-                regionFilter={regionFilter}
               />
+            ) : null}
+            {assets.length > 0 && filteredAssets.length === 0 ? (
+              <div className="impact-asset-list impact-asset-list-empty">
+                <p>No assets match current portfolio filters.</p>
+              </div>
             ) : null}
             {assets.length > 0 ? (
               <PortfolioManagePanel onAssetsChange={handleAssetsChange} />
             ) : null}
             </div>
           </aside>
+          <div className="impact-console-divider impact-console-divider-left">
+            <button
+              type="button"
+              className="impact-console-collapse-btn"
+              aria-label={leftCollapsed ? "Expand left panel" : "Collapse left panel"}
+              onClick={() => setLeftCollapsed((value) => !value)}
+            >
+              {leftCollapsed ? "›" : "‹"}
+            </button>
+            {!leftCollapsed ? (
+              <button
+                type="button"
+                className="impact-console-resize-grip"
+                aria-label="Resize left panel"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setDragSide("left");
+                  setDragOriginX(event.clientX);
+                  setDragOriginWidth(leftWidth);
+                }}
+              />
+            ) : null}
+          </div>
 
           <section className="impact-console-col impact-console-watch">
             <ImpactMapPanel
               assets={assets}
+              visibleAssetIds={visibleAssetIds}
               alerts={alerts}
               alertsByAsset={alertsByAsset}
               selectedAssetId={selectedAssetId}
@@ -268,21 +458,50 @@ export default function ImpactPage() {
               onRefresh={() => void fetchMap(range)}
               loadState={loadState}
               updatedLabel={updatedLabel}
+              flyToCoord={flyToCoord}
             />
             <ImpactWatchlist
               alerts={alerts}
               selectedAlertId={selectedAlert?.id ?? null}
               onSelect={handleSelectAlert}
+              filter={watchlistFilter}
+              onFilterChange={setWatchlistFilter}
             />
           </section>
+          <div className="impact-console-divider impact-console-divider-right">
+            {!rightCollapsed ? (
+              <button
+                type="button"
+                className="impact-console-resize-grip"
+                aria-label="Resize right panel"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setDragSide("right");
+                  setDragOriginX(event.clientX);
+                  setDragOriginWidth(rightWidth);
+                }}
+              />
+            ) : null}
+            <button
+              type="button"
+              className="impact-console-collapse-btn"
+              aria-label={rightCollapsed ? "Expand right panel" : "Collapse right panel"}
+              onClick={() => setRightCollapsed((value) => !value)}
+            >
+              {rightCollapsed ? "‹" : "›"}
+            </button>
+          </div>
 
-          <aside className="impact-console-col impact-console-detail">
+          <aside
+            className={`impact-console-col impact-console-detail${rightCollapsed ? " is-collapsed" : ""}`}
+          >
             <div className="impact-detail-sticky">
               <ExposureCard
                 alert={selectedAlert}
                 feedback={feedback}
                 onFeedback={setFeedback}
                 onDismiss={handleDismissSelection}
+                onFlyTo={handleFlyToEvidence}
               />
             </div>
           </aside>

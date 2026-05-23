@@ -12,9 +12,11 @@ type Props = {
   alerts: ExposureAlert[];
   selectedAlertId: string | null;
   onSelect: (alertId: string) => void;
+  filter: FilterMode;
+  onFilterChange: (value: FilterMode) => void;
 };
 
-type FilterMode = "all" | "critical" | "high" | "elevated" | "low";
+export type FilterMode = "all" | "critical" | "high" | "elevated" | "low";
 type SortMode = "score" | "confidence";
 
 const CONFIDENCE_RANK: Record<ConfidenceLevel, number> = {
@@ -49,8 +51,7 @@ function familyLabel(family: SourceFamily): string {
   return family.replace(/_/g, " ");
 }
 
-export function ImpactWatchlist({ alerts, selectedAlertId, onSelect }: Props) {
-  const [filter, setFilter] = useState<FilterMode>("all");
+export function ImpactWatchlist({ alerts, selectedAlertId, onSelect, filter, onFilterChange }: Props) {
   const [sort, setSort] = useState<SortMode>("score");
 
   const filteredSorted = useMemo(() => {
@@ -96,7 +97,7 @@ export function ImpactWatchlist({ alerts, selectedAlertId, onSelect }: Props) {
                 role="tab"
                 aria-selected={filter === opt.id}
                 className={`impact-filter-chip${filter === opt.id ? " is-active" : ""}`}
-                onClick={() => setFilter(opt.id)}
+                onClick={() => onFilterChange(opt.id)}
               >
                 {opt.label}
               </button>
@@ -130,6 +131,7 @@ export function ImpactWatchlist({ alerts, selectedAlertId, onSelect }: Props) {
       ) : (
         <div className="impact-watch-table">
           <div className="impact-watch-table-head">
+            <span aria-hidden />
             <span>Rank</span>
             <span>Asset</span>
             <span>Location</span>
