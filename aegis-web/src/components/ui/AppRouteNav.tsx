@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { AegisLogo } from "./AegisLogo";
 import { useContactModal } from "./ContactModalContext";
 
 type AppRouteNavProps = {
@@ -54,9 +55,7 @@ export function AppRouteNav({ className = "", variant = "default" }: AppRouteNav
   if (variant === "map") {
     return (
       <nav className={`app-route-nav app-route-nav-map ${className}`.trim()} aria-label="Site sections">
-        <Link href="/" className="app-route-nav-brand">
-          AEG<span>I</span>S
-        </Link>
+        <AegisLogo href="/" size="nav" className="app-route-nav-brand-mark" />
         <button
           type="button"
           className="app-route-nav-menu-btn"
@@ -72,9 +71,7 @@ export function AppRouteNav({ className = "", variant = "default" }: AppRouteNav
 
   return (
     <nav className={`app-route-nav ${className}`.trim()} aria-label="Site sections">
-      <Link href="/" className="app-route-nav-brand">
-        AEG<span>I</span>S
-      </Link>
+      <AegisLogo href="/" size="nav" className="app-route-nav-brand-mark" />
       <div className="app-route-nav-links">{links}</div>
     </nav>
   );

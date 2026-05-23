@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AegisLogo } from "./AegisLogo";
 import { useContactModal } from "./ContactModalContext";
 
 type SiteFooterProps = {
@@ -18,9 +19,7 @@ export function SiteFooter({ showCta = true, className = "" }: SiteFooterProps) 
     <footer className={`site-footer-enhanced ${className}`.trim()}>
       <div className="site-footer-grid">
         <div>
-          <div className="site-footer-brand">
-            AEG<span>I</span>S
-          </div>
+          <AegisLogo href="/" size="footer" />
           <p className="mt-3 max-w-xs text-sm text-slate-500">
             Advanced early-warning and geostrategic intelligence — escalation signals and live map.
           </p>

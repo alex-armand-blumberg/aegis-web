@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { AegisLogo } from "./AegisLogo";
 import { useCommandPalette } from "./CommandPaletteContext";
 
 type AppCommandBarProps = {
@@ -39,11 +40,7 @@ export function AppCommandBar({
   return (
     <header className={`app-command-bar ${className}`.trim()}>
       <div className="app-command-bar-main">
-        {showBrand ? (
-          <Link href="/" className="app-command-bar-logo">
-            AEG<span>I</span>S
-          </Link>
-        ) : null}
+        {showBrand ? <AegisLogo href="/" size="nav" className="app-command-bar-logo-mark" /> : null}
         <div className="app-command-bar-title-block">
           <div className="app-command-bar-title">{title}</div>
           {syncLabel ? <div className="app-command-bar-sync">{syncLabel}</div> : null}

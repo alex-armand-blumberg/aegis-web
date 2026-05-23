@@ -558,6 +558,30 @@ nav {
 .nav-logo span {
   color: var(--brand);
 }
+.aegis-logo {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  text-decoration: none;
+  line-height: 0;
+}
+.aegis-logo-img {
+  width: auto;
+  height: auto;
+  display: block;
+}
+.aegis-logo-img-nav {
+  height: 36px;
+  width: auto;
+}
+.aegis-logo-img-footer {
+  height: 40px;
+  width: auto;
+}
+.aegis-logo-img-display {
+  height: 56px;
+  width: auto;
+}
 .nav-links {
   display: flex;
   gap: 32px;
@@ -818,6 +842,14 @@ nav {
 }
 .features-grid .feature-card:last-child {
   border-right: none;
+}
+.features-grid .feature-card-impact {
+  grid-column: 1 / -1;
+  width: calc(100% / 3);
+  max-width: calc(100% / 3);
+  justify-self: center;
+  border-right: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 .feature-icon {
   font-size: 22px;
@@ -1085,6 +1117,12 @@ footer {
   }
   .features-grid .feature-card:last-child {
     border-bottom: none;
+  }
+  .features-grid .feature-card-impact {
+    width: 100%;
+    max-width: none;
+    grid-column: auto;
+    border-top: none;
   }
   #about .inner {
     grid-template-columns: 1fr;
@@ -3195,16 +3233,9 @@ footer {
   background: rgba(15, 23, 42, 0.94);
   backdrop-filter: blur(10px);
 }
-.app-route-nav-brand {
-  font-family: var(--font-bebas), "Bebas Neue", sans-serif;
-  font-size: 17px;
-  letter-spacing: 0.12em;
-  color: #fff;
-  text-decoration: none;
+.app-route-nav-brand-mark,
+.app-command-bar-logo-mark {
   flex-shrink: 0;
-}
-.app-route-nav-brand span {
-  color: var(--brand);
 }
 .app-route-nav-links {
   display: flex;

@@ -189,8 +189,8 @@ export default function Home() {
             </Link>
             <Link
               href="/impact"
-              className="feature-card"
-              style={{ "--accent": "#34d399" } as React.CSSProperties}
+              className="feature-card feature-card-impact"
+              style={{ "--accent": "#6b8299" } as React.CSSProperties}
               onMouseEnter={warmImpact}
               onFocus={warmImpact}
             >
@@ -342,7 +342,7 @@ export default function Home() {
               }
             />
             <div className="methodology-logo reveal">
-              <img src="/aegis-logo.png" alt="AEGIS" />
+              <img src="/aegis-hq-logo.png" alt="AEGIS HQ" />
             </div>
           </div>
             <div className="method-grid">

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { AegisLogo } from "./AegisLogo";
 import { useContactModal } from "./ContactModalContext";
 
 type MarketingNavProps = {
@@ -85,9 +86,7 @@ export function MarketingNav({
   return (
     <div className={`marketing-nav-shell ${className}`.trim()} data-variant={variant}>
       <nav>
-        <Link href="/" className="nav-logo">
-          AEG<span>I</span>S<sub className="logo-hq">hq</sub>
-        </Link>
+        <AegisLogo href="/" size="nav" priority={isHome} />
         <div className="nav-links">
           {isHome ? (
             <>
