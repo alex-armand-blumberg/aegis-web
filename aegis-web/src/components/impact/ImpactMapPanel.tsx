@@ -109,10 +109,15 @@ const SELECTED_RING_MID_ID = "impact-selected-ring-mid";
 const SELECTED_RING_INNER_ID = "impact-selected-ring-inner";
 const SELECTED_STAR_LAYER_ID = "impact-selected-star";
 const SELECTED_LABEL_LAYER_ID = "impact-selected-label";
+const ASSET_SOURCE_ID = "impact-asset-source";
+const EVIDENCE_SOURCE_ID = "impact-evidence-source";
+const BACKGROUND_SIGNAL_SOURCE_ID = "impact-background-signal-source";
+const LINK_SOURCE_ID = "impact-link-source";
 
 const ASSET_LAYER: LayerProps = {
   id: ASSET_LAYER_ID,
   type: "circle",
+  source: ASSET_SOURCE_ID,
   paint: {
     "circle-radius": ["case", ["get", "selected"], 6, 4.8],
     "circle-color": [
@@ -155,6 +160,7 @@ const ASSET_LAYER: LayerProps = {
 const EVIDENCE_LAYER: LayerProps = {
   id: EVIDENCE_LAYER_ID,
   type: "circle",
+  source: EVIDENCE_SOURCE_ID,
   filter: ["==", ["get", "isModelContext"], false],
   paint: {
     "circle-radius": [
@@ -188,6 +194,7 @@ const EVIDENCE_LAYER: LayerProps = {
 const EVIDENCE_MODEL_LAYER: LayerProps = {
   id: EVIDENCE_MODEL_LAYER_ID,
   type: "circle",
+  source: EVIDENCE_SOURCE_ID,
   filter: ["==", ["get", "isModelContext"], true],
   paint: {
     "circle-radius": 4.8,
@@ -201,6 +208,7 @@ const EVIDENCE_MODEL_LAYER: LayerProps = {
 const EVIDENCE_SELECTED_RING_LAYER: LayerProps = {
   id: EVIDENCE_SELECTED_RING_ID,
   type: "circle",
+  source: EVIDENCE_SOURCE_ID,
   filter: ["==", ["get", "selected"], true],
   paint: {
     "circle-radius": [
@@ -224,6 +232,7 @@ const EVIDENCE_SELECTED_RING_LAYER: LayerProps = {
 const BACKGROUND_SIGNAL_LAYER: LayerProps = {
   id: BACKGROUND_SIGNAL_LAYER_ID,
   type: "circle",
+  source: BACKGROUND_SIGNAL_SOURCE_ID,
   filter: ["==", ["get", "isModelContext"], false],
   paint: {
     "circle-radius": [
@@ -266,6 +275,7 @@ const BACKGROUND_SIGNAL_LAYER: LayerProps = {
 const BACKGROUND_MODEL_LAYER: LayerProps = {
   id: BACKGROUND_MODEL_LAYER_ID,
   type: "circle",
+  source: BACKGROUND_SIGNAL_SOURCE_ID,
   filter: ["==", ["get", "isModelContext"], true],
   paint: {
     "circle-radius": 4.2,
@@ -279,6 +289,7 @@ const BACKGROUND_MODEL_LAYER: LayerProps = {
 const BACKGROUND_SELECTED_RING_LAYER: LayerProps = {
   id: BACKGROUND_SELECTED_RING_ID,
   type: "circle",
+  source: BACKGROUND_SIGNAL_SOURCE_ID,
   filter: ["==", ["get", "selected"], true],
   paint: {
     "circle-radius": 7,
@@ -292,6 +303,7 @@ const BACKGROUND_SELECTED_RING_LAYER: LayerProps = {
 const LINK_LAYER: LayerProps = {
   id: LINK_LAYER_ID,
   type: "line",
+  source: LINK_SOURCE_ID,
   paint: {
     "line-color": [
       "case",
@@ -307,6 +319,7 @@ const LINK_LAYER: LayerProps = {
 const SELECTED_RING_OUTER: LayerProps = {
   id: SELECTED_RING_OUTER_ID,
   type: "circle",
+  source: ASSET_SOURCE_ID,
   filter: ["==", ["get", "selected"], true],
   paint: {
     "circle-radius": 26,
@@ -320,6 +333,7 @@ const SELECTED_RING_OUTER: LayerProps = {
 const SELECTED_RING_MID: LayerProps = {
   id: SELECTED_RING_MID_ID,
   type: "circle",
+  source: ASSET_SOURCE_ID,
   filter: ["==", ["get", "selected"], true],
   paint: {
     "circle-radius": 18,
@@ -333,6 +347,7 @@ const SELECTED_RING_MID: LayerProps = {
 const SELECTED_RING_INNER: LayerProps = {
   id: SELECTED_RING_INNER_ID,
   type: "circle",
+  source: ASSET_SOURCE_ID,
   filter: ["==", ["get", "selected"], true],
   paint: {
     "circle-radius": 11,
@@ -346,7 +361,7 @@ const SELECTED_RING_INNER: LayerProps = {
 const SELECTED_STAR_LAYER: LayerProps = {
   id: SELECTED_STAR_LAYER_ID,
   type: "symbol",
-  source: "impact-asset-source",
+  source: ASSET_SOURCE_ID,
   filter: ["==", ["get", "selected"], true],
   layout: {
     "text-field": "✦",
@@ -364,7 +379,7 @@ const SELECTED_STAR_LAYER: LayerProps = {
 const SELECTED_LABEL_LAYER: LayerProps = {
   id: SELECTED_LABEL_LAYER_ID,
   type: "symbol",
-  source: "impact-asset-source",
+  source: ASSET_SOURCE_ID,
   filter: ["==", ["get", "selected"], true],
   layout: {
     "text-field": ["upcase", ["get", "name"]],
