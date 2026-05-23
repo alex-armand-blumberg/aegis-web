@@ -10,12 +10,11 @@ type Props = {
   onAssetsChange: (assets: UserAsset[]) => void;
 };
 
-export function AssetUploadPanel({ assetCount, onAssetsChange }: Props) {
+function usePortfolioActions(onAssetsChange: (assets: UserAsset[]) => void) {
   const [pasteValue, setPasteValue] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const compactFileRef = useRef<HTMLInputElement>(null);
 
   const handleParse = useCallback(
     (csv: string, label: string) => {
@@ -43,7 +42,6 @@ export function AssetUploadPanel({ assetCount, onAssetsChange }: Props) {
         setStatus(null);
       } finally {
         if (fileRef.current) fileRef.current.value = "";
-        if (compactFileRef.current) compactFileRef.current.value = "";
       }
     },
     [handleParse]
@@ -97,7 +95,35 @@ export function AssetUploadPanel({ assetCount, onAssetsChange }: Props) {
     setStatus("Sample CSV downloaded.");
   }, []);
 
-  const sharedExtras = (
+  return {
+    pasteValue,
+    setPasteValue,
+    errors,
+    status,
+    fileRef,
+    handleFile,
+    handlePaste,
+    handleLoadSample,
+    handleClear,
+    handleCopySample,
+    handleDownloadSample,
+  };
+}
+
+function PortfolioExtras({
+  pasteValue,
+  setPasteValue,
+  errors,
+  status,
+  onPaste,
+}: {
+  pasteValue: string;
+  setPasteValue: (value: string) => void;
+  errors: string[];
+  status: string | null;
+  onPaste: () => void;
+}) {
+  return (
     <>
       <details className="impact-disclosure">
         <summary>Expected CSV format</summary>
@@ -122,7 +148,7 @@ Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics
           spellCheck={false}
         />
         <div className="impact-paste-actions">
-          <button type="button" className="impact-btn impact-btn-secondary" onClick={handlePaste}>
+          <button type="button" className="impact-btn impact-btn-secondary" onClick={onPaste}>
             Parse pasted CSV
           </button>
           {pasteValue ? (
@@ -150,6 +176,10 @@ Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics
       ) : null}
     </>
   );
+}
+
+export function AssetUploadPanel({ assetCount, onAssetsChange }: Props) {
+  const actions = usePortfolioActions(onAssetsChange);
 
   if (assetCount === 0) {
     return (
@@ -164,31 +194,37 @@ Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics
           <button
             type="button"
             className="impact-btn impact-btn-primary impact-btn-lg"
-            onClick={handleLoadSample}
+            onClick={actions.handleLoadSample}
           >
             Load sample assets
           </button>
           <label className="impact-btn impact-btn-secondary impact-btn-lg impact-file-label">
             Upload CSV
             <input
-              ref={fileRef}
+              ref={actions.fileRef}
               type="file"
               accept=".csv,text/csv,text/plain"
-              onChange={handleFile}
+              onChange={actions.handleFile}
               className="impact-file-input"
             />
           </label>
         </div>
         <div className="impact-empty-utils">
-          <button type="button" className="impact-link-btn" onClick={handleCopySample}>
+          <button type="button" className="impact-link-btn" onClick={actions.handleCopySample}>
             Copy sample CSV
           </button>
           <span className="impact-link-sep">·</span>
-          <button type="button" className="impact-link-btn" onClick={handleDownloadSample}>
+          <button type="button" className="impact-link-btn" onClick={actions.handleDownloadSample}>
             Download sample CSV
           </button>
         </div>
-        {sharedExtras}
+        <PortfolioExtras
+          pasteValue={actions.pasteValue}
+          setPasteValue={actions.setPasteValue}
+          errors={actions.errors}
+          status={actions.status}
+          onPaste={actions.handlePaste}
+        />
         <p className="impact-privacy-note">
           Assets stay in your browser. Do not upload sensitive or confidential asset lists into
           this prototype.
@@ -198,66 +234,78 @@ Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics
   }
 
   return (
-    <section className="impact-portfolio-loaded">
-      <header className="impact-portfolio-head">
-        <div>
-          <span className="impact-eyebrow">Asset Portfolio</span>
-          <p className="impact-portfolio-count">
-            {assetCount} asset{assetCount === 1 ? "" : "s"} loaded locally
-          </p>
-        </div>
+    <header className="impact-portfolio-head">
+      <span className="impact-eyebrow">Asset Portfolio</span>
+      <span className="impact-portfolio-count">
+        {assetCount} asset{assetCount === 1 ? "" : "s"}
+      </span>
+    </header>
+  );
+}
+
+export function PortfolioManagePanel({
+  onAssetsChange,
+}: {
+  onAssetsChange: (assets: UserAsset[]) => void;
+}) {
+  const actions = usePortfolioActions(onAssetsChange);
+
+  return (
+    <details className="impact-portfolio-manage-panel">
+      <summary className="impact-portfolio-manage-btn">Manage portfolio</summary>
+      <div className="impact-portfolio-manage-body">
         <div className="impact-portfolio-toolbar">
           <button
             type="button"
             className="impact-btn impact-btn-secondary impact-btn-sm"
-            onClick={handleLoadSample}
+            onClick={actions.handleLoadSample}
             title="Replace with the fictional demo portfolio"
           >
-            Sample
+            Load sample assets
           </button>
           <label
             className="impact-btn impact-btn-secondary impact-btn-sm impact-file-label"
             title="Upload a CSV"
           >
-            Upload
+            Upload CSV
             <input
-              ref={compactFileRef}
+              ref={actions.fileRef}
               type="file"
               accept=".csv,text/csv,text/plain"
-              onChange={handleFile}
+              onChange={actions.handleFile}
               className="impact-file-input"
             />
           </label>
           <button
             type="button"
             className="impact-btn impact-btn-secondary impact-btn-sm"
-            onClick={handleCopySample}
-            title="Copy sample CSV to clipboard"
+            onClick={actions.handleCopySample}
           >
-            Copy
+            Copy sample CSV
           </button>
           <button
             type="button"
             className="impact-btn impact-btn-secondary impact-btn-sm"
-            onClick={handleDownloadSample}
-            title="Download sample CSV"
+            onClick={actions.handleDownloadSample}
           >
-            Download
+            Download sample CSV
           </button>
           <button
             type="button"
             className="impact-btn impact-btn-ghost impact-btn-sm"
-            onClick={handleClear}
-            title="Clear all assets"
+            onClick={actions.handleClear}
           >
-            Clear
+            Clear assets
           </button>
         </div>
-      </header>
-      {sharedExtras}
-      <p className="impact-privacy-note impact-privacy-note-sm">
-        Assets stay in your browser. Do not upload sensitive or confidential lists.
-      </p>
-    </section>
+        <PortfolioExtras
+          pasteValue={actions.pasteValue}
+          setPasteValue={actions.setPasteValue}
+          errors={actions.errors}
+          status={actions.status}
+          onPaste={actions.handlePaste}
+        />
+      </div>
+    </details>
   );
 }

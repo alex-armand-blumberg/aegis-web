@@ -1,14 +1,30 @@
 "use client";
 
-export function ImpactMethodologyPanel() {
+type Props = {
+  updatedLabel?: string | null;
+};
+
+export function ImpactMethodologyPanel({ updatedLabel = null }: Props) {
   return (
     <details className="impact-method-strip">
       <summary>
-        <span className="impact-method-strip-eyebrow">Methodology · safety · privacy</span>
+        <span className="impact-method-strip-btn">Methodology</span>
+        <span className="impact-method-strip-btn">Safety</span>
+        <span className="impact-method-strip-btn">Privacy</span>
         <span className="impact-method-strip-pills">
           <span className="impact-method-pill">Score ≠ prediction</span>
           <span className="impact-method-pill">Confidence is separate</span>
           <span className="impact-method-pill">Do not upload sensitive lists</span>
+        </span>
+        <span className="impact-method-strip-updated">
+          {updatedLabel ? (
+            <>
+              <span className="impact-method-strip-dot" aria-hidden />
+              Data sources refreshed {updatedLabel}
+            </>
+          ) : (
+            "Data sources pending"
+          )}
         </span>
         <span className="impact-method-strip-cta">Expand</span>
       </summary>

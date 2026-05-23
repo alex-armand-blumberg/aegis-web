@@ -12,9 +12,8 @@ import {
   saveAssets,
 } from "@/lib/impact/storage";
 import type { AlertFeedback, ExposureAlert, UserAsset } from "@/lib/impact/types";
-import { MarketingNav } from "@/components/ui/MarketingNav";
-import { SiteFooter } from "@/components/ui/SiteFooter";
-import { AssetUploadPanel } from "@/components/impact/AssetUploadPanel";
+import { ImpactWorkspaceNav } from "@/components/impact/ImpactWorkspaceNav";
+import { AssetUploadPanel, PortfolioManagePanel } from "@/components/impact/AssetUploadPanel";
 import { AssetTable } from "@/components/impact/AssetTable";
 import { ImpactWatchlist } from "@/components/impact/ImpactWatchlist";
 import { ExposureCard } from "@/components/impact/ExposureCard";
@@ -49,10 +48,15 @@ export default function ImpactPage() {
   const [assets, setAssets] = useState<UserAsset[]>([]);
   const [feedback, setFeedback] = useState<AlertFeedback[]>([]);
   const [range, setRange] = useState<RangeOption>("7d");
+  const [assetSearch, setAssetSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | UserAsset["type"]>("all");
+  const [importanceFilter, setImportanceFilter] = useState<"all" | UserAsset["importance"]>("all");
+  const [regionFilter, setRegionFilter] = useState<"all" | string>("all");
   const [mapData, setMapData] = useState<MapApiResponse | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [selectionDismissed, setSelectionDismissed] = useState(false);
 
   useEffect(() => {
     setAssets(loadAssets());
@@ -97,131 +101,156 @@ export default function ImpactPage() {
   }, [alerts]);
 
   useEffect(() => {
-    if (!selectedAssetId && alerts.length > 0) {
+    if (!selectionDismissed && !selectedAssetId && alerts.length > 0) {
       setSelectedAssetId(alerts[0].asset.id);
     }
     if (selectedAssetId && !assets.some((a) => a.id === selectedAssetId)) {
-      setSelectedAssetId(alerts[0]?.asset.id ?? null);
+      setSelectedAssetId(selectionDismissed ? null : (alerts[0]?.asset.id ?? null));
     }
-  }, [alerts, assets, selectedAssetId]);
+  }, [alerts, assets, selectedAssetId, selectionDismissed]);
 
   const selectedAlert = selectedAssetId ? alertsByAsset[selectedAssetId] ?? null : null;
+
+  const regionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const asset of assets) {
+      if (asset.country) set.add(asset.country);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [assets]);
 
   const handleAssetsChange = useCallback((next: UserAsset[]) => {
     setAssets(next);
     if (next.length === 0) {
       clearStoredAssets();
       setSelectedAssetId(null);
+      setSelectionDismissed(false);
+    }
+    if (next.length > 0) {
+      setTypeFilter("all");
+      setImportanceFilter("all");
+      setRegionFilter("all");
+      setAssetSearch("");
+      setSelectionDismissed(false);
     }
   }, []);
 
   const handleSelectAsset = useCallback((id: string) => {
+    setSelectionDismissed(false);
     setSelectedAssetId(id);
   }, []);
 
   const handleSelectAlert = useCallback(
     (alertId: string) => {
       const found = alerts.find((a) => a.id === alertId);
-      if (found) setSelectedAssetId(found.asset.id);
+      if (found) {
+        setSelectionDismissed(false);
+        setSelectedAssetId(found.asset.id);
+      }
     },
     [alerts]
   );
 
+  const handleDismissSelection = useCallback(() => {
+    setSelectionDismissed(true);
+    setSelectedAssetId(null);
+  }, []);
+
   const providerFailures =
     mapData?.providerHealth?.filter((p) => p && p.ok === false).length ?? 0;
-  const cacheStatus = mapData?.cache?.status ?? "—";
-  const cacheAgeMs = mapData?.cache?.ageMs;
-  const cacheAgeLabel = typeof cacheAgeMs === "number" ? formatAge(cacheAgeMs) : null;
   const updatedLabel = mapData?.updatedAt
     ? new Date(mapData.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : "—";
-
-  const statusLabel =
-    loadState === "loading"
-      ? "Loading signals…"
-      : loadState === "ready"
-      ? `Updated ${updatedLabel}`
-      : loadState === "error"
-      ? "Signals failed to load"
-      : "Idle";
+    : null;
 
   return (
     <div className="impact-page">
-      <MarketingNav />
+      <ImpactWorkspaceNav loadState={loadState} providerFailures={providerFailures} />
 
       <main className="impact-main">
-        <header className="impact-mission">
-          <div className="impact-mission-title">
-            <span className="impact-mission-brand">AEGIS · Impact Layer</span>
-            <span className="impact-mission-sub">
-              Source-backed exposure alerts for user-defined assets, suppliers, facilities, routes,
-              and regions.
-            </span>
-          </div>
-          <div className="impact-mission-pills">
-            <span className="impact-mission-pill">Phase 2A map</span>
-            <span className="impact-mission-pill">Assets stay local</span>
-            <span className="impact-mission-pill">Score ≠ prediction</span>
-            <span className="impact-mission-pill">Public sources</span>
-            <span className="impact-mission-pill">AI explains · code scores</span>
-          </div>
-          <div className="impact-mission-controls">
-            <div className="impact-range-buttons" role="tablist" aria-label="Time range">
-              {RANGE_OPTIONS.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  role="tab"
-                  aria-selected={range === r}
-                  className={`impact-btn impact-btn-toggle${range === r ? " is-active" : ""}`}
-                  onClick={() => setRange(r)}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              className="impact-btn impact-btn-secondary impact-btn-sm"
-              onClick={() => void fetchMap(range)}
-              disabled={loadState === "loading"}
-            >
-              Refresh
-            </button>
-            <div className="impact-mission-telemetry">
-              <span className={`impact-status-dot impact-status-${loadState}`} aria-hidden />
-              <span>{statusLabel}</span>
-              <span className="impact-mission-telemetry-sep">·</span>
-              <span title="Map data cache status from /api/map">
-                cache {cacheStatus}
-                {cacheAgeLabel ? ` ${cacheAgeLabel}` : ""}
-              </span>
-              <span className="impact-mission-telemetry-sep">·</span>
-              <span>
-                providers{" "}
-                {providerFailures > 0
-                  ? `${providerFailures} failing`
-                  : mapData
-                  ? "ok"
-                  : "—"}
-              </span>
-            </div>
-          </div>
-        </header>
-
         {loadError ? <p className="impact-load-error">{loadError}</p> : null}
 
         <div className="impact-console">
           <aside className="impact-console-col impact-console-portfolio">
+            <div className="impact-portfolio-shell">
             <AssetUploadPanel assetCount={assets.length} onAssetsChange={handleAssetsChange} />
+            {assets.length > 0 ? (
+              <div className="impact-portfolio-filters">
+                <label className="impact-portfolio-search">
+                  <input
+                    type="search"
+                    value={assetSearch}
+                    onChange={(event) => setAssetSearch(event.target.value)}
+                    placeholder="Search assets..."
+                  />
+                  <span className="impact-portfolio-search-icon" aria-hidden>
+                    ⌕
+                  </span>
+                </label>
+                <div className="impact-portfolio-filter-grid">
+                  <label className="impact-filter-field">
+                    <span>Type</span>
+                    <select
+                      value={typeFilter}
+                      onChange={(event) =>
+                        setTypeFilter(event.target.value as "all" | UserAsset["type"])
+                      }
+                    >
+                      <option value="all">All Types</option>
+                      {Array.from(new Set(assets.map((asset) => asset.type))).map((type) => (
+                        <option key={type} value={type}>
+                          {type.replace(/_/g, " ")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="impact-filter-field">
+                    <span>Importance</span>
+                    <select
+                      value={importanceFilter}
+                      onChange={(event) =>
+                        setImportanceFilter(event.target.value as "all" | UserAsset["importance"])
+                      }
+                    >
+                      <option value="all">All</option>
+                      <option value="critical">Critical</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </label>
+                  <label className="impact-filter-field">
+                    <span>Region</span>
+                    <select
+                      value={regionFilter}
+                      onChange={(event) => setRegionFilter(event.target.value)}
+                    >
+                      <option value="all">All Regions</option>
+                      {regionOptions.map((region) => (
+                        <option key={region} value={region}>
+                          {region}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            ) : null}
             {assets.length > 0 ? (
               <AssetTable
                 assets={assets}
                 alertsByAsset={alertsByAsset}
                 selectedAssetId={selectedAssetId}
                 onSelect={handleSelectAsset}
+                search={assetSearch}
+                typeFilter={typeFilter}
+                importanceFilter={importanceFilter}
+                regionFilter={regionFilter}
               />
             ) : null}
+            {assets.length > 0 ? (
+              <PortfolioManagePanel onAssetsChange={handleAssetsChange} />
+            ) : null}
+            </div>
           </aside>
 
           <section className="impact-console-col impact-console-watch">
@@ -234,6 +263,11 @@ export default function ImpactPage() {
               onSelectAsset={handleSelectAsset}
               onSelectAlert={handleSelectAlert}
               range={range}
+              rangeOptions={RANGE_OPTIONS}
+              onRangeChange={(value) => setRange(value as RangeOption)}
+              onRefresh={() => void fetchMap(range)}
+              loadState={loadState}
+              updatedLabel={updatedLabel}
             />
             <ImpactWatchlist
               alerts={alerts}
@@ -248,25 +282,16 @@ export default function ImpactPage() {
                 alert={selectedAlert}
                 feedback={feedback}
                 onFeedback={setFeedback}
+                onDismiss={handleDismissSelection}
               />
             </div>
           </aside>
         </div>
 
         <footer className="impact-foot-strip">
-          <ImpactMethodologyPanel />
+          <ImpactMethodologyPanel updatedLabel={updatedLabel} />
         </footer>
       </main>
-
-      <SiteFooter />
     </div>
   );
-}
-
-function formatAge(ageMs: number): string {
-  if (!Number.isFinite(ageMs) || ageMs < 0) return "";
-  if (ageMs < 60 * 1000) return `${Math.round(ageMs / 1000)}s`;
-  if (ageMs < 60 * 60 * 1000) return `${Math.round(ageMs / (60 * 1000))}m`;
-  if (ageMs < 24 * 60 * 60 * 1000) return `${Math.round(ageMs / (60 * 60 * 1000))}h`;
-  return `${Math.round(ageMs / (24 * 60 * 60 * 1000))}d`;
 }

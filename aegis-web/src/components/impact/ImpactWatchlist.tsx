@@ -14,16 +14,8 @@ type Props = {
   onSelect: (alertId: string) => void;
 };
 
-type FilterMode = "all" | "elevated" | "high";
+type FilterMode = "all" | "critical" | "high" | "elevated" | "low";
 type SortMode = "score" | "confidence";
-
-const LEVEL_RANK: Record<ExposureLevel, number> = {
-  low: 0,
-  guarded: 1,
-  elevated: 2,
-  high: 3,
-  critical: 4,
-};
 
 const CONFIDENCE_RANK: Record<ConfidenceLevel, number> = {
   low: 0,
@@ -31,11 +23,18 @@ const CONFIDENCE_RANK: Record<ConfidenceLevel, number> = {
   high: 2,
 };
 
-function familyLabel(family: SourceFamily): string {
-  return family.replace(/_/g, " ");
+function familyIcon(family: SourceFamily): string {
+  if (family === "structured_conflict") return "✶";
+  if (family === "maritime") return "⚓";
+  if (family === "official") return "◈";
+  if (family === "news") return "◌";
+  if (family === "infrastructure") return "▦";
+  if (family === "humanitarian") return "✚";
+  if (family === "model_context") return "◌";
+  return "•";
 }
 
-function topFamilies(alert: ExposureAlert, limit = 2): SourceFamily[] {
+function topFamilies(alert: ExposureAlert, limit = 3): SourceFamily[] {
   const counts = new Map<SourceFamily, number>();
   for (const ev of alert.evidence) {
     for (const f of ev.sourceFamilies) counts.set(f, (counts.get(f) ?? 0) + 1);
@@ -46,14 +45,20 @@ function topFamilies(alert: ExposureAlert, limit = 2): SourceFamily[] {
     .map(([f]) => f);
 }
 
+function familyLabel(family: SourceFamily): string {
+  return family.replace(/_/g, " ");
+}
+
 export function ImpactWatchlist({ alerts, selectedAlertId, onSelect }: Props) {
   const [filter, setFilter] = useState<FilterMode>("all");
   const [sort, setSort] = useState<SortMode>("score");
 
   const filteredSorted = useMemo(() => {
     const filtered = alerts.filter((a) => {
-      if (filter === "elevated") return LEVEL_RANK[a.level] >= LEVEL_RANK.elevated;
-      if (filter === "high") return LEVEL_RANK[a.level] >= LEVEL_RANK.high;
+      if (filter === "critical") return a.level === "critical";
+      if (filter === "high") return a.level === "high";
+      if (filter === "elevated") return a.level === "elevated";
+      if (filter === "low") return a.level === "low" || a.level === "guarded";
       return true;
     });
     if (sort === "confidence") {
@@ -72,15 +77,17 @@ export function ImpactWatchlist({ alerts, selectedAlertId, onSelect }: Props) {
       <header className="impact-watch-head">
         <div className="impact-watch-title">
           <span className="impact-eyebrow">Exposure Watchlist</span>
-          <p className="impact-watch-sub">Ranked by source-backed signal pressure</p>
+          <p className="impact-watch-sub">Ranked by exposure score</p>
         </div>
         <div className="impact-watch-controls">
           <div className="impact-filter-chips" role="tablist" aria-label="Filter alerts">
             {(
               [
                 { id: "all", label: "All" },
-                { id: "elevated", label: "Elevated+" },
-                { id: "high", label: "High+" },
+                { id: "critical", label: "Critical" },
+                { id: "high", label: "High" },
+                { id: "elevated", label: "Elevated" },
+                { id: "low", label: "Low" },
               ] as Array<{ id: FilterMode; label: string }>
             ).map((opt) => (
               <button
@@ -96,7 +103,7 @@ export function ImpactWatchlist({ alerts, selectedAlertId, onSelect }: Props) {
             ))}
           </div>
           <label className="impact-sort-label">
-            <span>Sort</span>
+            <span>Sort by</span>
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortMode)}
@@ -121,56 +128,71 @@ export function ImpactWatchlist({ alerts, selectedAlertId, onSelect }: Props) {
           <p>No alerts match the current filter.</p>
         </div>
       ) : (
-        <ol className="impact-watch-list">
-          {filteredSorted.map((alert, idx) => {
-            const selected = alert.id === selectedAlertId;
-            const families = topFamilies(alert);
-            return (
-              <li key={alert.id} className="impact-watch-li">
-                <button
-                  type="button"
-                  className={`impact-watch-row${selected ? " is-selected" : ""}`}
-                  data-level={alert.level}
-                  onClick={() => onSelect(alert.id)}
-                >
-                  <span className="impact-watch-stripe" aria-hidden />
-                  <span className="impact-watch-rank">{idx + 1}</span>
-                  <span className="impact-watch-main">
-                    <span className="impact-watch-name">
-                      {alert.asset.name}
-                      <span className="impact-watch-loc">
-                        {alert.asset.city ? ` · ${alert.asset.city}, ` : " · "}
-                        {alert.asset.country}
+        <div className="impact-watch-table">
+          <div className="impact-watch-table-head">
+            <span>Rank</span>
+            <span>Asset</span>
+            <span>Location</span>
+            <span>Score</span>
+            <span>Top drivers</span>
+          </div>
+          <ol className="impact-watch-list">
+            {filteredSorted.map((alert, idx) => {
+              const selected = alert.id === selectedAlertId;
+              const families = topFamilies(alert);
+              const allFamilyCount = new Set(
+                alert.evidence.flatMap((item) => item.sourceFamilies)
+              ).size;
+              const overflow = Math.max(0, allFamilyCount - families.length);
+              return (
+                <li key={alert.id} className="impact-watch-li">
+                  <button
+                    type="button"
+                    className={`impact-watch-row${selected ? " is-selected" : ""}`}
+                    data-level={alert.level}
+                    onClick={() => onSelect(alert.id)}
+                  >
+                    <span className="impact-watch-stripe" aria-hidden />
+                    <span className="impact-watch-rank">{idx + 1}</span>
+                    <span className="impact-watch-main">
+                      <span className="impact-watch-name">{alert.asset.name}</span>
+                    </span>
+                    <span className="impact-watch-location">
+                      {alert.asset.city ? `${alert.asset.city}, ` : ""}
+                      {alert.asset.country}
+                    </span>
+                    <span className="impact-watch-meta">
+                      <span className={`impact-score-chip impact-level-${alert.level}`}>
+                        <span className="impact-score-value">{alert.score}</span>
                       </span>
                     </span>
-                    <span className="impact-watch-headline">{alert.headline}</span>
-                  </span>
-                  <span className="impact-watch-meta">
-                    <span className={`impact-score-chip impact-level-${alert.level}`}>
-                      <span className="impact-score-value">{alert.score}</span>
-                      <span className="impact-score-label">{alert.level}</span>
+                    <span className="impact-watch-drivers">
+                      {families.length > 0 ? (
+                        <span className="impact-watch-driver-icons">
+                          {families.map((f) => (
+                            <span
+                              key={f}
+                              className="impact-driver-icon"
+                              title={familyLabel(f)}
+                              aria-label={familyLabel(f)}
+                            >
+                              {familyIcon(f)}
+                            </span>
+                          ))}
+                          {overflow > 0 ? (
+                            <span className="impact-driver-overflow">+{overflow}</span>
+                          ) : null}
+                        </span>
+                      ) : (
+                        <span className="impact-watch-evidence">—</span>
+                      )}
                     </span>
-                    <span className={`impact-conf-chip impact-conf-${alert.confidence}`}>
-                      {alert.confidence}
-                    </span>
-                    <span className="impact-watch-evidence">
-                      {alert.evidence.length} clue{alert.evidence.length === 1 ? "" : "s"}
-                    </span>
-                    {families.length > 0 ? (
-                      <span className="impact-watch-families">
-                        {families.map((f) => (
-                          <span key={f} className="impact-family-chip">
-                            {familyLabel(f)}
-                          </span>
-                        ))}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
       )}
     </div>
   );

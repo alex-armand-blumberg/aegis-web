@@ -29,6 +29,16 @@ export function severityColor(severity: IntelSeverity): string {
   return SEVERITY_COLOR[severity];
 }
 
+export function formatCoordLat(lat: number): string {
+  const hemi = lat >= 0 ? "N" : "S";
+  return `Lat ${Math.abs(lat).toFixed(2)}° ${hemi}`;
+}
+
+export function formatCoordLon(lon: number): string {
+  const hemi = lon >= 0 ? "E" : "W";
+  return `Lon ${Math.abs(lon).toFixed(2)}° ${hemi}`;
+}
+
 type PointLike = { lat: number; lon: number };
 
 function isValidPoint(point: PointLike): boolean {

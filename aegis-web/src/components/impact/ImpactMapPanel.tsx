@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Map, {
   Layer,
-  NavigationControl,
   Popup,
   Source,
   type LayerProps,
@@ -19,6 +18,8 @@ import {
   buildEvidenceGeoJson,
   buildLinkGeoJson,
   computeBounds,
+  formatCoordLat,
+  formatCoordLon,
 } from "@/lib/impact/mapGeo";
 
 type Props = {
@@ -28,6 +29,11 @@ type Props = {
   selectedAssetId: string | null;
   selectedAlert: ExposureAlert | null;
   range: string;
+  rangeOptions: readonly string[];
+  onRangeChange: (range: string) => void;
+  onRefresh: () => void;
+  loadState: "idle" | "loading" | "ready" | "error";
+  updatedLabel: string | null;
   onSelectAsset: (assetId: string) => void;
   onSelectAlert: (alertId: string) => void;
 };
@@ -52,28 +58,32 @@ const ASSET_LAYER_ID = "impact-assets";
 const EVIDENCE_LAYER_ID = "impact-evidence";
 const EVIDENCE_MODEL_LAYER_ID = "impact-evidence-model-context";
 const LINK_LAYER_ID = "impact-links";
+const SELECTED_RING_OUTER_ID = "impact-selected-ring-outer";
+const SELECTED_RING_MID_ID = "impact-selected-ring-mid";
+const SELECTED_RING_INNER_ID = "impact-selected-ring-inner";
+const SELECTED_STAR_LAYER_ID = "impact-selected-star";
 
 const ASSET_LAYER: LayerProps = {
   id: ASSET_LAYER_ID,
   type: "circle",
   paint: {
-    "circle-radius": ["case", ["get", "selected"], 8, 6],
+    "circle-radius": ["case", ["get", "selected"], 6.2, 4.2],
     "circle-color": [
       "match",
       ["get", "level"],
       "critical",
-      "#b91c1c",
+      "#a82a2a",
       "high",
-      "#c2410c",
+      "#8a4f1f",
       "elevated",
-      "#a16207",
+      "#78612e",
       "guarded",
-      "#334155",
-      "#475569",
+      "#4b5563",
+      "#4b5563",
     ],
-    "circle-stroke-color": ["case", ["get", "selected"], "#f8fafc", "#0f172a"],
-    "circle-stroke-width": ["case", ["get", "selected"], 2, 1],
-    "circle-opacity": 0.92,
+    "circle-stroke-color": ["case", ["get", "selected"], "rgba(255,255,255,0.95)", "rgba(203,213,225,0.45)"],
+    "circle-stroke-width": ["case", ["get", "selected"], 1.6, 0.8],
+    "circle-opacity": 0.96,
   },
 };
 
@@ -86,27 +96,27 @@ const EVIDENCE_LAYER: LayerProps = {
       "match",
       ["get", "severity"],
       "critical",
-      6,
+      4.6,
       "high",
-      5,
+      4.1,
       "medium",
-      4.5,
-      4,
+      3.6,
+      3.2,
     ],
     "circle-color": [
       "match",
       ["get", "severity"],
       "critical",
-      "#ef4444",
+      "#dc6363",
       "high",
-      "#f59e0b",
+      "#b98e53",
       "medium",
-      "#facc15",
-      "#64748b",
+      "#9e975b",
+      "#7b8798",
     ],
-    "circle-stroke-color": "#0b1220",
-    "circle-stroke-width": 1,
-    "circle-opacity": 0.9,
+    "circle-stroke-color": "rgba(8,11,18,0.9)",
+    "circle-stroke-width": 0.8,
+    "circle-opacity": 0.88,
   },
 };
 
@@ -115,11 +125,11 @@ const EVIDENCE_MODEL_LAYER: LayerProps = {
   type: "circle",
   filter: ["==", ["get", "isModelContext"], true],
   paint: {
-    "circle-radius": 6,
+    "circle-radius": 4.8,
     "circle-color": "rgba(0,0,0,0)",
-    "circle-stroke-color": "#94a3b8",
-    "circle-stroke-width": 1.5,
-    "circle-opacity": 0.9,
+    "circle-stroke-color": "rgba(148,163,184,0.75)",
+    "circle-stroke-width": 1,
+    "circle-opacity": 0.85,
   },
 };
 
@@ -130,11 +140,67 @@ const LINK_LAYER: LayerProps = {
     "line-color": [
       "case",
       ["get", "isModelContext"],
-      "rgba(148,163,184,0.35)",
-      "rgba(148,163,184,0.5)",
+      "rgba(148,163,184,0.18)",
+      "rgba(148,163,184,0.28)",
     ],
-    "line-width": 1,
-    "line-opacity": 0.55,
+    "line-width": 0.8,
+    "line-opacity": 0.46,
+  },
+};
+
+const SELECTED_RING_OUTER: LayerProps = {
+  id: SELECTED_RING_OUTER_ID,
+  type: "circle",
+  filter: ["==", ["get", "selected"], true],
+  paint: {
+    "circle-radius": 24,
+    "circle-color": "rgba(0,0,0,0)",
+    "circle-stroke-color": "rgba(255,255,255,0.16)",
+    "circle-stroke-width": 1,
+    "circle-opacity": 0.85,
+  },
+};
+
+const SELECTED_RING_MID: LayerProps = {
+  id: SELECTED_RING_MID_ID,
+  type: "circle",
+  filter: ["==", ["get", "selected"], true],
+  paint: {
+    "circle-radius": 16,
+    "circle-color": "rgba(0,0,0,0)",
+    "circle-stroke-color": "rgba(255,255,255,0.28)",
+    "circle-stroke-width": 1,
+    "circle-opacity": 0.88,
+  },
+};
+
+const SELECTED_RING_INNER: LayerProps = {
+  id: SELECTED_RING_INNER_ID,
+  type: "circle",
+  filter: ["==", ["get", "selected"], true],
+  paint: {
+    "circle-radius": 10,
+    "circle-color": "rgba(0,0,0,0)",
+    "circle-stroke-color": "rgba(255,255,255,0.48)",
+    "circle-stroke-width": 1,
+    "circle-opacity": 0.9,
+  },
+};
+
+const SELECTED_STAR_LAYER: LayerProps = {
+  id: SELECTED_STAR_LAYER_ID,
+  type: "symbol",
+  filter: ["==", ["get", "selected"], true],
+  layout: {
+    "text-field": "✦",
+    "text-size": 11,
+    "text-allow-overlap": true,
+    "text-ignore-placement": true,
+  },
+  paint: {
+    "text-color": "#f1f5f9",
+    "text-halo-color": "rgba(0,0,0,0.85)",
+    "text-halo-width": 1,
   },
 };
 
@@ -156,6 +222,11 @@ export function ImpactMapPanel({
   selectedAssetId,
   selectedAlert,
   range,
+  rangeOptions,
+  onRangeChange,
+  onRefresh,
+  loadState,
+  updatedLabel,
   onSelectAsset,
   onSelectAlert,
 }: Props) {
@@ -163,6 +234,7 @@ export function ImpactMapPanel({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [hover, setHover] = useState<HoverState>(null);
+  const [showEvidence, setShowEvidence] = useState(true);
 
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === selectedAssetId) ?? null,
@@ -199,7 +271,9 @@ export function ImpactMapPanel({
     });
   }, [assets, mapLoaded, selectedEvidence, selectedAssetId]);
 
-  const interactiveLayerIds = [ASSET_LAYER_ID, EVIDENCE_LAYER_ID, EVIDENCE_MODEL_LAYER_ID];
+  const interactiveLayerIds = showEvidence
+    ? [ASSET_LAYER_ID, EVIDENCE_LAYER_ID, EVIDENCE_MODEL_LAYER_ID]
+    : [ASSET_LAYER_ID];
 
   const handleMapClick = (event: MapLayerMouseEvent) => {
     const feature = event.features?.[0];
@@ -290,10 +364,8 @@ export function ImpactMapPanel({
     <section className="impact-map-panel" aria-label="Operational map panel">
       <div className="impact-map-overlay">
         <div className="impact-map-title-block">
-          <span className="impact-eyebrow">Operational map</span>
-          <p>
-            Asset markers, selected-alert evidence clusters, and source-backed relationship links.
-          </p>
+          <span className="impact-eyebrow">Global Impact Map</span>
+          <p>Real-time exposure visualization.</p>
         </div>
         <div className="impact-map-telemetry">
           <span>{assets.length} assets</span>
@@ -301,6 +373,36 @@ export function ImpactMapPanel({
           <span>{selectedEvidence.length} evidence clusters</span>
           <span>·</span>
           <span>{range}</span>
+          {updatedLabel ? (
+            <>
+              <span>·</span>
+              <span>{updatedLabel}</span>
+            </>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="impact-map-controls-top">
+        <button
+          type="button"
+          className={`impact-map-control-chip${showEvidence ? " is-active" : ""}`}
+          onClick={() => setShowEvidence((value) => !value)}
+        >
+          Layers
+        </button>
+        <div className="impact-map-range-group" role="tablist" aria-label="Map range">
+          {rangeOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              aria-selected={range === option}
+              className={`impact-map-control-chip${range === option ? " is-active" : ""}`}
+              onClick={() => onRangeChange(option)}
+            >
+              {option}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -326,20 +428,26 @@ export function ImpactMapPanel({
           onMouseLeave={() => setHover(null)}
           cursor={hover ? "pointer" : "grab"}
         >
-          <NavigationControl position="bottom-right" visualizePitch={false} />
-
           <Source id="impact-asset-source" type="geojson" data={assetGeoJson}>
+            <Layer {...SELECTED_RING_OUTER} />
+            <Layer {...SELECTED_RING_MID} />
+            <Layer {...SELECTED_RING_INNER} />
             <Layer {...ASSET_LAYER} />
+            <Layer {...SELECTED_STAR_LAYER} />
           </Source>
 
-          <Source id="impact-link-source" type="geojson" data={linkGeoJson}>
-            <Layer {...LINK_LAYER} />
-          </Source>
+          {showEvidence ? (
+            <Source id="impact-link-source" type="geojson" data={linkGeoJson}>
+              <Layer {...LINK_LAYER} />
+            </Source>
+          ) : null}
 
-          <Source id="impact-evidence-source" type="geojson" data={evidenceGeoJson}>
-            <Layer {...EVIDENCE_LAYER} />
-            <Layer {...EVIDENCE_MODEL_LAYER} />
-          </Source>
+          {showEvidence ? (
+            <Source id="impact-evidence-source" type="geojson" data={evidenceGeoJson}>
+              <Layer {...EVIDENCE_LAYER} />
+              <Layer {...EVIDENCE_MODEL_LAYER} />
+            </Source>
+          ) : null}
 
           {hover ? (
             <Popup
@@ -357,13 +465,54 @@ export function ImpactMapPanel({
             </Popup>
           ) : null}
         </Map>
-      </div>
 
-      <div className="impact-map-legend">
-        <span className="impact-map-legend-chip">Asset marker</span>
-        <span className="impact-map-legend-chip">Evidence cluster</span>
-        <span className="impact-map-legend-chip">Selected asset</span>
-        <span className="impact-map-legend-chip impact-map-legend-chip-model">Model context</span>
+        <div className="impact-map-legend-inset">
+          <span className="impact-map-legend-title">Risk Level</span>
+          <span className="impact-map-legend-row">
+            <i className="impact-map-sym impact-map-sym-critical" aria-hidden />
+            Critical
+          </span>
+          <span className="impact-map-legend-row">
+            <i className="impact-map-sym impact-map-sym-high" aria-hidden />
+            High
+          </span>
+          <span className="impact-map-legend-row">
+            <i className="impact-map-sym impact-map-sym-elevated" aria-hidden />
+            Elevated
+          </span>
+          <span className="impact-map-legend-row">
+            <i className="impact-map-sym impact-map-sym-low" aria-hidden />
+            Low
+          </span>
+          <span className="impact-map-legend-row">
+            <i className="impact-map-sym impact-map-sym-unknown" aria-hidden />
+            Unknown
+          </span>
+          <span className="impact-map-legend-row">
+            <i className="impact-map-sym impact-map-sym-model" aria-hidden />
+            Model Context
+          </span>
+        </div>
+
+        <div className="impact-map-status-inset">
+          {selectedAsset ? (
+            <span>
+              {formatCoordLat(selectedAsset.lat)} | {formatCoordLon(selectedAsset.lon)}
+            </span>
+          ) : (
+            <span>
+              {assets.length} assets · {selectedEvidence.length} evidence · {range}
+            </span>
+          )}
+          <button
+            type="button"
+            className="impact-map-refresh-btn"
+            disabled={loadState === "loading"}
+            onClick={onRefresh}
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {selectedAlert && selectedEvidence.length === 0 ? (
