@@ -694,6 +694,7 @@ nav {
   text-transform: none;
   text-shadow: 0 0 80px rgba(59, 130, 246, 0.2);
   max-width: 18em;
+  margin-bottom: 32px;
   opacity: 0;
   animation: fadeUp 0.7s 0.2s forwards;
 }

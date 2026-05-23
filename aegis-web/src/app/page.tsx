@@ -93,9 +93,6 @@ export default function Home() {
         />
         <div className="hero-tag">Palantir Valley Forge Grant Demo</div>
         <h1>Spot global risk before it hits your assets.</h1>
-        <p className="hero-sub">
-          Advanced Early-Warning &amp; Geostrategic Intelligence System
-        </p>
         <div className="hero-buttons">
           <Link href="/escalation" className="btn-primary">
             Launch Demo &rarr;
