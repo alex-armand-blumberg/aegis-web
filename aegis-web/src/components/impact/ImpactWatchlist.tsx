@@ -67,6 +67,26 @@ function familyLabel(family: SourceFamily): string {
   return names[family] ?? family.replace(/_/g, " ");
 }
 
+function confidenceSortScore(alert: ExposureAlert): number {
+  const evidence = alert.evidence;
+  if (evidence.length === 0) return CONFIDENCE_RANK[alert.confidence] * 1000;
+
+  const familyCount = new Set(evidence.flatMap((item) => item.sourceFamilies)).size;
+  const avgReliability =
+    evidence.reduce((sum, item) => sum + item.sourceReliability, 0) / evidence.length;
+  const preciseGeoCount = evidence.filter(
+    (item) => item.geoPrecision === "exact" || item.geoPrecision === "city"
+  ).length;
+
+  return (
+    CONFIDENCE_RANK[alert.confidence] * 1000 +
+    familyCount * 100 +
+    avgReliability * 80 +
+    Math.min(evidence.length, 12) * 5 +
+    preciseGeoCount * 3
+  );
+}
+
 export function ImpactWatchlist({
   alerts,
   selectedAlertId,
@@ -90,7 +110,7 @@ export function ImpactWatchlist({
     return filtered.slice().sort((a, b) => {
       if (sort === "confidence") {
         const byConfidence =
-          (CONFIDENCE_RANK[a.confidence] - CONFIDENCE_RANK[b.confidence]) * direction;
+          (confidenceSortScore(a) - confidenceSortScore(b)) * direction;
         if (byConfidence !== 0) return byConfidence;
         return (a.score - b.score) * direction;
       }

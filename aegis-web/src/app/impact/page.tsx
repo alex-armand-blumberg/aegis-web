@@ -12,7 +12,7 @@ import {
   saveAssets,
 } from "@/lib/impact/storage";
 import type { AlertFeedback, ExposureAlert, UserAsset } from "@/lib/impact/types";
-import { ImpactWorkspaceNav } from "@/components/impact/ImpactWorkspaceNav";
+import { MarketingNav } from "@/components/ui/MarketingNav";
 import { AssetUploadPanel, PortfolioManagePanel } from "@/components/impact/AssetUploadPanel";
 import { AssetTable } from "@/components/impact/AssetTable";
 import { ImpactWatchlist, type FilterMode } from "@/components/impact/ImpactWatchlist";
@@ -213,14 +213,15 @@ export default function ImpactPage() {
       event.preventDefault();
       const startY = event.clientY;
       const startHeight = watchHeight;
+      let dragging = false;
 
       const onMouseMove = (moveEvent: MouseEvent) => {
-        const next = clamp(
-          startHeight + (startY - moveEvent.clientY),
-          WATCH_HEIGHT.min,
-          WATCH_HEIGHT.max
+        const delta = startY - moveEvent.clientY;
+        if (!dragging && Math.abs(delta) < PANEL_DRAG_THRESHOLD) return;
+        dragging = true;
+        setWatchHeight(
+          clamp(startHeight + delta, WATCH_HEIGHT.min, WATCH_HEIGHT.max)
         );
-        setWatchHeight(next);
       };
 
       const onMouseUp = () => {
@@ -379,6 +380,25 @@ export default function ImpactPage() {
     ? new Date(mapData.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : null;
 
+  const syncStatusLabel =
+    loadState === "loading"
+      ? "Syncing"
+      : loadState === "error"
+        ? "Signals unavailable"
+        : loadState === "ready" && providerFailures > 0
+          ? "Degraded"
+          : loadState === "ready"
+            ? "Operational"
+            : "Standby";
+  const syncStatusTone =
+    loadState === "error"
+      ? "error"
+      : loadState === "loading" || (loadState === "ready" && providerFailures > 0)
+        ? "warn"
+        : loadState === "ready"
+          ? "ok"
+          : "idle";
+
   const consoleStyle = useMemo(
     () =>
       ({
@@ -390,7 +410,13 @@ export default function ImpactPage() {
 
   return (
     <div className="impact-page">
-      <ImpactWorkspaceNav loadState={loadState} providerFailures={providerFailures} />
+      <MarketingNav
+        extraLinks={
+          <span className={`impact-nav-sync impact-nav-sync-${syncStatusTone}`}>
+            {syncStatusLabel}
+          </span>
+        }
+      />
 
       <main className="impact-main">
         {loadError ? <p className="impact-load-error">{loadError}</p> : null}
@@ -519,7 +545,7 @@ export default function ImpactPage() {
             <div className="impact-watch-divider">
               <button
                 type="button"
-                className="impact-console-collapse-btn impact-console-collapse-btn-horizontal"
+                className="impact-console-collapse-btn"
                 aria-label="Resize exposure watchlist"
                 onMouseDown={handleWatchResizeStart}
               >
