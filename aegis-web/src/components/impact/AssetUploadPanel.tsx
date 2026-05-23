@@ -128,8 +128,8 @@ function PortfolioExtras({
       <details className="impact-disclosure impact-disclosure-sample">
         <summary>Expected CSV format</summary>
         <div className="impact-csv-sample-box">
-          <pre className="impact-csv-sample-pre">{`name,type,country,city,lat,lon,importance,owner,tags,notes
-Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics;shipping","Fictional demo supplier"`}</pre>
+          <code className="impact-csv-sample-line">name,type,country,city,lat,lon,importance,owner,tags,notes</code>
+          <code className="impact-csv-sample-line">Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,&quot;electronics;shipping&quot;,&quot;Fictional demo supplier&quot;</code>
         </div>
         <ul>
           <li>Required: name, country, lat, lon.</li>

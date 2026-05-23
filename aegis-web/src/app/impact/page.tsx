@@ -43,12 +43,11 @@ const IMPACT_LAYERS = [
 ].join(",");
 
 type LoadState = "idle" | "loading" | "ready" | "error";
-type DragSide = "left" | "right" | null;
-type CenterDrag = null | { originY: number; originHeight: number };
 
 const LEFT_PANEL_WIDTH = { min: 220, max: 520, default: 272, collapsed: 36 } as const;
 const RIGHT_PANEL_WIDTH = { min: 280, max: 620, default: 400, collapsed: 36 } as const;
 const WATCH_HEIGHT = { min: 170, max: 420, default: 220 } as const;
+const PANEL_DRAG_THRESHOLD = 4;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -115,11 +114,7 @@ export default function ImpactPage() {
   );
   const [leftCollapsed, setLeftCollapsed] = useState(() => loadPanelCollapsed("left"));
   const [rightCollapsed, setRightCollapsed] = useState(() => loadPanelCollapsed("right"));
-  const [dragSide, setDragSide] = useState<DragSide>(null);
-  const [dragOriginX, setDragOriginX] = useState(0);
-  const [dragOriginWidth, setDragOriginWidth] = useState(0);
   const [watchHeight, setWatchHeight] = useState(() => loadWatchHeight());
-  const [centerDrag, setCenterDrag] = useState<CenterDrag>(null);
 
   useEffect(() => {
     setAssets(loadAssets());
@@ -174,54 +169,70 @@ export default function ImpactPage() {
       // Ignore storage errors to keep dashboard functional.
     }
   }, [watchHeight]);
+  const handlePanelResizeStart = useCallback(
+    (side: "left" | "right", event: React.MouseEvent<HTMLButtonElement>) => {
+      if (side === "left" && leftCollapsed) return;
+      if (side === "right" && rightCollapsed) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = side === "left" ? leftWidth : rightWidth;
+      let dragging = false;
 
-  useEffect(() => {
-    if (!dragSide) return;
-    const onMouseMove = (event: MouseEvent) => {
-      if (dragSide === "left") {
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        const delta = moveEvent.clientX - startX;
+        if (!dragging && Math.abs(delta) < PANEL_DRAG_THRESHOLD) return;
+        dragging = true;
+        if (side === "left") {
+          setLeftWidth(
+            clamp(startWidth + delta, LEFT_PANEL_WIDTH.min, LEFT_PANEL_WIDTH.max)
+          );
+        } else {
+          setRightWidth(
+            clamp(startWidth - delta, RIGHT_PANEL_WIDTH.min, RIGHT_PANEL_WIDTH.max)
+          );
+        }
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        if (!dragging) {
+          if (side === "left") setLeftCollapsed((value) => !value);
+          else setRightCollapsed((value) => !value);
+        }
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [leftCollapsed, leftWidth, rightCollapsed, rightWidth]
+  );
+
+  const handleWatchResizeStart = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      const startY = event.clientY;
+      const startHeight = watchHeight;
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
         const next = clamp(
-          dragOriginWidth + (event.clientX - dragOriginX),
-          LEFT_PANEL_WIDTH.min,
-          LEFT_PANEL_WIDTH.max
+          startHeight + (startY - moveEvent.clientY),
+          WATCH_HEIGHT.min,
+          WATCH_HEIGHT.max
         );
-        setLeftWidth(next);
-      } else if (dragSide === "right") {
-        const next = clamp(
-          dragOriginWidth - (event.clientX - dragOriginX),
-          RIGHT_PANEL_WIDTH.min,
-          RIGHT_PANEL_WIDTH.max
-        );
-        setRightWidth(next);
-      }
-    };
-    const onMouseUp = () => setDragSide(null);
+        setWatchHeight(next);
+      };
 
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-    return () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-  }, [dragOriginWidth, dragOriginX, dragSide]);
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      };
 
-  useEffect(() => {
-    if (!centerDrag) return;
-    const onMouseMove = (event: MouseEvent) => {
-      const next = clamp(
-        centerDrag.originHeight + (centerDrag.originY - event.clientY),
-        WATCH_HEIGHT.min,
-        WATCH_HEIGHT.max
-      );
-      setWatchHeight(next);
-    };
-    const onMouseUp = () => setCenterDrag(null);
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-    return () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-  }, [centerDrag]);
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [watchHeight]
+  );
 
   const fetchMap = useCallback(async (r: RangeOption) => {
     setLoadState("loading");
@@ -477,24 +488,14 @@ export default function ImpactPage() {
             <button
               type="button"
               className="impact-console-collapse-btn"
-              aria-label={leftCollapsed ? "Expand left panel" : "Collapse left panel"}
-              onClick={() => setLeftCollapsed((value) => !value)}
+              aria-label={leftCollapsed ? "Expand left panel" : "Collapse or resize left panel"}
+              onClick={leftCollapsed ? () => setLeftCollapsed(false) : undefined}
+              onMouseDown={
+                leftCollapsed ? undefined : (event) => handlePanelResizeStart("left", event)
+              }
             >
               {leftCollapsed ? "›" : "‹"}
             </button>
-            {!leftCollapsed ? (
-              <button
-                type="button"
-                className="impact-console-resize-grip"
-                aria-label="Resize left panel"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  setDragSide("left");
-                  setDragOriginX(event.clientX);
-                  setDragOriginWidth(leftWidth);
-                }}
-              />
-            ) : null}
           </div>
 
           <section className="impact-console-col impact-console-watch">
@@ -515,18 +516,15 @@ export default function ImpactPage() {
               updatedLabel={updatedLabel}
               flyToCoord={flyToCoord}
             />
-            <div
-              className="impact-watch-resize-handle"
-              role="separator"
-              aria-label="Resize exposure watchlist"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                setCenterDrag({ originY: event.clientY, originHeight: watchHeight });
-              }}
-            >
-              <span className="impact-watch-resize-grip" aria-hidden>
+            <div className="impact-watch-divider">
+              <button
+                type="button"
+                className="impact-console-collapse-btn impact-console-collapse-btn-horizontal"
+                aria-label="Resize exposure watchlist"
+                onMouseDown={handleWatchResizeStart}
+              >
                 ↕
-              </span>
+              </button>
             </div>
             <ImpactWatchlist
               alerts={alerts}
@@ -538,24 +536,14 @@ export default function ImpactPage() {
             />
           </section>
           <div className="impact-console-divider impact-console-divider-right">
-            {!rightCollapsed ? (
-              <button
-                type="button"
-                className="impact-console-resize-grip"
-                aria-label="Resize right panel"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  setDragSide("right");
-                  setDragOriginX(event.clientX);
-                  setDragOriginWidth(rightWidth);
-                }}
-              />
-            ) : null}
             <button
               type="button"
               className="impact-console-collapse-btn"
-              aria-label={rightCollapsed ? "Expand right panel" : "Collapse right panel"}
-              onClick={() => setRightCollapsed((value) => !value)}
+              aria-label={rightCollapsed ? "Expand right panel" : "Collapse or resize right panel"}
+              onClick={rightCollapsed ? () => setRightCollapsed(false) : undefined}
+              onMouseDown={
+                rightCollapsed ? undefined : (event) => handlePanelResizeStart("right", event)
+              }
             >
               {rightCollapsed ? "‹" : "›"}
             </button>

@@ -3858,37 +3858,15 @@ footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   padding: 0 2px;
   background: rgba(8, 8, 10, 0.96);
   border-left: 1px solid rgba(148, 163, 184, 0.16);
   border-right: 1px solid rgba(148, 163, 184, 0.12);
+  user-select: none;
 }
 .impact-console-divider-right {
   border-left: 1px solid rgba(148, 163, 184, 0.12);
   border-right: 1px solid rgba(148, 163, 184, 0.16);
-}
-.impact-console-resize-grip {
-  width: 8px;
-  height: 100%;
-  border: 0;
-  background:
-    linear-gradient(
-      to right,
-      rgba(148, 163, 184, 0.08) 0%,
-      rgba(148, 163, 184, 0.5) 50%,
-      rgba(148, 163, 184, 0.08) 100%
-    );
-  cursor: col-resize;
-}
-.impact-console-resize-grip:hover {
-  background:
-    linear-gradient(
-      to right,
-      rgba(148, 163, 184, 0.18) 0%,
-      rgba(148, 163, 184, 0.75) 50%,
-      rgba(148, 163, 184, 0.18) 100%
-    );
 }
 .impact-console-collapse-btn {
   width: 10px;
@@ -3899,9 +3877,28 @@ footer {
   color: rgba(226, 232, 240, 0.88);
   font-size: 12px;
   line-height: 1;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
 }
+.impact-console-collapse-btn:active { cursor: grabbing; }
 .impact-console-collapse-btn:hover { border-color: rgba(148, 163, 184, 0.42); }
+.impact-console-collapse-btn-horizontal {
+  width: 44px;
+  min-width: 44px;
+  height: 10px;
+  font-size: 10px;
+}
+.impact-watch-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  height: 22px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(8, 8, 10, 0.96);
+  user-select: none;
+}
 .impact-console-col.is-collapsed { overflow: hidden; }
 .impact-console-col.is-collapsed > * {
   opacity: 0;
@@ -3911,28 +3908,6 @@ footer {
 .impact-console.is-right-collapsed .impact-console-detail {
   border-left: 0;
   border-right: 0;
-}
-.impact-watch-resize-handle {
-  height: 12px;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(8, 8, 10, 0.96);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: row-resize;
-}
-.impact-watch-resize-grip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(148, 163, 184, 0.76);
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: 0.1em;
-}
-.impact-watch-resize-handle:hover .impact-watch-resize-grip {
-  color: rgba(226, 232, 240, 0.88);
 }
 .impact-portfolio-shell {
   display: flex;
@@ -3948,6 +3923,7 @@ footer {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -3992,6 +3968,7 @@ footer {
 }
 .impact-portfolio-manage-body {
   padding: 8px 10px 10px;
+  min-width: 0;
   border-top: 1px solid rgba(148, 163, 184, 0.1);
   background: rgba(8, 8, 10, 0.98);
 }
@@ -4006,6 +3983,8 @@ footer {
 .impact-empty-utils { font-size: 11.5px; color: rgba(148, 163, 184, 0.85); }
 
 .impact-disclosure {
+  min-width: 0;
+  max-width: 100%;
   border: 1px dashed rgba(148, 163, 184, 0.35);
   border-radius: 4px;
   padding: 7px 8px;
@@ -4029,21 +4008,30 @@ footer {
   margin: 6px 0;
 }
 .impact-disclosure ul { font-size: 11px; color: rgba(148, 163, 184, 0.85); margin-left: 16px; }
-.impact-disclosure-sample { min-width: 0; }
+.impact-disclosure-sample { min-width: 0; max-width: 100%; }
 .impact-csv-sample-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   margin: 6px 0;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(2, 6, 17, 0.7);
-  max-width: 100%;
-  overflow-x: auto;
+  overflow: hidden;
 }
-.impact-csv-sample-pre {
+.impact-csv-sample-line {
+  display: block;
   margin: 0;
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 10.5px;
-  white-space: pre;
-  min-width: max-content;
-  padding: 7px;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: #cbd5f5;
 }
 .impact-paste-input {
@@ -4466,8 +4454,6 @@ footer {
   border-bottom: 1px solid rgba(148, 163, 184, 0.1);
 }
 .impact-watch-title { display: flex; flex-direction: column; gap: 1px; }
-.impact-watch-sub { font-size: 10.5px; color: rgba(148, 163, 184, 0.9); }
-.impact-watch-driver-hint { font-size: 9px; color: rgba(148, 163, 184, 0.72); }
 .impact-watch-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .impact-filter-chips { display: inline-flex; gap: 4px; }
 .impact-filter-chip {
@@ -4493,11 +4479,19 @@ footer {
   font-family: var(--font-barlow-condensed);
   font-size: 9.5px;
 }
-.impact-sort-active {
-  color: rgba(203, 213, 225, 0.75);
+.impact-sort-direction {
+  background: rgba(2, 6, 17, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0;
+  padding: 3px 6px;
+  color: rgba(203, 213, 225, 0.85);
+  font-family: var(--font-barlow-condensed);
   font-size: 9px;
   letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
 }
+.impact-sort-direction:hover { border-color: rgba(148, 163, 184, 0.5); }
 .impact-watch-empty { padding: 12px; text-align: center; color: rgba(148, 163, 184, 0.9); font-size: 11.5px; }
 .impact-watch-empty-sub { font-size: 10.5px; color: rgba(148, 163, 184, 0.75); margin-top: 4px; }
 .impact-watch-table-head,
@@ -4521,12 +4515,28 @@ footer {
 .impact-watch-list { list-style: none; display: flex; flex-direction: column; }
 .impact-watch-li { padding: 0; border-top: 1px solid rgba(148, 163, 184, 0.08); }
 .impact-watch-row {
+  display: grid;
+  grid-template-columns: 3px 24px minmax(120px, 1.1fr) minmax(110px, 0.9fr) 44px minmax(90px, 0.8fr);
+  gap: 6px;
+  align-items: center;
   width: 100%;
   text-align: left;
-  padding: 4px 10px 4px 0;
   background: transparent;
   border: 0;
   color: #e2e8f0;
+  cursor: pointer;
+}
+.impact-watch-row-select {
+  display: grid;
+  grid-column: 1 / 6;
+  grid-template-columns: subgrid;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 4px 0 4px 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
   cursor: pointer;
 }
 .impact-watch-row.is-selected { background: rgba(255, 255, 255, 0.04); }
@@ -4537,7 +4547,13 @@ footer {
 .impact-watch-row[data-level="guarded"] .impact-watch-stripe,
 .impact-watch-row[data-level="low"] .impact-watch-stripe { background: #4b5563; }
 .impact-watch-rank { font-family: var(--font-bebas); font-size: 14px; color: rgba(226, 232, 240, 0.55); text-align: center; }
-.impact-watch-main, .impact-watch-location, .impact-watch-meta, .impact-watch-drivers { min-width: 0; }
+.impact-watch-main, .impact-watch-location, .impact-watch-meta { min-width: 0; }
+.impact-watch-drivers {
+  grid-column: 6;
+  min-width: 0;
+  padding: 4px 10px 4px 0;
+  overflow: visible;
+}
 .impact-watch-name { color: #f1f5f9; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .impact-watch-location { color: rgba(148, 163, 184, 0.78); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .impact-watch-meta { display: inline-flex; justify-content: flex-start; }
@@ -4547,6 +4563,7 @@ footer {
 .impact-watch-evidence { font-size: 10px; color: rgba(148, 163, 184, 0.6); }
 .impact-watch-driver-icons { display: inline-flex; align-items: center; gap: 3px; }
 .impact-driver-icon {
+  position: relative;
   width: 16px;
   height: 16px;
   border: 1px solid rgba(148, 163, 184, 0.22);
@@ -4557,6 +4574,31 @@ footer {
   font-size: 8px;
   color: rgba(203, 213, 225, 0.75);
   background: rgba(12, 12, 14, 0.9);
+  cursor: help;
+}
+.impact-driver-icon::after {
+  content: attr(data-label);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  padding: 4px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(2, 6, 17, 0.96);
+  color: #e2e8f0;
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0.12s ease;
+  z-index: 30;
+}
+.impact-driver-icon:hover::after,
+.impact-driver-icon:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
 }
 .impact-driver-overflow {
   font-size: 9px;

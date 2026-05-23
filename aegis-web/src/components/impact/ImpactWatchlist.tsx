@@ -19,6 +19,7 @@ type Props = {
 
 export type FilterMode = "all" | "critical" | "high" | "elevated" | "low";
 type SortMode = "score" | "confidence";
+type SortDirection = "asc" | "desc";
 
 const CONFIDENCE_RANK: Record<ConfidenceLevel, number> = {
   low: 0,
@@ -75,6 +76,7 @@ export function ImpactWatchlist({
   height,
 }: Props) {
   const [sort, setSort] = useState<SortMode>("score");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const filteredSorted = useMemo(() => {
     const filtered = alerts.filter((a) => {
@@ -84,24 +86,25 @@ export function ImpactWatchlist({
       if (filter === "low") return a.level === "low" || a.level === "guarded";
       return true;
     });
-    if (sort === "confidence") {
-      return filtered
-        .slice()
-        .sort(
-          (a, b) =>
-            CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence] || b.score - a.score
-        );
-    }
-    return filtered.slice().sort((a, b) => b.score - a.score);
-  }, [alerts, filter, sort]);
+    const direction = sortDirection === "desc" ? -1 : 1;
+    return filtered.slice().sort((a, b) => {
+      if (sort === "confidence") {
+        const byConfidence =
+          (CONFIDENCE_RANK[a.confidence] - CONFIDENCE_RANK[b.confidence]) * direction;
+        if (byConfidence !== 0) return byConfidence;
+        return (a.score - b.score) * direction;
+      }
+      const byScore = (a.score - b.score) * direction;
+      if (byScore !== 0) return byScore;
+      return a.asset.name.localeCompare(b.asset.name);
+    });
+  }, [alerts, filter, sort, sortDirection]);
 
   return (
     <div className="impact-watch" style={height ? { height: `${height}px`, maxHeight: `${height}px` } : undefined}>
       <header className="impact-watch-head">
         <div className="impact-watch-title">
           <span className="impact-eyebrow">Exposure Watchlist</span>
-          <p className="impact-watch-sub impact-eyebrow">Ranked by exposure score</p>
-          <p className="impact-watch-driver-hint">Hover a driver icon to see its meaning.</p>
         </div>
         <div className="impact-watch-controls">
           <div className="impact-filter-chips" role="tablist" aria-label="Filter alerts">
@@ -136,9 +139,15 @@ export function ImpactWatchlist({
               <option value="score">Score</option>
               <option value="confidence">Confidence</option>
             </select>
-            <span className="impact-sort-active" aria-live="polite">
-              {sort === "score" ? "score ↓" : "confidence ↓"}
-            </span>
+            <button
+              type="button"
+              className="impact-sort-direction"
+              aria-label={`Sort ${sortDirection === "desc" ? "descending" : "ascending"}`}
+              onClick={() => setSortDirection((value) => (value === "desc" ? "asc" : "desc"))}
+            >
+              {sort === "score" ? "Score" : "Confidence"}{" "}
+              {sortDirection === "desc" ? "↓" : "↑"}
+            </button>
           </label>
         </div>
       </header>
@@ -174,34 +183,38 @@ export function ImpactWatchlist({
               const overflow = Math.max(0, allFamilyCount - families.length);
               return (
                 <li key={alert.id} className="impact-watch-li">
-                  <button
-                    type="button"
+                  <div
                     className={`impact-watch-row${selected ? " is-selected" : ""}`}
                     data-level={alert.level}
-                    onClick={() => onSelect(alert.id)}
                   >
-                    <span className="impact-watch-stripe" aria-hidden />
-                    <span className="impact-watch-rank">{idx + 1}</span>
-                    <span className="impact-watch-main">
-                      <span className="impact-watch-name">{alert.asset.name}</span>
-                    </span>
-                    <span className="impact-watch-location">
-                      {alert.asset.city ? `${alert.asset.city}, ` : ""}
-                      {alert.asset.country}
-                    </span>
-                    <span className="impact-watch-meta">
-                      <span className={`impact-score-chip impact-level-${alert.level}`}>
-                        <span className="impact-score-value">{alert.score}</span>
+                    <button
+                      type="button"
+                      className="impact-watch-row-select"
+                      onClick={() => onSelect(alert.id)}
+                    >
+                      <span className="impact-watch-stripe" aria-hidden />
+                      <span className="impact-watch-rank">{idx + 1}</span>
+                      <span className="impact-watch-main">
+                        <span className="impact-watch-name">{alert.asset.name}</span>
                       </span>
-                    </span>
-                    <span className="impact-watch-drivers">
+                      <span className="impact-watch-location">
+                        {alert.asset.city ? `${alert.asset.city}, ` : ""}
+                        {alert.asset.country}
+                      </span>
+                      <span className="impact-watch-meta">
+                        <span className={`impact-score-chip impact-level-${alert.level}`}>
+                          <span className="impact-score-value">{alert.score}</span>
+                        </span>
+                      </span>
+                    </button>
+                    <div className="impact-watch-drivers">
                       {families.length > 0 ? (
                         <span className="impact-watch-driver-icons">
                           {families.map((f) => (
                             <span
                               key={f}
                               className="impact-driver-icon"
-                              title={familyLabel(f)}
+                              data-label={familyLabel(f)}
                               aria-label={familyLabel(f)}
                             >
                               {familyIcon(f)}
@@ -214,8 +227,8 @@ export function ImpactWatchlist({
                       ) : (
                         <span className="impact-watch-evidence">—</span>
                       )}
-                    </span>
-                  </button>
+                    </div>
+                  </div>
                 </li>
               );
             })}
