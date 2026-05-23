@@ -4,21 +4,22 @@ import type { IntelSeverity } from "@/lib/intel/types";
 
 export type LonLatBounds = [[number, number], [number, number]];
 
-export const BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+export const BASEMAP_STYLE =
+  "https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json";
 
 const LEVEL_COLOR: Record<ExposureLevel, string> = {
-  critical: "#b91c1c",
-  high: "#c2410c",
-  elevated: "#a16207",
-  guarded: "#334155",
-  low: "#475569",
+  critical: "#8b1a1a",
+  high: "#7a3d0f",
+  elevated: "#7f6a33",
+  guarded: "#36404c",
+  low: "#4a5564",
 };
 
 const SEVERITY_COLOR: Record<IntelSeverity, string> = {
-  critical: "#b91c1c",
-  high: "#c2410c",
-  medium: "#a16207",
-  low: "#475569",
+  critical: "#9a2b2b",
+  high: "#8a4f1f",
+  medium: "#7f6a33",
+  low: "#4a5564",
 };
 
 export function levelColor(level: ExposureLevel): string {

@@ -46,6 +46,8 @@ type HoverState = {
   subtitle: string;
 } | null;
 
+type SourceLayerSpec = { "source-layer"?: string };
+
 const INITIAL_VIEW_STATE = {
   longitude: 0,
   latitude: 20,
@@ -62,28 +64,48 @@ const SELECTED_RING_OUTER_ID = "impact-selected-ring-outer";
 const SELECTED_RING_MID_ID = "impact-selected-ring-mid";
 const SELECTED_RING_INNER_ID = "impact-selected-ring-inner";
 const SELECTED_STAR_LAYER_ID = "impact-selected-star";
+const SELECTED_LABEL_LAYER_ID = "impact-selected-label";
+const COUNTRY_LABEL_LAYER_ID = "impact-country-labels";
 
 const ASSET_LAYER: LayerProps = {
   id: ASSET_LAYER_ID,
   type: "circle",
   paint: {
-    "circle-radius": ["case", ["get", "selected"], 6.2, 4.2],
+    "circle-radius": ["case", ["get", "selected"], 6, 4.8],
     "circle-color": [
       "match",
       ["get", "level"],
       "critical",
-      "#a82a2a",
+      "#8b1a1a",
       "high",
-      "#8a4f1f",
+      "#7a3d0f",
       "elevated",
-      "#78612e",
+      "rgba(0,0,0,0)",
       "guarded",
-      "#4b5563",
-      "#4b5563",
+      "#2d3748",
+      "#2d3748",
     ],
-    "circle-stroke-color": ["case", ["get", "selected"], "rgba(255,255,255,0.95)", "rgba(203,213,225,0.45)"],
-    "circle-stroke-width": ["case", ["get", "selected"], 1.6, 0.8],
-    "circle-opacity": 0.96,
+    "circle-stroke-color": [
+      "case",
+      ["==", ["get", "level"], "critical"],
+      "rgba(220,88,88,0.7)",
+      ["==", ["get", "level"], "high"],
+      "rgba(180,100,40,0.6)",
+      ["==", ["get", "level"], "elevated"],
+      "rgba(160,130,60,0.65)",
+      ["get", "selected"],
+      "rgba(241,245,249,0.88)",
+      "rgba(148,163,184,0.25)",
+    ],
+    "circle-stroke-width": [
+      "case",
+      ["==", ["get", "level"], "elevated"],
+      1,
+      ["get", "selected"],
+      1.2,
+      0.8,
+    ],
+    "circle-opacity": 0.95,
   },
 };
 
@@ -96,26 +118,26 @@ const EVIDENCE_LAYER: LayerProps = {
       "match",
       ["get", "severity"],
       "critical",
-      4.6,
+      3.8,
       "high",
-      4.1,
+      3.4,
       "medium",
-      3.6,
-      3.2,
+      3,
+      2.6,
     ],
     "circle-color": [
       "match",
       ["get", "severity"],
       "critical",
-      "#dc6363",
+      "#b85252",
       "high",
-      "#b98e53",
+      "#9a6b30",
       "medium",
-      "#9e975b",
-      "#7b8798",
+      "#857952",
+      "#546070",
     ],
-    "circle-stroke-color": "rgba(8,11,18,0.9)",
-    "circle-stroke-width": 0.8,
+    "circle-stroke-color": "rgba(8,11,18,0.85)",
+    "circle-stroke-width": 0.7,
     "circle-opacity": 0.88,
   },
 };
@@ -143,8 +165,8 @@ const LINK_LAYER: LayerProps = {
       "rgba(148,163,184,0.18)",
       "rgba(148,163,184,0.28)",
     ],
-    "line-width": 0.8,
-    "line-opacity": 0.46,
+    "line-width": 0.6,
+    "line-opacity": 0.3,
   },
 };
 
@@ -153,10 +175,10 @@ const SELECTED_RING_OUTER: LayerProps = {
   type: "circle",
   filter: ["==", ["get", "selected"], true],
   paint: {
-    "circle-radius": 24,
+    "circle-radius": 26,
     "circle-color": "rgba(0,0,0,0)",
-    "circle-stroke-color": "rgba(255,255,255,0.16)",
-    "circle-stroke-width": 1,
+    "circle-stroke-color": "rgba(255,255,255,0.12)",
+    "circle-stroke-width": 1.2,
     "circle-opacity": 0.85,
   },
 };
@@ -166,10 +188,10 @@ const SELECTED_RING_MID: LayerProps = {
   type: "circle",
   filter: ["==", ["get", "selected"], true],
   paint: {
-    "circle-radius": 16,
+    "circle-radius": 18,
     "circle-color": "rgba(0,0,0,0)",
-    "circle-stroke-color": "rgba(255,255,255,0.28)",
-    "circle-stroke-width": 1,
+    "circle-stroke-color": "rgba(255,255,255,0.22)",
+    "circle-stroke-width": 1.2,
     "circle-opacity": 0.88,
   },
 };
@@ -179,10 +201,10 @@ const SELECTED_RING_INNER: LayerProps = {
   type: "circle",
   filter: ["==", ["get", "selected"], true],
   paint: {
-    "circle-radius": 10,
+    "circle-radius": 11,
     "circle-color": "rgba(0,0,0,0)",
-    "circle-stroke-color": "rgba(255,255,255,0.48)",
-    "circle-stroke-width": 1,
+    "circle-stroke-color": "rgba(255,255,255,0.42)",
+    "circle-stroke-width": 1.4,
     "circle-opacity": 0.9,
   },
 };
@@ -201,6 +223,26 @@ const SELECTED_STAR_LAYER: LayerProps = {
     "text-color": "#f1f5f9",
     "text-halo-color": "rgba(0,0,0,0.85)",
     "text-halo-width": 1,
+  },
+};
+
+const SELECTED_LABEL_LAYER: LayerProps = {
+  id: SELECTED_LABEL_LAYER_ID,
+  type: "symbol",
+  filter: ["==", ["get", "selected"], true],
+  layout: {
+    "text-field": ["upcase", ["get", "name"]],
+    "text-size": 9.5,
+    "text-anchor": "bottom",
+    "text-offset": [0, -2.8],
+    "text-allow-overlap": true,
+    "text-ignore-placement": true,
+    "text-letter-spacing": 0.08,
+  },
+  paint: {
+    "text-color": "rgba(241,245,249,0.92)",
+    "text-halo-color": "rgba(0,0,0,0.9)",
+    "text-halo-width": 1.2,
   },
 };
 
@@ -235,6 +277,7 @@ export function ImpactMapPanel({
   const [mapError, setMapError] = useState<string | null>(null);
   const [hover, setHover] = useState<HoverState>(null);
   const [showEvidence, setShowEvidence] = useState(true);
+  const [lastMapCoord, setLastMapCoord] = useState<{ lat: number; lon: number } | null>(null);
 
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === selectedAssetId) ?? null,
@@ -295,6 +338,7 @@ export function ImpactMapPanel({
   };
 
   const handleHover = (event: MapLayerMouseEvent) => {
+    setLastMapCoord({ lat: event.lngLat.lat, lon: event.lngLat.lng });
     const feature = event.features?.[0];
     if (!feature || !feature.properties) {
       setHover(null);
@@ -333,6 +377,63 @@ export function ImpactMapPanel({
     }
 
     setHover(null);
+  };
+
+  const handleMapLoad = () => {
+    setMapLoaded(true);
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    const style = map.getStyle();
+    if (!style || !style.sources) return;
+
+    const sourceEntry = Object.entries(style.sources).find(([, source]) => {
+      const sourceType = (source as { type?: string }).type;
+      return sourceType === "vector";
+    });
+    if (!sourceEntry) return;
+
+    const [sourceId] = sourceEntry;
+    let hasCountryLayer = false;
+    try {
+      const sourceLayers = map
+        .getStyle()
+        .layers?.map((layer) => (layer as SourceLayerSpec)["source-layer"])
+        .filter((value): value is string => Boolean(value));
+      hasCountryLayer = sourceLayers?.includes("place_label") ?? false;
+    } catch {
+      hasCountryLayer = false;
+    }
+    if (!hasCountryLayer) return;
+    if (map.getLayer(COUNTRY_LABEL_LAYER_ID)) return;
+
+    try {
+      map.addLayer({
+        id: COUNTRY_LABEL_LAYER_ID,
+        type: "symbol",
+        source: sourceId,
+        "source-layer": "place_label",
+        filter: [
+          "all",
+          ["==", ["get", "class"], "country"],
+        ],
+        minzoom: 3,
+        layout: {
+          "text-field": ["upcase", ["coalesce", ["get", "name_en"], ["get", "name"]]],
+          "text-size": 9,
+          "text-letter-spacing": 0.15,
+          "text-font": ["Open Sans Semibold"],
+          "symbol-placement": "point",
+          "text-allow-overlap": false,
+        },
+        paint: {
+          "text-color": "rgba(148,163,184,0.55)",
+          "text-halo-color": "rgba(0,0,0,0.82)",
+          "text-halo-width": 0.8,
+        },
+      });
+    } catch {
+      // Keep no-label basemap if layer/source assumptions differ.
+    }
   };
 
   if (assets.length === 0) {
@@ -415,7 +516,7 @@ export function ImpactMapPanel({
           attributionControl={false}
           interactiveLayerIds={interactiveLayerIds}
           reuseMaps
-          onLoad={() => setMapLoaded(true)}
+          onLoad={handleMapLoad}
           onError={(event) => {
             const message =
               typeof (event as { error?: { message?: string } }).error?.message === "string"
@@ -425,6 +526,9 @@ export function ImpactMapPanel({
           }}
           onClick={handleMapClick}
           onMouseMove={handleHover}
+          onMove={(event) => {
+            setLastMapCoord({ lat: event.viewState.latitude, lon: event.viewState.longitude });
+          }}
           onMouseLeave={() => setHover(null)}
           cursor={hover ? "pointer" : "grab"}
         >
@@ -434,6 +538,7 @@ export function ImpactMapPanel({
             <Layer {...SELECTED_RING_INNER} />
             <Layer {...ASSET_LAYER} />
             <Layer {...SELECTED_STAR_LAYER} />
+            <Layer {...SELECTED_LABEL_LAYER} />
           </Source>
 
           {showEvidence ? (
@@ -498,6 +603,10 @@ export function ImpactMapPanel({
           {selectedAsset ? (
             <span>
               {formatCoordLat(selectedAsset.lat)} | {formatCoordLon(selectedAsset.lon)}
+            </span>
+          ) : lastMapCoord ? (
+            <span>
+              {formatCoordLat(lastMapCoord.lat)} | {formatCoordLon(lastMapCoord.lon)}
             </span>
           ) : (
             <span>

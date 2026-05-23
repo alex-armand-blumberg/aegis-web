@@ -77,7 +77,7 @@ export function ImpactWatchlist({ alerts, selectedAlertId, onSelect }: Props) {
       <header className="impact-watch-head">
         <div className="impact-watch-title">
           <span className="impact-eyebrow">Exposure Watchlist</span>
-          <p className="impact-watch-sub">Ranked by exposure score</p>
+          <p className="impact-watch-sub impact-eyebrow">Ranked by exposure score</p>
         </div>
         <div className="impact-watch-controls">
           <div className="impact-filter-chips" role="tablist" aria-label="Filter alerts">

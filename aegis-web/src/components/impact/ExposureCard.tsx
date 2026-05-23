@@ -214,7 +214,7 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
         <span>
           {capsCount} cap{capsCount === 1 ? "" : "s"}
         </span>
-        <span>Range {alert.range}</span>
+        <span>Window {alert.range}</span>
       </div>
 
       <div className="impact-detail-tabs" role="tablist" aria-label="Alert detail sections">
@@ -267,6 +267,16 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
 
           <section className="impact-detail-section">
             <span className="impact-eyebrow">Evidence summary</span>
+            <div className="impact-evidence-summary-meta">
+              <span>
+                {alert.evidence.length} evidence cluster
+                {alert.evidence.length === 1 ? "" : "s"} · {capsCount} cap
+                {capsCount === 1 ? "" : "s"} applied
+              </span>
+              <span className={`impact-conf-chip impact-conf-${alert.confidence}`}>
+                {alert.confidence}
+              </span>
+            </div>
             <EvidenceList items={previewEvidence} compact />
             {hiddenCount > 0 ? (
               <button
