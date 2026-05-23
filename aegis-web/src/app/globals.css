@@ -3957,6 +3957,7 @@ footer {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 .impact-console-divider {
   display: flex;
@@ -4330,7 +4331,7 @@ footer {
   position: relative;
   overflow: hidden;
   flex: 1 1 0;
-  min-height: 180px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   border: none;
@@ -4401,22 +4402,28 @@ footer {
   border-color: rgba(248, 250, 252, 0.5);
   color: #f8fafc;
 }
-.impact-map-canvas { position: relative; min-height: 400px; flex: 1; }
-.impact-map-canvas .maplibregl-map { width: 100%; height: 100%; min-height: 400px; }
+.impact-map-canvas {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 0;
+  --impact-map-inset-bottom: 14px;
+}
+.impact-map-canvas .maplibregl-map { width: 100%; height: 100%; min-height: 0; }
 .impact-map-canvas .maplibregl-ctrl-bottom-right,
 .impact-map-canvas .maplibregl-ctrl-bottom-left { display: none; }
 .impact-map-legend-inset {
   position: absolute;
-  left: 8px;
-  bottom: 8px;
-  z-index: 7;
+  left: 10px;
+  bottom: var(--impact-map-inset-bottom);
+  z-index: 8;
   border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(4, 4, 6, 0.9);
+  background: rgba(4, 4, 6, 0.92);
   padding: 6px 8px;
   display: flex;
   flex-direction: column;
   gap: 3px;
   min-width: 128px;
+  pointer-events: none;
 }
 .impact-map-legend-title {
   font-family: var(--font-barlow-condensed);
@@ -4476,11 +4483,11 @@ footer {
 .impact-map-dot-unknown { background: #334155; }
 .impact-map-status-inset {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
-  z-index: 7;
+  right: 10px;
+  bottom: var(--impact-map-inset-bottom);
+  z-index: 8;
   border: 1px solid rgba(148, 163, 184, 0.26);
-  background: rgba(4, 4, 6, 0.9);
+  background: rgba(4, 4, 6, 0.92);
   padding: 5px 8px;
   display: inline-flex;
   align-items: center;
@@ -4545,8 +4552,8 @@ footer {
   flex-direction: column;
   min-height: 0;
   flex: 0 0 auto;
-  height: 220px;
-  max-height: 220px;
+  height: 200px;
+  max-height: 200px;
   border-top: 1px solid rgba(148, 163, 184, 0.14);
   background: #0c0c0e;
 }
@@ -5064,9 +5071,9 @@ footer {
     --impact-left-col: 252px;
     --impact-right-col: 340px;
   }
-  .impact-map-panel { min-height: 380px; }
+  .impact-map-panel { min-height: 0; }
   .impact-map-canvas,
-  .impact-map-canvas .maplibregl-map { min-height: 360px; }
+  .impact-map-canvas .maplibregl-map { min-height: 0; }
 }
 @media (max-width: 1100px) {
   .impact-console {

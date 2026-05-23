@@ -47,7 +47,8 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 
 const LEFT_PANEL_WIDTH = { min: 220, max: 520, default: 272, collapsed: 36 } as const;
 const RIGHT_PANEL_WIDTH = { min: 280, max: 620, default: 400, collapsed: 36 } as const;
-const WATCH_HEIGHT = { min: 170, max: 420, default: 220 } as const;
+const WATCH_HEIGHT = { min: 110, max: 520, default: 200 } as const;
+const WATCH_MAP_MIN = 200;
 const PANEL_DRAG_THRESHOLD = 4;
 
 function clamp(value: number, min: number, max: number): number {
@@ -214,6 +215,15 @@ export default function ImpactPage() {
       event.preventDefault();
       const startY = event.clientY;
       const startHeight = watchHeight;
+      const watchColumn = event.currentTarget.closest(".impact-console-watch") as HTMLElement | null;
+      const dividerHeight =
+        event.currentTarget.closest(".impact-watch-divider")?.clientHeight ?? 22;
+      const maxForColumn = watchColumn
+        ? Math.max(
+            WATCH_HEIGHT.min,
+            watchColumn.clientHeight - WATCH_MAP_MIN - dividerHeight
+          )
+        : WATCH_HEIGHT.max;
       let dragging = false;
 
       const onMouseMove = (moveEvent: MouseEvent) => {
@@ -221,7 +231,11 @@ export default function ImpactPage() {
         if (!dragging && Math.abs(delta) < PANEL_DRAG_THRESHOLD) return;
         dragging = true;
         setWatchHeight(
-          clamp(startHeight + delta, WATCH_HEIGHT.min, WATCH_HEIGHT.max)
+          clamp(
+            startHeight + delta,
+            WATCH_HEIGHT.min,
+            Math.min(WATCH_HEIGHT.max, maxForColumn)
+          )
         );
       };
 
