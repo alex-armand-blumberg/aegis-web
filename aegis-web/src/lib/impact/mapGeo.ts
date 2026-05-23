@@ -2,6 +2,10 @@ import type { Feature, FeatureCollection, LineString, Point } from "geojson";
 import type { ExposureAlert, EvidenceItem, ExposureLevel, UserAsset } from "./types";
 import type { IntelSeverity } from "@/lib/intel/types";
 import type { ImpactBackgroundSignal } from "./mapSignals";
+import {
+  classifyEvidenceRelation,
+  type EvidenceRelation,
+} from "./evidenceRelation";
 
 export type LonLatBounds = [[number, number], [number, number]];
 
@@ -156,18 +160,25 @@ type EvidenceProps = {
   distanceKm: number | null;
   eventClass: EvidenceItem["eventClass"];
   isModelContext: boolean;
+  relation: EvidenceRelation;
   selected: boolean;
 };
 
 export function buildEvidenceGeoJson(
   evidence: EvidenceItem[],
-  selectedEvidenceId?: string | null
+  selectedEvidenceId?: string | null,
+  asset?: UserAsset | null
 ): FeatureCollection<Point, EvidenceProps> {
   const features: Array<Feature<Point, EvidenceProps>> = [];
   for (const item of evidence) {
     if (!isValidPoint(item)) continue;
     const isModelContext =
       item.eventClass === "model_risk_context" || item.sourceFamilies.includes("model_context");
+    const relation: EvidenceRelation = asset
+      ? classifyEvidenceRelation(item, asset)
+      : isModelContext
+        ? "model_context"
+        : "regional_context";
     features.push({
       type: "Feature",
       geometry: {
@@ -181,6 +192,7 @@ export function buildEvidenceGeoJson(
         distanceKm: Number.isFinite(item.distanceKm) ? item.distanceKm ?? null : null,
         eventClass: item.eventClass,
         isModelContext,
+        relation,
         selected: item.id === selectedEvidenceId,
       },
     });
@@ -235,6 +247,7 @@ export function buildBackgroundSignalGeoJson(args: {
 type LinkProps = {
   evidenceId: string;
   isModelContext: boolean;
+  relation: EvidenceRelation;
 };
 
 export function buildLinkGeoJson(args: {
@@ -249,6 +262,7 @@ export function buildLinkGeoJson(args: {
     if (!isValidPoint(item)) continue;
     const isModelContext =
       item.eventClass === "model_risk_context" || item.sourceFamilies.includes("model_context");
+    const relation = classifyEvidenceRelation(item, asset);
     features.push({
       type: "Feature",
       geometry: {
@@ -261,6 +275,7 @@ export function buildLinkGeoJson(args: {
       properties: {
         evidenceId: item.id,
         isModelContext,
+        relation,
       },
     });
   }

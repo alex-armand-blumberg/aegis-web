@@ -6,8 +6,15 @@ import type {
   EvidenceItem,
   ExposureAlert,
   ExposureScoreBreakdown,
+  UserAsset,
 } from "@/lib/impact/types";
 import { countryDisplay } from "@/lib/impact/countryDisplay";
+import {
+  EVIDENCE_RELATION_LABEL,
+  classifyEvidenceRelation,
+  groupEvidenceByRelation,
+  type EvidenceRelation,
+} from "@/lib/impact/evidenceRelation";
 import { BriefRenderer } from "./BriefRenderer";
 import { FeedbackControls } from "./FeedbackControls";
 
@@ -179,8 +186,10 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }
 
   const bars = breakdownBars(alert.breakdown);
   const capsCount = alert.breakdown.capsApplied.length;
-  const previewEvidence = alert.evidence.slice(0, EVIDENCE_PREVIEW_LIMIT);
-  const hiddenCount = Math.max(0, alert.evidence.length - EVIDENCE_PREVIEW_LIMIT);
+  const evidenceGroups = groupEvidenceByRelation(alert.evidence, alert.asset);
+  const previewGroups = buildPreviewGroups(evidenceGroups, EVIDENCE_PREVIEW_LIMIT);
+  const previewCount = previewGroups.reduce((sum, group) => sum + group.items.length, 0);
+  const hiddenCount = Math.max(0, alert.evidence.length - previewCount);
   const country = countryDisplay(alert.asset.country);
   const primaryWatchNext = alert.watchNext[0] ?? null;
 
@@ -270,7 +279,13 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }
 
           <section className="impact-detail-section">
             <span className="impact-eyebrow">Evidence summary</span>
-            <EvidenceList items={previewEvidence} compact preview onItemClick={onFlyTo} />
+            <GroupedEvidenceList
+              groups={previewGroups}
+              asset={alert.asset}
+              compact
+              preview
+              onItemClick={onFlyTo}
+            />
             {hiddenCount > 0 ? (
               <button
                 type="button"
@@ -351,7 +366,11 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }
 
       {activeTab === "evidence" ? (
         <section className="impact-detail-section">
-          <EvidenceList items={alert.evidence} onItemClick={onFlyTo} />
+          <GroupedEvidenceList
+            groups={evidenceGroups}
+            asset={alert.asset}
+            onItemClick={onFlyTo}
+          />
         </section>
       ) : null}
 
@@ -416,13 +435,86 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }
   );
 }
 
+type EvidenceGroup = { relation: EvidenceRelation; items: EvidenceItem[] };
+
+const RELATION_HINT: Record<EvidenceRelation, string> = {
+  direct: "Local or proximate concrete events for this asset.",
+  regional_context: "Same-region developments that may shape exposure indirectly.",
+  model_context: "Aggregate or model context — not a concrete incident.",
+};
+
+function buildPreviewGroups(groups: EvidenceGroup[], limit: number): EvidenceGroup[] {
+  if (limit <= 0) return [];
+  const out: EvidenceGroup[] = [];
+  let remaining = limit;
+  for (const group of groups) {
+    if (remaining <= 0) break;
+    if (group.items.length === 0) continue;
+    const take = Math.min(group.items.length, remaining);
+    out.push({ relation: group.relation, items: group.items.slice(0, take) });
+    remaining -= take;
+  }
+  return out;
+}
+
+function GroupedEvidenceList({
+  groups,
+  asset,
+  compact = false,
+  preview = false,
+  onItemClick,
+}: {
+  groups: EvidenceGroup[];
+  asset: UserAsset;
+  compact?: boolean;
+  preview?: boolean;
+  onItemClick?: (lat: number, lon: number) => void;
+}) {
+  if (groups.length === 0) {
+    return (
+      <p className="impact-evidence-empty">
+        No concrete evidence clusters matched this asset in the current window.
+      </p>
+    );
+  }
+  return (
+    <div className="impact-evidence-groups">
+      {groups.map((group) => (
+        <section
+          key={group.relation}
+          className={`impact-evidence-group impact-evidence-group-${group.relation}`}
+        >
+          <header className="impact-evidence-group-head">
+            <span
+              className={`impact-relation-chip impact-relation-${group.relation}`}
+              title={RELATION_HINT[group.relation]}
+            >
+              {EVIDENCE_RELATION_LABEL[group.relation]}
+            </span>
+            <span className="impact-evidence-group-count">{group.items.length}</span>
+          </header>
+          <EvidenceList
+            items={group.items}
+            asset={asset}
+            compact={compact}
+            preview={preview}
+            onItemClick={onItemClick}
+          />
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function EvidenceList({
   items,
+  asset,
   compact = false,
   preview = false,
   onItemClick,
 }: {
   items: EvidenceItem[];
+  asset: UserAsset;
   compact?: boolean;
   preview?: boolean;
   onItemClick?: (lat: number, lon: number) => void;
@@ -438,57 +530,69 @@ function EvidenceList({
     <ol
       className={`impact-evidence-list${compact ? " impact-evidence-list-compact" : ""}${preview ? " impact-evidence-list-preview" : ""}`}
     >
-      {items.map((e) => (
-        <li
-          key={e.id}
-          className="impact-evidence-item"
-          onClick={() => onItemClick?.(e.lat, e.lon)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              onItemClick?.(e.lat, e.lon);
-            }
-          }}
-          role={onItemClick ? "button" : undefined}
-          tabIndex={onItemClick ? 0 : undefined}
-        >
-          <div className="impact-evidence-head">
-            <span className="impact-evidence-title">{e.title}</span>
-            <span className={`impact-severity-chip impact-severity-${e.severity}`}>
-              {e.severity}
-            </span>
-          </div>
-          {preview ? (
-            <div className="impact-evidence-preview-meta">
-              <span>{e.sources[0] || "Unknown source"}</span>
-              <span>·</span>
-              <span>{formatRelative(e.timestamp)}</span>
+      {items.map((e) => {
+        const relation = classifyEvidenceRelation(e, asset);
+        return (
+          <li
+            key={e.id}
+            className={`impact-evidence-item impact-evidence-item-${relation}`}
+            data-relation={relation}
+            onClick={() => onItemClick?.(e.lat, e.lon)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onItemClick?.(e.lat, e.lon);
+              }
+            }}
+            role={onItemClick ? "button" : undefined}
+            tabIndex={onItemClick ? 0 : undefined}
+          >
+            <div className="impact-evidence-head">
+              <span className="impact-evidence-title">{e.title}</span>
+              <span className="impact-evidence-head-chips">
+                <span
+                  className={`impact-relation-chip impact-relation-${relation}`}
+                  title={RELATION_HINT[relation]}
+                >
+                  {EVIDENCE_RELATION_LABEL[relation]}
+                </span>
+                <span className={`impact-severity-chip impact-severity-${e.severity}`}>
+                  {e.severity}
+                </span>
+              </span>
             </div>
-          ) : (
-            <div className="impact-evidence-meta">
-              <span>{e.eventClass.replace(/_/g, " ")}</span>
-              <span>{e.sources.slice(0, 2).join(", ") || "—"}</span>
-              <span>{formatTimestamp(e.timestamp)}</span>
-              {!compact ? <span>{formatDistance(e.distanceKm)}</span> : null}
-              <span>{(e.sourceReliability * 100).toFixed(0)}% rel</span>
-            </div>
-          )}
-          {!compact && e.urls && e.urls.length > 0 ? (
-            <ul className="impact-evidence-links">
-              {e.urls.slice(0, EVIDENCE_LINK_LIMIT).map((u) => (
-                <li key={u}>
-                  <a href={u} target="_blank" rel="noopener noreferrer">
-                    Source: {sourceLinkLabel(u)}
-                  </a>
-                </li>
-              ))}
-              {e.urls.length > EVIDENCE_LINK_LIMIT ? (
-                <li className="impact-evidence-link-more">+{e.urls.length - EVIDENCE_LINK_LIMIT} more</li>
-              ) : null}
-            </ul>
-          ) : null}
-        </li>
-      ))}
+            {preview ? (
+              <div className="impact-evidence-preview-meta">
+                <span>{e.sources[0] || "Unknown source"}</span>
+                <span>·</span>
+                <span>{formatRelative(e.timestamp)}</span>
+              </div>
+            ) : (
+              <div className="impact-evidence-meta">
+                <span>{e.eventClass.replace(/_/g, " ")}</span>
+                <span>{e.sources.slice(0, 2).join(", ") || "—"}</span>
+                <span>{formatTimestamp(e.timestamp)}</span>
+                {!compact ? <span>{formatDistance(e.distanceKm)}</span> : null}
+                <span>{(e.sourceReliability * 100).toFixed(0)}% rel</span>
+              </div>
+            )}
+            {!compact && e.urls && e.urls.length > 0 ? (
+              <ul className="impact-evidence-links">
+                {e.urls.slice(0, EVIDENCE_LINK_LIMIT).map((u) => (
+                  <li key={u}>
+                    <a href={u} target="_blank" rel="noopener noreferrer">
+                      Source: {sourceLinkLabel(u)}
+                    </a>
+                  </li>
+                ))}
+                {e.urls.length > EVIDENCE_LINK_LIMIT ? (
+                  <li className="impact-evidence-link-more">+{e.urls.length - EVIDENCE_LINK_LIMIT} more</li>
+                ) : null}
+              </ul>
+            ) : null}
+          </li>
+        );
+      })}
     </ol>
   );
 }

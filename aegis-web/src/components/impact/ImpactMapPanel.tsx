@@ -98,12 +98,14 @@ const INITIAL_VIEW_STATE = {
 
 const ASSET_LAYER_ID = "impact-assets";
 const EVIDENCE_LAYER_ID = "impact-evidence";
+const EVIDENCE_REGIONAL_LAYER_ID = "impact-evidence-regional";
 const EVIDENCE_MODEL_LAYER_ID = "impact-evidence-model-context";
 const EVIDENCE_SELECTED_RING_ID = "impact-evidence-selected-ring";
 const BACKGROUND_SIGNAL_LAYER_ID = "impact-background-signals";
 const BACKGROUND_MODEL_LAYER_ID = "impact-background-model-context";
 const BACKGROUND_SELECTED_RING_ID = "impact-background-selected-ring";
 const LINK_LAYER_ID = "impact-links";
+const LINK_REGIONAL_LAYER_ID = "impact-links-regional";
 const SELECTED_RING_OUTER_ID = "impact-selected-ring-outer";
 const SELECTED_RING_MID_ID = "impact-selected-ring-mid";
 const SELECTED_RING_INNER_ID = "impact-selected-ring-inner";
@@ -113,6 +115,11 @@ const ASSET_SOURCE_ID = "impact-asset-source";
 const EVIDENCE_SOURCE_ID = "impact-evidence-source";
 const BACKGROUND_SIGNAL_SOURCE_ID = "impact-background-signal-source";
 const LINK_SOURCE_ID = "impact-link-source";
+
+const SELECTED_ACCENT_OUTER = "rgba(232,191,122,0.22)";
+const SELECTED_ACCENT_MID = "rgba(232,191,122,0.42)";
+const SELECTED_ACCENT_INNER = "rgba(232,191,122,0.78)";
+const SELECTED_ACCENT_STROKE = "rgba(232,191,122,0.85)";
 
 const ASSET_LAYER: LayerProps = {
   id: ASSET_LAYER_ID,
@@ -135,22 +142,22 @@ const ASSET_LAYER: LayerProps = {
     ],
     "circle-stroke-color": [
       "case",
+      ["get", "selected"],
+      SELECTED_ACCENT_STROKE,
       ["==", ["get", "level"], "critical"],
       "rgba(200,90,90,0.75)",
       ["==", ["get", "level"], "high"],
       "rgba(107,130,153,0.72)",
       ["==", ["get", "level"], "elevated"],
       "rgba(100,116,139,0.75)",
-      ["get", "selected"],
-      "rgba(241,245,249,0.88)",
-      "rgba(148,163,184,0.25)",
+      "rgba(148,163,184,0.22)",
     ],
     "circle-stroke-width": [
       "case",
+      ["get", "selected"],
+      1.6,
       ["==", ["get", "level"], "elevated"],
       1,
-      ["get", "selected"],
-      1.2,
       0.8,
     ],
     "circle-opacity": 0.95,
@@ -161,33 +168,75 @@ const EVIDENCE_LAYER: LayerProps = {
   id: EVIDENCE_LAYER_ID,
   type: "circle",
   source: EVIDENCE_SOURCE_ID,
-  filter: ["==", ["get", "isModelContext"], false],
+  filter: [
+    "all",
+    ["==", ["get", "isModelContext"], false],
+    ["==", ["get", "relation"], "direct"],
+  ],
   paint: {
     "circle-radius": [
       "match",
       ["get", "severity"],
       "critical",
-      3.9,
+      4.2,
       "high",
-      3.5,
+      3.8,
       "medium",
-      3.1,
-      2.7,
+      3.3,
+      2.9,
     ],
     "circle-color": [
       "match",
       ["get", "severity"],
       "critical",
-      "#b85252",
+      "#c95d4f",
       "high",
-      "#5b7088",
+      "#b88350",
       "medium",
-      "#64748b",
-      "#546070",
+      "#8c8f95",
+      "#697282",
     ],
-    "circle-stroke-color": "rgba(8,11,18,0.92)",
-    "circle-stroke-width": 0.8,
-    "circle-opacity": 0.92,
+    "circle-stroke-color": SELECTED_ACCENT_STROKE,
+    "circle-stroke-width": 1.1,
+    "circle-opacity": 0.95,
+  },
+};
+
+const EVIDENCE_REGIONAL_LAYER: LayerProps = {
+  id: EVIDENCE_REGIONAL_LAYER_ID,
+  type: "circle",
+  source: EVIDENCE_SOURCE_ID,
+  filter: [
+    "all",
+    ["==", ["get", "isModelContext"], false],
+    ["==", ["get", "relation"], "regional_context"],
+  ],
+  paint: {
+    "circle-radius": [
+      "match",
+      ["get", "severity"],
+      "critical",
+      3.4,
+      "high",
+      3.0,
+      "medium",
+      2.7,
+      2.4,
+    ],
+    "circle-color": "rgba(0,0,0,0)",
+    "circle-stroke-color": [
+      "match",
+      ["get", "severity"],
+      "critical",
+      "rgba(200,120,120,0.85)",
+      "high",
+      "rgba(150,160,180,0.78)",
+      "medium",
+      "rgba(140,150,170,0.7)",
+      "rgba(120,134,156,0.6)",
+    ],
+    "circle-stroke-width": 1.2,
+    "circle-opacity": 0.9,
   },
 };
 
@@ -215,17 +264,17 @@ const EVIDENCE_SELECTED_RING_LAYER: LayerProps = {
       "match",
       ["get", "severity"],
       "critical",
-      8.2,
+      9.4,
       "high",
-      7.4,
+      8.4,
       "medium",
+      7.6,
       6.8,
-      6.2,
     ],
     "circle-color": "rgba(0,0,0,0)",
-    "circle-stroke-color": "rgba(241,245,249,0.45)",
-    "circle-stroke-width": 1.1,
-    "circle-opacity": 0.9,
+    "circle-stroke-color": SELECTED_ACCENT_INNER,
+    "circle-stroke-width": 1.5,
+    "circle-opacity": 0.95,
   },
 };
 
@@ -239,35 +288,35 @@ const BACKGROUND_SIGNAL_LAYER: LayerProps = {
       "match",
       ["get", "severity"],
       "critical",
-      3.2,
-      "high",
-      2.9,
-      "medium",
       2.6,
+      "high",
       2.3,
+      "medium",
+      2.0,
+      1.8,
     ],
     "circle-color": [
       "match",
       ["get", "severity"],
       "critical",
-      "rgba(184,80,80,0.85)",
+      "rgba(160,90,90,0.7)",
       "high",
-      "rgba(107,130,153,0.78)",
+      "rgba(100,120,140,0.65)",
       "medium",
-      "rgba(100,116,139,0.7)",
-      "rgba(84,96,112,0.64)",
+      "rgba(95,108,128,0.6)",
+      "rgba(80,90,108,0.55)",
     ],
-    "circle-stroke-color": "rgba(8,11,18,0.62)",
-    "circle-stroke-width": 0.6,
+    "circle-stroke-color": "rgba(8,11,18,0.55)",
+    "circle-stroke-width": 0.5,
     "circle-opacity": [
       "case",
       ["<=", ["get", "distanceKm"], 80],
-      0.72,
+      0.55,
       ["<=", ["get", "distanceKm"], 200],
-      0.56,
-      ["<=", ["get", "distanceKm"], 350],
       0.4,
+      ["<=", ["get", "distanceKm"], 350],
       0.28,
+      0.18,
     ],
   },
 };
@@ -304,15 +353,28 @@ const LINK_LAYER: LayerProps = {
   id: LINK_LAYER_ID,
   type: "line",
   source: LINK_SOURCE_ID,
+  filter: ["==", ["get", "relation"], "direct"],
   paint: {
-    "line-color": [
-      "case",
-      ["get", "isModelContext"],
-      "rgba(148,163,184,0.18)",
-      "rgba(148,163,184,0.28)",
-    ],
+    "line-color": SELECTED_ACCENT_INNER,
+    "line-width": 0.9,
+    "line-opacity": 0.55,
+  },
+};
+
+const LINK_REGIONAL_LAYER: LayerProps = {
+  id: LINK_REGIONAL_LAYER_ID,
+  type: "line",
+  source: LINK_SOURCE_ID,
+  filter: [
+    "all",
+    ["!=", ["get", "relation"], "direct"],
+    ["==", ["get", "isModelContext"], false],
+  ],
+  paint: {
+    "line-color": "rgba(148,163,184,0.42)",
     "line-width": 0.6,
-    "line-opacity": 0.3,
+    "line-opacity": 0.32,
+    "line-dasharray": [2, 3],
   },
 };
 
@@ -324,9 +386,9 @@ const SELECTED_RING_OUTER: LayerProps = {
   paint: {
     "circle-radius": 26,
     "circle-color": "rgba(0,0,0,0)",
-    "circle-stroke-color": "rgba(255,255,255,0.12)",
+    "circle-stroke-color": SELECTED_ACCENT_OUTER,
     "circle-stroke-width": 1.2,
-    "circle-opacity": 0.85,
+    "circle-opacity": 0.95,
   },
 };
 
@@ -338,9 +400,9 @@ const SELECTED_RING_MID: LayerProps = {
   paint: {
     "circle-radius": 18,
     "circle-color": "rgba(0,0,0,0)",
-    "circle-stroke-color": "rgba(255,255,255,0.22)",
-    "circle-stroke-width": 1.2,
-    "circle-opacity": 0.88,
+    "circle-stroke-color": SELECTED_ACCENT_MID,
+    "circle-stroke-width": 1.4,
+    "circle-opacity": 0.95,
   },
 };
 
@@ -352,9 +414,9 @@ const SELECTED_RING_INNER: LayerProps = {
   paint: {
     "circle-radius": 11,
     "circle-color": "rgba(0,0,0,0)",
-    "circle-stroke-color": "rgba(255,255,255,0.42)",
-    "circle-stroke-width": 1.4,
-    "circle-opacity": 0.9,
+    "circle-stroke-color": SELECTED_ACCENT_INNER,
+    "circle-stroke-width": 1.6,
+    "circle-opacity": 1,
   },
 };
 
@@ -397,6 +459,13 @@ const SELECTED_LABEL_LAYER: LayerProps = {
   },
 };
 
+function relationLabel(value: unknown): string {
+  if (value === "direct") return "Direct";
+  if (value === "regional_context") return "Regional";
+  if (value === "model_context") return "Model context";
+  return "Evidence";
+}
+
 function evidenceSubtitle(alert: ExposureAlert, properties: Record<string, unknown>): string {
   const severity = typeof properties.severity === "string" ? properties.severity : "low";
   const distance =
@@ -405,7 +474,8 @@ function evidenceSubtitle(alert: ExposureAlert, properties: Record<string, unkno
         ? `${properties.distanceKm.toFixed(1)} km`
         : `${Math.round(properties.distanceKm)} km`
       : "distance —";
-  return `${severity} severity · ${distance} · ${alert.asset.name}`;
+  const relation = relationLabel(properties.relation);
+  return `${relation} · ${severity} severity · ${distance} · ${alert.asset.name}`;
 }
 
 function signalSubtitle(properties: Record<string, unknown>): string {
@@ -549,8 +619,8 @@ export function ImpactMapPanel({
     [assets, alertsByAsset, selectedAssetId, visibleAssetIds]
   );
   const evidenceGeoJson = useMemo(
-    () => buildEvidenceGeoJson(selectedEvidence, selectedEvidenceId),
-    [selectedEvidence, selectedEvidenceId]
+    () => buildEvidenceGeoJson(selectedEvidence, selectedEvidenceId, selectedAsset),
+    [selectedAsset, selectedEvidence, selectedEvidenceId]
   );
   const linkGeoJson = useMemo(
     () => buildLinkGeoJson({ asset: selectedAsset, evidence: selectedEvidence }),
@@ -690,7 +760,7 @@ export function ImpactMapPanel({
     const ids: string[] = [];
     if (displayFilters.assets) ids.push(ASSET_LAYER_ID);
     if (displayFilters.selectedEvidence) {
-      ids.push(EVIDENCE_LAYER_ID, EVIDENCE_MODEL_LAYER_ID);
+      ids.push(EVIDENCE_LAYER_ID, EVIDENCE_REGIONAL_LAYER_ID, EVIDENCE_MODEL_LAYER_ID);
     }
     if (displayFilters.nearbySignals) {
       ids.push(BACKGROUND_SIGNAL_LAYER_ID, BACKGROUND_MODEL_LAYER_ID);
@@ -717,7 +787,9 @@ export function ImpactMapPanel({
     }
 
     if (
-      (layerId === EVIDENCE_LAYER_ID || layerId === EVIDENCE_MODEL_LAYER_ID) &&
+      (layerId === EVIDENCE_LAYER_ID ||
+        layerId === EVIDENCE_REGIONAL_LAYER_ID ||
+        layerId === EVIDENCE_MODEL_LAYER_ID) &&
       typeof properties.evidenceId === "string"
     ) {
       setSelectedEvidenceId(properties.evidenceId);
@@ -777,7 +849,9 @@ export function ImpactMapPanel({
     }
 
     if (
-      (layerId === EVIDENCE_LAYER_ID || layerId === EVIDENCE_MODEL_LAYER_ID) &&
+      (layerId === EVIDENCE_LAYER_ID ||
+        layerId === EVIDENCE_REGIONAL_LAYER_ID ||
+        layerId === EVIDENCE_MODEL_LAYER_ID) &&
       typeof properties.title === "string" &&
       selectedAlert
     ) {
@@ -1082,6 +1156,7 @@ export function ImpactMapPanel({
 
           {displayFilters.relationshipLines && displayFilters.selectedEvidence ? (
             <Source id="impact-link-source" type="geojson" data={linkGeoJson}>
+              <Layer {...LINK_REGIONAL_LAYER} />
               <Layer {...LINK_LAYER} />
             </Source>
           ) : null}
@@ -1089,6 +1164,7 @@ export function ImpactMapPanel({
           {displayFilters.selectedEvidence ? (
             <Source id="impact-evidence-source" type="geojson" data={evidenceGeoJson}>
               <Layer {...EVIDENCE_SELECTED_RING_LAYER} />
+              <Layer {...EVIDENCE_REGIONAL_LAYER} />
               <Layer {...EVIDENCE_LAYER} />
               <Layer {...EVIDENCE_MODEL_LAYER} />
             </Source>
@@ -1120,22 +1196,18 @@ export function ImpactMapPanel({
         </Map>
 
         <div className="impact-map-legend-inset">
-          <span className="impact-map-legend-title">Risk level</span>
+          <span className="impact-map-legend-title">Evidence relation</span>
           <span className="impact-map-legend-row">
-            <i className="impact-map-sym impact-map-sym-critical" aria-hidden />
-            Critical
+            <i className="impact-map-sym impact-map-sym-direct" aria-hidden />
+            Direct
           </span>
           <span className="impact-map-legend-row">
-            <i className="impact-map-sym impact-map-sym-high" aria-hidden />
-            High
+            <i className="impact-map-sym impact-map-sym-regional" aria-hidden />
+            Regional context
           </span>
           <span className="impact-map-legend-row">
-            <i className="impact-map-sym impact-map-sym-elevated" aria-hidden />
-            Elevated
-          </span>
-          <span className="impact-map-legend-row">
-            <i className="impact-map-sym impact-map-sym-low" aria-hidden />
-            Low
+            <i className="impact-map-sym impact-map-sym-bg" aria-hidden />
+            Background signal
           </span>
           <span className="impact-map-legend-row">
             <i className="impact-map-sym impact-map-sym-model" aria-hidden />

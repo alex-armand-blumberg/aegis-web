@@ -183,6 +183,249 @@ export function inferSourceFamily(point: IntelPoint): SourceFamily {
   return "unknown";
 }
 
+export type ReportType = "incident" | "statement" | "context";
+
+const NEWSLIKE_SOURCE_TERMS = [
+  "gdelt",
+  "google news",
+  "rss",
+  "liveuamap",
+  "live uamap",
+  "reuters",
+  "ap news",
+  "associated press",
+  "bbc",
+  "al jazeera",
+  "cnn",
+  "afp",
+  "bloomberg",
+  "intel relay",
+  "open-source",
+  "lawfare",
+  "world monitor",
+  "isw",
+  "csis",
+  "cfr",
+];
+
+const STATEMENT_TERMS = [
+  " says",
+  " said ",
+  " warns",
+  " warned",
+  " claims",
+  " claimed",
+  " announces",
+  " announced",
+  " plans ",
+  " plan to",
+  " to send",
+  " will send",
+  " to deliver",
+  " will deliver",
+  " to provide",
+  " to supply",
+  " will supply",
+  " to receive",
+  " to buy",
+  " to purchase",
+  " could ",
+  " may ",
+  " might ",
+  " considering",
+  " considers",
+  " weighs",
+  " agreement",
+  " deal ",
+  " package",
+  " contract",
+  " meeting",
+  " summit",
+  " statement",
+  " speech",
+  " address",
+  " remarks",
+  " press conference",
+  " opinion",
+  " analysis",
+  " expects",
+  " expected to",
+  " predicts",
+  " vows",
+  " pledges",
+  " calls for",
+  " demands",
+  " rejects",
+  " proposes",
+  " discusses",
+  " approved",
+  " approves",
+  " signs",
+  " passes",
+  " ratified",
+  " transfer of",
+  " supply of",
+  " delivery of",
+  " sale of",
+  " purchase of",
+  " unveils",
+  " unveiled",
+  " talks",
+  " denies",
+  " threatens",
+  " warns of",
+];
+
+const INCIDENT_TERMS = [
+  " killed",
+  " wounded",
+  " injured",
+  " struck",
+  " hit by",
+  " hits ",
+  " damaged",
+  " destroyed",
+  " fired at",
+  " launched at",
+  " launched against",
+  " intercepted",
+  " shot down",
+  " shot dead",
+  " exploded",
+  " detonated",
+  " shelled",
+  " bombed",
+  " raided",
+  " stormed",
+  " casualties",
+  " dead in",
+  " dead after",
+  " victims",
+  " ambushed",
+  " ambush",
+  " car bomb",
+  " ied",
+  " suicide bomb",
+  " killed in",
+  " wounded in",
+  " attack on",
+  " attacked",
+  " gunmen kill",
+  " massacre",
+  " seized",
+  " stormed",
+];
+
+const KINETIC_STRIKE_TERMS = [
+  "missile strike",
+  "rocket strike",
+  "drone strike",
+  "airstrike",
+  "air strike",
+  "shelling",
+  "bombardment",
+  "explosion",
+  "exploded",
+  "detonated",
+  "drone hit",
+  "missile hit",
+  "intercepted",
+  "shot down",
+];
+
+const KINETIC_BATTLE_TERMS = [
+  "clash",
+  "armed clash",
+  "battle",
+  "firefight",
+  "raid",
+  "infiltration",
+  "stormed",
+  "ambushed",
+  "ambush",
+];
+
+const UNREST_TERMS = ["protest", "demonstration", "riot", "unrest", "rally"];
+
+const STRATEGIC_TERMS = [
+  "military buildup",
+  "deployment",
+  "mobilization",
+  "exercise",
+  "wargame",
+];
+
+const HUMANITARIAN_TERMS = [
+  "displacement",
+  "humanitarian",
+  "refugees",
+  "aid corridor",
+];
+
+const DISASTER_TERMS = [
+  "earthquake",
+  "flood",
+  "cyclone",
+  "wildfire",
+  "tsunami",
+  "hurricane",
+  "typhoon",
+];
+
+const SANCTIONS_TERMS = [
+  "sanctions",
+  "export controls",
+  "asset freeze",
+  "designation",
+];
+
+const MARITIME_TERMS = [
+  "vessel",
+  "ais",
+  "shipping",
+  "chokepoint",
+  "strait",
+  "port closed",
+  "naval",
+];
+
+const AVIATION_TERMS = [
+  "flight",
+  "airspace",
+  "airport",
+  "noteam",
+  "notam",
+];
+
+const INFRA_TERMS = [
+  "infrastructure",
+  "power outage",
+  "pipeline",
+  "cable cut",
+  "bridge collapse",
+  "grid down",
+  "telecom outage",
+  "water supply",
+];
+
+function isNewsLikeSource(source: string): boolean {
+  return includesAny(lc(source), NEWSLIKE_SOURCE_TERMS);
+}
+
+function spaced(value: string): string {
+  return ` ${value} `;
+}
+
+export function inferReportType(point: IntelPoint): ReportType {
+  const title = spaced(lc(point.title));
+  const subtitle = spaced(lc(point.subtitle));
+  const haystack = `${title}${subtitle}`;
+
+  if (includesAny(haystack, INCIDENT_TERMS)) return "incident";
+  if (includesAny(haystack, STATEMENT_TERMS)) return "statement";
+  return "context";
+}
+
 export function inferEventClass(point: IntelPoint): EventClass {
   const layer = point.layer;
   const title = lc(point.title);
@@ -190,7 +433,7 @@ export function inferEventClass(point: IntelPoint): EventClass {
   const subtitle = lc(point.subtitle);
 
   if (layer === "conflictsBattles") return "armed_conflict";
-  if (layer === "conflictsExplosions" || layer === "liveStrikes") return "strike_or_explosion";
+  if (layer === "conflictsExplosions") return "strike_or_explosion";
   if (layer === "conflictsCivilians") return "civilian_harm";
   if (layer === "conflictsProtests" || layer === "conflictsRiots") return "protest_or_unrest";
   if (layer === "conflictsStrategic" || layer === "troopMovements") return "strategic_development";
@@ -199,111 +442,88 @@ export function inferEventClass(point: IntelPoint): EventClass {
   if (layer === "infrastructure") return "infrastructure_disruption";
   if (layer === "escalationRisk" || layer === "hotspots") return "model_risk_context";
 
-  if (
-    includesAny(title, [
-      "missile",
-      "rocket",
-      "drone strike",
-      "airstrike",
-      "air strike",
-      "shelling",
-      "bombardment",
-      "explosion",
-    ]) ||
-    includesAny(subtitle, ["airstrike", "shelling", "missile"])
-  ) {
+  const reportType = inferReportType(point);
+  const newsLike =
+    layer === "news" || (layer === "liveStrikes" && isNewsLikeSource(point.source));
+
+  if (layer === "liveStrikes" && !newsLike) {
     return "strike_or_explosion";
   }
 
-  if (
-    includesAny(title, ["clash", "armed clash", "battle", "firefight", "raid", "infiltration"])
-  ) {
-    return "armed_conflict";
+  if (newsLike && reportType === "statement") {
+    if (includesAny(title, STRATEGIC_TERMS)) return "strategic_development";
+    if (
+      includesAny(source, ["reliefweb", "ocha", "unhcr"]) ||
+      includesAny(title, HUMANITARIAN_TERMS)
+    ) {
+      return "humanitarian_stress";
+    }
+    if (
+      includesAny(source, ["gdacs", "usgs"]) ||
+      includesAny(title, DISASTER_TERMS)
+    ) {
+      return "natural_disaster";
+    }
+    if (
+      includesAny(source, ["ofac", "sanction"]) ||
+      includesAny(title, SANCTIONS_TERMS)
+    ) {
+      return "sanctions_or_economic";
+    }
+    if (includesAny(title, AVIATION_TERMS)) return "aviation_activity";
+    if (includesAny(title, MARITIME_TERMS)) return "maritime_activity";
+    return "news_report";
   }
 
-  if (
-    includesAny(title, [
-      "civilian",
-      "casualt",
-      "killed civilians",
-      "civilian harm",
-      "civilians killed",
-      "civilians wounded",
-    ])
-  ) {
-    return "civilian_harm";
+  if (reportType === "incident" || !newsLike) {
+    if (
+      includesAny(title, KINETIC_STRIKE_TERMS) ||
+      includesAny(subtitle, ["airstrike", "shelling", "missile"])
+    ) {
+      return "strike_or_explosion";
+    }
+    if (includesAny(title, KINETIC_BATTLE_TERMS)) return "armed_conflict";
+    if (
+      includesAny(title, [
+        "civilian",
+        "casualt",
+        "killed civilians",
+        "civilian harm",
+        "civilians killed",
+        "civilians wounded",
+      ])
+    ) {
+      return "civilian_harm";
+    }
+    if (includesAny(title, UNREST_TERMS)) return "protest_or_unrest";
   }
 
-  if (includesAny(title, ["protest", "demonstration", "riot", "unrest", "rally"])) {
-    return "protest_or_unrest";
-  }
-
-  if (
-    includesAny(title, [
-      "military buildup",
-      "deployment",
-      "mobilization",
-      "strategic",
-      "exercise",
-      "wargame",
-    ])
-  ) {
-    return "strategic_development";
-  }
+  if (includesAny(title, STRATEGIC_TERMS)) return "strategic_development";
 
   if (
     includesAny(source, ["reliefweb", "ocha", "unhcr"]) ||
-    includesAny(title, ["displacement", "aid", "humanitarian", "refugees"])
+    includesAny(title, HUMANITARIAN_TERMS)
   ) {
     return "humanitarian_stress";
   }
 
   if (
     includesAny(source, ["gdacs", "usgs"]) ||
-    includesAny(title, ["earthquake", "flood", "cyclone", "wildfire", "tsunami", "hurricane", "typhoon"])
+    includesAny(title, DISASTER_TERMS)
   ) {
     return "natural_disaster";
   }
 
   if (
     includesAny(source, ["ofac", "sanction"]) ||
-    includesAny(title, ["sanctions", "export controls", "asset freeze", "designation"])
+    includesAny(title, SANCTIONS_TERMS)
   ) {
     return "sanctions_or_economic";
   }
 
-  if (
-    includesAny(title, [
-      "vessel",
-      "ais",
-      "shipping",
-      "chokepoint",
-      "strait",
-      "port closed",
-      "naval",
-    ])
-  ) {
-    return "maritime_activity";
-  }
-
-  if (includesAny(title, ["flight", "airspace", "airport", "noteam", "notam"])) {
-    return "aviation_activity";
-  }
-
-  if (
-    includesAny(title, [
-      "infrastructure",
-      "power outage",
-      "pipeline",
-      "cable",
-      "bridge",
-      "grid",
-      "telecom",
-      "water supply",
-    ])
-  ) {
-    return "infrastructure_disruption";
-  }
+  if (includesAny(title, MARITIME_TERMS)) return "maritime_activity";
+  if (includesAny(title, AVIATION_TERMS)) return "aviation_activity";
+  if (includesAny(title, INFRA_TERMS)) return "infrastructure_disruption";
 
   if (layer === "news") return "news_report";
 

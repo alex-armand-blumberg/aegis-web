@@ -78,6 +78,22 @@ const HOUR_MS = 60 * 60 * 1000;
 const CLUSTER_WINDOW_HOURS = 48;
 const CLUSTER_DISTANCE_KM = 50;
 const TITLE_SIMILARITY_THRESHOLD = 0.4;
+const FAMILY_LAYER_MIN_SIMILARITY = 0.22;
+const STRONG_CROSS_MATCH_SIMILARITY = 0.6;
+const STRONG_CROSS_MATCH_DISTANCE_KM = 200;
+const STRONG_CROSS_MATCH_HOURS = 24;
+
+function canonicalUrlKey(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "").toLowerCase();
+    const path = u.pathname.replace(/\/+$/, "").toLowerCase();
+    return `${host}${path}`;
+  } catch {
+    return null;
+  }
+}
 
 const SEVERITY_RANK: Record<IntelSeverity, number> = {
   low: 0,
@@ -114,6 +130,7 @@ type WorkingCluster = {
   tokens: Set<string>;
   latestTime: number;
   representative: NormalizedSignal;
+  urlKeys: Set<string>;
 };
 
 function shouldJoinCluster(
@@ -122,6 +139,12 @@ function shouldJoinCluster(
   cluster: WorkingCluster
 ): boolean {
   const rep = cluster.representative;
+
+  const signalUrlKey = canonicalUrlKey(signal.url);
+  if (signalUrlKey && cluster.urlKeys.has(signalUrlKey)) {
+    return true;
+  }
+
   if (signal.eventClass !== rep.eventClass) return false;
 
   const sigTime = new Date(signal.timestamp).getTime();
@@ -130,13 +153,32 @@ function shouldJoinCluster(
 
   const sameCountry = countriesMatch(signal.country, rep.country);
   const distance = getDistanceKm({ lat: signal.lat, lon: signal.lon }, { lat: rep.lat, lon: rep.lon });
+  const similarity = jaccard(signalTokens, cluster.tokens);
+
+  if (
+    similarity >= STRONG_CROSS_MATCH_SIMILARITY &&
+    ageHours <= STRONG_CROSS_MATCH_HOURS &&
+    (sameCountry || distance <= STRONG_CROSS_MATCH_DISTANCE_KM)
+  ) {
+    return true;
+  }
 
   if (distance > CLUSTER_DISTANCE_KM && !sameCountry) return false;
 
-  const similarity = jaccard(signalTokens, cluster.tokens);
-  if (distance <= CLUSTER_DISTANCE_KM) return true;
+  if (distance <= CLUSTER_DISTANCE_KM) {
+    if (similarity >= 0.2 || sameCountry) return true;
+    if (distance <= 10) return true;
+    return false;
+  }
   if (sameCountry && similarity >= TITLE_SIMILARITY_THRESHOLD) return true;
-  if (sameCountry && signal.sourceFamily === rep.sourceFamily && signal.layer === rep.layer) return true;
+  if (
+    sameCountry &&
+    signal.sourceFamily === rep.sourceFamily &&
+    signal.layer === rep.layer &&
+    similarity >= FAMILY_LAYER_MIN_SIMILARITY
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -203,12 +245,14 @@ export function clusterSignals(signals: NormalizedSignal[]): EvidenceCluster[] {
   for (const signal of sorted) {
     const tokens = tokenize(signal.title);
     const sigTime = new Date(signal.timestamp).getTime();
+    const urlKey = canonicalUrlKey(signal.url);
 
     let joined = false;
     for (const cluster of working) {
       if (shouldJoinCluster(signal, tokens, cluster)) {
         cluster.points.push(signal);
         for (const t of tokens) cluster.tokens.add(t);
+        if (urlKey) cluster.urlKeys.add(urlKey);
         if (Number.isFinite(sigTime) && sigTime > cluster.latestTime) {
           cluster.latestTime = sigTime;
         }
@@ -223,11 +267,14 @@ export function clusterSignals(signals: NormalizedSignal[]): EvidenceCluster[] {
       }
     }
     if (!joined) {
+      const urlKeys = new Set<string>();
+      if (urlKey) urlKeys.add(urlKey);
       working.push({
         points: [signal],
         tokens,
         latestTime: Number.isFinite(sigTime) ? sigTime : 0,
         representative: signal,
+        urlKeys,
       });
     }
   }
