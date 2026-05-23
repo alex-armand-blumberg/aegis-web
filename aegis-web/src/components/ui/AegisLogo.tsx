@@ -11,7 +11,7 @@ type Props = {
 };
 
 const SIZE = {
-  nav: { width: 60, height: 60 },
+  nav: { width: 70, height: 70 },
   footer: { width: 66, height: 66 },
   display: { width: 108, height: 108 },
 } as const;

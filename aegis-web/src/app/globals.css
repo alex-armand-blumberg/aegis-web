@@ -29,7 +29,7 @@
   --duration-slow: 380ms;
   --card: var(--surface-2);
   /* Fixed marketing header — spacer + sticky offsets (see .marketing-nav-spacer) */
-  --marketing-nav-height: 72px;
+  --marketing-nav-height: 80px;
 }
 
 @theme inline {
@@ -571,7 +571,7 @@ nav {
   display: block;
 }
 .aegis-logo-img-nav {
-  height: 60px;
+  height: 70px;
   width: auto;
 }
 .aegis-logo-img-footer {
@@ -686,25 +686,26 @@ nav {
 }
 #hero h1 {
   font-family: var(--font-oswald), "Oswald", sans-serif;
-  font-size: clamp(86px, 16vw, 180px);
+  font-size: clamp(34px, 4.6vw, 56px);
   font-weight: 600;
-  line-height: 0.9;
-  letter-spacing: 0.04em;
+  line-height: 1.14;
+  letter-spacing: -0.01em;
   color: white;
   text-transform: none;
-  text-shadow: 0 0 120px rgba(59, 130, 246, 0.25);
+  text-shadow: 0 0 80px rgba(59, 130, 246, 0.2);
+  max-width: 18em;
   opacity: 0;
   animation: fadeUp 0.7s 0.2s forwards;
 }
 .hero-sub {
   font-family: var(--font-barlow-condensed), "Barlow Condensed", sans-serif;
-  font-size: clamp(11px, 1.6vw, 16px);
+  font-size: clamp(11px, 1.4vw, 15px);
   font-weight: 300;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.92);
+  color: rgba(255, 255, 255, 0.88);
   text-shadow: 0 0 24px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(0, 0, 0, 0.4);
-  margin-top: 40px;
+  margin-top: 24px;
   margin-bottom: 40px;
   opacity: 0;
   animation: fadeUp 0.7s 0.35s forwards;

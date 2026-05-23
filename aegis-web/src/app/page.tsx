@@ -92,7 +92,7 @@ export default function Home() {
           posterSrc="/earth-bg.png"
         />
         <div className="hero-tag">Palantir Valley Forge Grant Demo</div>
-        <h1>AegisHQ</h1>
+        <h1>Spot global risk before it hits your assets.</h1>
         <p className="hero-sub">
           Advanced Early-Warning &amp; Geostrategic Intelligence System
         </p>
