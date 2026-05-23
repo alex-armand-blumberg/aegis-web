@@ -411,6 +411,7 @@ export default function ImpactPage() {
   return (
     <div className="impact-page">
       <MarketingNav
+        minimalAppLinks
         extraLinks={
           <span className={`impact-nav-sync impact-nav-sync-${syncStatusTone}`}>
             {syncStatusLabel}

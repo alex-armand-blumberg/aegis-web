@@ -588,6 +588,23 @@ nav {
   opacity: 0.88 !important;
   color: white !important;
 }
+.nav-cta-launch {
+  background: #f8fafc !important;
+  color: #0a0a0c !important;
+}
+.nav-cta-launch:hover {
+  opacity: 0.92 !important;
+  color: #0a0a0c !important;
+}
+.impact-page .nav-cta-launch {
+  background: #ffffff !important;
+  color: #0a0a0c !important;
+}
+.impact-page .nav-cta-launch:hover {
+  background: #f1f5f9 !important;
+  color: #0a0a0c !important;
+  opacity: 1 !important;
+}
 
 #hero {
   min-height: 100vh;
@@ -4326,13 +4343,21 @@ footer {
   z-index: 1;
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 8px;
   min-height: 480px;
   padding: 12px;
+  text-align: center;
 }
 .impact-map-empty p,
-.impact-map-fallback p { margin: 0; font-size: 12px; color: rgba(203, 213, 225, 0.9); }
+.impact-map-fallback p {
+  margin: 0;
+  max-width: 360px;
+  font-size: 12px;
+  color: rgba(203, 213, 225, 0.9);
+  line-height: 1.45;
+}
 .impact-map-fallback-sub {
   color: rgba(148, 163, 184, 0.88);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;

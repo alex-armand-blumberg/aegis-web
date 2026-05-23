@@ -10,6 +10,8 @@ type MarketingNavProps = {
   onContactClick?: () => void;
   extraLinks?: ReactNode;
   className?: string;
+  /** Hide Map / Impact / Escalation (e.g. Impact dashboard). */
+  minimalAppLinks?: boolean;
 };
 
 function navActiveClass(pathname: string | null, href: string): string | undefined {
@@ -17,7 +19,12 @@ function navActiveClass(pathname: string | null, href: string): string | undefin
   return pathname === href || pathname.startsWith(`${href}/`) ? "is-active" : undefined;
 }
 
-export function MarketingNav({ onContactClick, extraLinks, className = "" }: MarketingNavProps) {
+export function MarketingNav({
+  onContactClick,
+  extraLinks,
+  className = "",
+  minimalAppLinks = false,
+}: MarketingNavProps) {
   const pathname = usePathname();
   const { openContact } = useContactModal();
   const handleContact = onContactClick ?? openContact;
@@ -28,7 +35,7 @@ export function MarketingNav({ onContactClick, extraLinks, className = "" }: Mar
   let cta: ReactNode;
   if (isHome) {
     cta = (
-      <Link href="/escalation" className="nav-cta">
+      <Link href="/escalation" className="nav-cta nav-cta-launch">
         Launch Demo
       </Link>
     );
@@ -40,11 +47,40 @@ export function MarketingNav({ onContactClick, extraLinks, className = "" }: Mar
     );
   } else {
     cta = (
-      <Link href="/escalation" className="nav-cta">
+      <Link href="/escalation" className="nav-cta nav-cta-launch">
         Launch Demo
       </Link>
     );
   }
+
+  const appLinks = minimalAppLinks ? (
+    <>
+      <Link href="/data" className={navActiveClass(pathname, "/data")}>
+        Data
+      </Link>
+      <Link href="/limitations" className={navActiveClass(pathname, "/limitations")}>
+        Limitations
+      </Link>
+    </>
+  ) : (
+    <>
+      <Link href="/map" className={navActiveClass(pathname, "/map")}>
+        Map
+      </Link>
+      <Link href="/impact" className={navActiveClass(pathname, "/impact")}>
+        Impact
+      </Link>
+      <Link href="/escalation" className={navActiveClass(pathname, "/escalation")}>
+        Escalation
+      </Link>
+      <Link href="/data" className={navActiveClass(pathname, "/data")}>
+        Data
+      </Link>
+      <Link href="/limitations" className={navActiveClass(pathname, "/limitations")}>
+        Limitations
+      </Link>
+    </>
+  );
 
   return (
     <div className={`marketing-nav-shell ${className}`.trim()} data-variant={variant}>
@@ -60,23 +96,7 @@ export function MarketingNav({ onContactClick, extraLinks, className = "" }: Mar
               <Link href="/#methodology">Methodology</Link>
             </>
           ) : (
-            <>
-              <Link href="/map" className={navActiveClass(pathname, "/map")}>
-                Map
-              </Link>
-              <Link href="/impact" className={navActiveClass(pathname, "/impact")}>
-                Impact
-              </Link>
-              <Link href="/escalation" className={navActiveClass(pathname, "/escalation")}>
-                Escalation
-              </Link>
-              <Link href="/data" className={navActiveClass(pathname, "/data")}>
-                Data
-              </Link>
-              <Link href="/limitations" className={navActiveClass(pathname, "/limitations")}>
-                Limitations
-              </Link>
-            </>
+            appLinks
           )}
           {extraLinks}
           <button type="button" onClick={handleContact} className="nav-link-btn">
