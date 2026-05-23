@@ -14,6 +14,7 @@ export type SourceFamily =
   | "military-activity"
   | "strategic-infrastructure"
   | "natural-hazards"
+  | "humanitarian"
   | "economic-signals";
 
 export type MapSourceDescriptor = {
@@ -51,12 +52,28 @@ export const MAP_SOURCE_FAMILY_MATRIX: Array<{
   {
     family: "strategic-infrastructure",
     layers: ["infrastructure"],
-    sources: ["Curated strategic sites", "bases/chokepoints", "ports/pipelines overlays"],
+    sources: [
+      "Curated strategic sites",
+      "bases/chokepoints",
+      "ports/pipelines overlays",
+      "IAEA press releases",
+    ],
   },
   {
     family: "natural-hazards",
     layers: ["news"],
-    sources: ["USGS", "GDACS", "NASA EONET", "NASA FIRMS"],
+    sources: [
+      "USGS",
+      "GDACS",
+      "NASA EONET",
+      "NASA FIRMS",
+      "NOAA NHC (active tropical storms)",
+    ],
+  },
+  {
+    family: "humanitarian",
+    layers: ["news"],
+    sources: ["ReliefWeb (UN OCHA partner)"],
   },
   {
     family: "economic-signals",
@@ -653,6 +670,115 @@ export const REQUESTED_SOURCE_ACCESS_MATRIX: Array<{
     source: "SAM.gov opportunities",
     mode: "credentialed_or_licensed",
     fallback: "Free-key API optional; skip when SAM_GOV_API_KEY absent",
+  },
+  {
+    source: "ReliefWeb",
+    mode: "direct_api",
+    fallback: "Skip when RELIEFWEB_APPNAME absent",
+  },
+  {
+    source: "GDACS",
+    mode: "direct_api",
+    fallback: "Disabled when ESCALATION_ENABLE_GDACS=false; degrades silently on upstream error",
+  },
+  {
+    source: "USGS earthquakes",
+    mode: "direct_api",
+    fallback: "Public GeoJSON summary feeds; range-aware feed selection",
+  },
+  {
+    source: "NASA FIRMS",
+    mode: "credentialed_or_licensed",
+    fallback: "Skip when NASA_FIRMS_MAP_KEY absent (free MAP_KEY registration)",
+  },
+  {
+    source: "NOAA NHC",
+    mode: "direct_api",
+    fallback: "Public CurrentStorms.json; degrades silently on upstream error",
+  },
+  {
+    source: "IAEA press releases",
+    mode: "public_rss_or_page",
+    fallback: "Three-feed RSS chain; geocoded by country/site mention",
+  },
+];
+
+/** Phase 2C.2 structured live-source descriptors used to publish what is wired. */
+export type Phase2C2LiveSourceDescriptor = {
+  id: string;
+  name: string;
+  family: SourceFamily;
+  layers: SourceLayer[];
+  envVar?: string;
+  envOptional: boolean;
+  capPerRange: number;
+  freeTier: true;
+  notes?: string;
+};
+
+export const PHASE2C2_LIVE_SOURCES: Phase2C2LiveSourceDescriptor[] = [
+  {
+    id: "reliefweb-2c2",
+    name: "ReliefWeb (UN OCHA)",
+    family: "humanitarian",
+    layers: ["news"],
+    envVar: "RELIEFWEB_APPNAME",
+    envOptional: true,
+    capPerRange: 200,
+    freeTier: true,
+    notes: "Skipped when RELIEFWEB_APPNAME not set.",
+  },
+  {
+    id: "gdacs-2c2",
+    name: "GDACS (Global Disaster Alert)",
+    family: "natural-hazards",
+    layers: ["news"],
+    envVar: "ESCALATION_ENABLE_GDACS",
+    envOptional: true,
+    capPerRange: 150,
+    freeTier: true,
+    notes: "Defaults on; set ESCALATION_ENABLE_GDACS=false to disable.",
+  },
+  {
+    id: "usgs-eq-2c2",
+    name: "USGS Earthquake Hazards",
+    family: "natural-hazards",
+    layers: ["news"],
+    envOptional: true,
+    capPerRange: 200,
+    freeTier: true,
+    notes: "Range-aware summary feeds; no key required.",
+  },
+  {
+    id: "nasa-firms-2c2",
+    name: "NASA FIRMS active fires",
+    family: "natural-hazards",
+    layers: ["news"],
+    envVar: "NASA_FIRMS_MAP_KEY",
+    envOptional: true,
+    capPerRange: 300,
+    freeTier: true,
+    notes: "Skipped when NASA_FIRMS_MAP_KEY not set.",
+  },
+  {
+    id: "noaa-nhc-2c2",
+    name: "NOAA NHC active tropical storms",
+    family: "natural-hazards",
+    layers: ["news"],
+    envOptional: true,
+    capPerRange: 80,
+    freeTier: true,
+    notes: "Public CurrentStorms.json; no key required.",
+  },
+  {
+    id: "iaea-2c2",
+    name: "IAEA press releases",
+    family: "strategic-infrastructure",
+    layers: ["news"],
+    envOptional: true,
+    capPerRange: 60,
+    freeTier: true,
+    notes: "Three-feed RSS chain; geocoded by country/site mention.",
   },
 ];
 

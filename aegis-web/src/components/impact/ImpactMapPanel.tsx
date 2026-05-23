@@ -82,6 +82,8 @@ const SIGNAL_TYPE_ORDER: SignalCategoryKey[] = [
   "unrest",
   "infrastructure",
   "news",
+  "humanitarian",
+  "disaster",
   "maritime",
   "aviation",
   "modelContext",
@@ -504,6 +506,12 @@ function evidenceMatchesFilters(
   for (const layer of evidence.layers) {
     if (signalTypeFilters[signalCategoryForLayer(layer)]) return true;
   }
+  if (signalTypeFilters.humanitarian && evidence.sourceFamilies.includes("humanitarian")) {
+    return true;
+  }
+  if (signalTypeFilters.disaster && evidence.sourceFamilies.includes("disaster")) {
+    return true;
+  }
   return false;
 }
 
@@ -593,9 +601,12 @@ export function ImpactMapPanel({
 
   const signalTypeCounts = useMemo(() => {
     const counts = Object.fromEntries(
-      SIGNAL_TYPE_ORDER.map((key) => [key, 0])
+      Object.keys(DEFAULT_SIGNAL_CATEGORIES).map((key) => [key, 0])
     ) as Record<SignalCategoryKey, number>;
-    for (const signal of backgroundSignalsAll) counts[signal.category] += 1;
+    for (const signal of backgroundSignalsAll) {
+      const current = counts[signal.category] ?? 0;
+      counts[signal.category] = current + 1;
+    }
     return counts;
   }, [backgroundSignalsAll]);
 

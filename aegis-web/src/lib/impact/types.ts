@@ -139,6 +139,31 @@ export type ExposureScoreBreakdown = {
   capsApplied: string[];
 };
 
+export type RegionalContextReason =
+  | "same_country"
+  | "neighbor_country"
+  | "theater_match"
+  | "corridor_match"
+  | "supplier_overlay";
+
+export type RegionalContextItem = {
+  id: string;
+  clusterId: string;
+  title: string;
+  source: string;
+  sourceFamily: SourceFamily;
+  eventClass: EventClass;
+  severity: IntelSeverity;
+  timestamp: string;
+  country?: string;
+  lat: number;
+  lon: number;
+  distanceKm?: number;
+  url?: string;
+  reasons: RegionalContextReason[];
+  matchLabel: string;
+};
+
 export type ExposureAlert = {
   id: string;
   asset: UserAsset;
@@ -152,6 +177,7 @@ export type ExposureAlert = {
   watchNext: string[];
   breakdown: ExposureScoreBreakdown;
   evidence: EvidenceItem[];
+  regionalContext?: RegionalContextItem[];
   generatedAt: string;
   range: string;
 };

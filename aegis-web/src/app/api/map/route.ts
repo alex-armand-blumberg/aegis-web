@@ -28,6 +28,13 @@ import {
   readTieredCache,
   writeTieredCache,
 } from "@/lib/cache/tieredCache";
+import { isPhase2C2SourcesEnabled } from "@/lib/intel/sources/_shared";
+import { fetchReliefWebSignals } from "@/lib/intel/sources/reliefweb";
+import { fetchGdacsSignals } from "@/lib/intel/sources/gdacs";
+import { fetchUsgsEarthquakeSignals } from "@/lib/intel/sources/usgsEarthquakes";
+import { fetchNasaFirmsSignals } from "@/lib/intel/sources/nasaFirms";
+import { fetchNoaaNhcSignals } from "@/lib/intel/sources/noaaNhc";
+import { fetchIaeaSignals } from "@/lib/intel/sources/iaea";
 
 export const maxDuration = 300;
 
@@ -6350,6 +6357,12 @@ export async function GET(request: Request) {
         buildLayers.includes("conflictsStrategic") ||
         buildLayers.includes("liveStrikes");
 
+      const phase2c2Enabled = isPhase2C2SourcesEnabled();
+      const wantsNewsLayer =
+        buildLayers.includes("news") ||
+        buildLayers.includes("escalationRisk") ||
+        buildLayers.includes("hotspots");
+
       const [
         acledRes,
         ucdpRes,
@@ -6369,6 +6382,12 @@ export async function GET(request: Request) {
         experimentalTrackersRes,
         requestedDomainLiveRes,
         strategicRes,
+        reliefWebRes,
+        gdacsRes,
+        usgsRes,
+        nasaFirmsRes,
+        noaaNhcRes,
+        iaeaRes,
       ] = await Promise.all([
         wantsConflicts ? fetchAcledConflicts(rangeHours) : Promise.resolve(makeSkippedAdapter("ACLED ArcGIS", "Skipped (layer filter) [reason=layer_gated]")),
         wantsConflicts ? fetchUcdpConflicts(rangeHours) : Promise.resolve(makeSkippedAdapter("UCDP geocoded", "Skipped (layer filter) [reason=layer_gated]")),
@@ -6412,6 +6431,66 @@ export async function GET(request: Request) {
               ...makeSkippedAdapter("Strategic escalation signals", "Skipped (layer filter) [reason=layer_gated]"),
               providerHealth: [] as ProviderHealth[],
             }),
+        phase2c2Enabled && wantsNewsLayer
+          ? fetchReliefWebSignals(rangeHours)
+          : Promise.resolve(
+              makeSkippedAdapter(
+                "ReliefWeb",
+                phase2c2Enabled
+                  ? "Skipped (layer filter) [reason=layer_gated]"
+                  : "Skipped: ENABLE_PHASE2C2_SOURCES=false [reason=skipped]"
+              )
+            ),
+        phase2c2Enabled && wantsNewsLayer
+          ? fetchGdacsSignals(rangeHours)
+          : Promise.resolve(
+              makeSkippedAdapter(
+                "GDACS",
+                phase2c2Enabled
+                  ? "Skipped (layer filter) [reason=layer_gated]"
+                  : "Skipped: ENABLE_PHASE2C2_SOURCES=false [reason=skipped]"
+              )
+            ),
+        phase2c2Enabled && wantsNewsLayer
+          ? fetchUsgsEarthquakeSignals(rangeHours)
+          : Promise.resolve(
+              makeSkippedAdapter(
+                "USGS Earthquakes",
+                phase2c2Enabled
+                  ? "Skipped (layer filter) [reason=layer_gated]"
+                  : "Skipped: ENABLE_PHASE2C2_SOURCES=false [reason=skipped]"
+              )
+            ),
+        phase2c2Enabled && wantsNewsLayer
+          ? fetchNasaFirmsSignals(rangeHours)
+          : Promise.resolve(
+              makeSkippedAdapter(
+                "NASA FIRMS",
+                phase2c2Enabled
+                  ? "Skipped (layer filter) [reason=layer_gated]"
+                  : "Skipped: ENABLE_PHASE2C2_SOURCES=false [reason=skipped]"
+              )
+            ),
+        phase2c2Enabled && wantsNewsLayer
+          ? fetchNoaaNhcSignals(rangeHours)
+          : Promise.resolve(
+              makeSkippedAdapter(
+                "NOAA NHC",
+                phase2c2Enabled
+                  ? "Skipped (layer filter) [reason=layer_gated]"
+                  : "Skipped: ENABLE_PHASE2C2_SOURCES=false [reason=skipped]"
+              )
+            ),
+        phase2c2Enabled && wantsNewsLayer
+          ? fetchIaeaSignals(rangeHours)
+          : Promise.resolve(
+              makeSkippedAdapter(
+                "IAEA",
+                phase2c2Enabled
+                  ? "Skipped (layer filter) [reason=layer_gated]"
+                  : "Skipped: ENABLE_PHASE2C2_SOURCES=false [reason=skipped]"
+              )
+            ),
       ]);
 
       const mergedConflicts = [...ucdpRes.points, ...acledRes.points]
@@ -6478,6 +6557,12 @@ export async function GET(request: Request) {
         ...experimentalTrackersRes.points.filter((p) => p.layer === "news"),
         ...requestedDomainLiveRes.points.filter((p) => p.layer === "news"),
         ...strategicRes.points,
+        ...reliefWebRes.points,
+        ...gdacsRes.points,
+        ...usgsRes.points,
+        ...nasaFirmsRes.points,
+        ...noaaNhcRes.points,
+        ...iaeaRes.points,
         ...gdeltRes.points.map((p, idx) => ({
           ...p,
           id: `gdelt-news-${p.id}-${idx}`,
@@ -6695,6 +6780,18 @@ export async function GET(request: Request) {
           requestedDomainLiveRes.health,
           strategicRes.health,
           ...strategicRes.providerHealth,
+          reliefWebRes.health,
+          gdacsRes.health,
+          usgsRes.health,
+          nasaFirmsRes.health,
+          noaaNhcRes.health,
+          iaeaRes.health,
+          {
+            provider: "Phase 2C.2 live sources",
+            ok: true,
+            updatedAt: new Date().toISOString(),
+            message: `enabled=${phase2c2Enabled}; reliefweb=${reliefWebRes.points.length}; gdacs=${gdacsRes.points.length}; usgs=${usgsRes.points.length}; nasa_firms=${nasaFirmsRes.points.length}; noaa_nhc=${noaaNhcRes.points.length}; iaea=${iaeaRes.points.length} [reason=phase2c2_summary]`,
+          },
           {
             provider: "Carrier groups",
             ok: carrierGroups.length > 0,

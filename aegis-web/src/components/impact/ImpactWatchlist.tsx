@@ -30,10 +30,14 @@ const CONFIDENCE_RANK: Record<ConfidenceLevel, number> = {
 function familyIcon(family: SourceFamily): string {
   if (family === "structured_conflict") return "✶";
   if (family === "maritime") return "⚓";
+  if (family === "aviation") return "✈";
   if (family === "official") return "◈";
   if (family === "news") return "◌";
   if (family === "infrastructure") return "▦";
   if (family === "humanitarian") return "✚";
+  if (family === "disaster") return "▲";
+  if (family === "sanctions") return "§";
+  if (family === "market") return "₿";
   if (family === "model_context") return "◌";
   return "•";
 }

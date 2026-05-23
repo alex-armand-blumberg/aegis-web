@@ -6,6 +6,8 @@ import type {
   EvidenceItem,
   ExposureAlert,
   ExposureScoreBreakdown,
+  RegionalContextItem,
+  RegionalContextReason,
   SourceFamily,
   UserAsset,
 } from "@/lib/impact/types";
@@ -16,6 +18,7 @@ import {
   groupEvidenceByRelation,
   type EvidenceRelation,
 } from "@/lib/impact/evidenceRelation";
+import { regionalContextReasonLabel } from "@/lib/impact/regionalContext";
 import { BriefRenderer } from "./BriefRenderer";
 import { FeedbackControls } from "./FeedbackControls";
 
@@ -396,6 +399,17 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }
             ) : null}
           </section>
 
+          {alert.regionalContext && alert.regionalContext.length > 0 ? (
+            <section className="impact-detail-section impact-regional-context">
+              <span className="impact-eyebrow">Regional context</span>
+              <p className="impact-evidence-group-desc">
+                Live signals matched to this asset&rsquo;s region or theater. Not
+                counted in the score &mdash; useful for situational awareness.
+              </p>
+              <RegionalContextList items={alert.regionalContext} onItemClick={onFlyTo} />
+            </section>
+          ) : null}
+
           {primaryWatchNext ? (
             <section className="impact-detail-section">
               <span className="impact-eyebrow">Watch next</span>
@@ -712,4 +726,83 @@ function sourceLinkLabel(url: string): string {
   } catch {
     return url;
   }
+}
+
+const REGIONAL_REASON_TOOLTIP: Record<RegionalContextReason, string> = {
+  same_country: "Live signal in the same country as this asset.",
+  neighbor_country: "Live signal in a country bordering or adjacent to this asset.",
+  theater_match: "Live signal mentions a theater keyword tied to this asset.",
+  corridor_match: "Live signal mentions a transit/corridor tied to this asset.",
+  supplier_overlay: "Live signal overlaps the asset's supplier or vendor footprint.",
+};
+
+function RegionalContextList({
+  items,
+  onItemClick,
+}: {
+  items: RegionalContextItem[];
+  onItemClick?: (lat: number, lon: number) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <ol className="impact-evidence-list impact-evidence-list-compact impact-regional-context-list">
+      {items.map((item) => {
+        const distance = formatDistance(item.distanceKm);
+        return (
+          <li
+            key={item.id}
+            className="impact-evidence-item impact-evidence-item-regional_context"
+            onClick={() => onItemClick?.(item.lat, item.lon)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onItemClick?.(item.lat, item.lon);
+              }
+            }}
+            role={onItemClick ? "button" : undefined}
+            tabIndex={onItemClick ? 0 : undefined}
+          >
+            <div className="impact-evidence-head">
+              <span className="impact-evidence-title">{item.title}</span>
+              <span className="impact-evidence-head-chips">
+                <span className={`impact-severity-chip impact-severity-${item.severity}`}>
+                  {item.severity}
+                </span>
+              </span>
+            </div>
+            <div className="impact-evidence-meta impact-evidence-meta-compact impact-evidence-preview-meta">
+              <span>{eventClassLabel(item.eventClass)}</span>
+              {item.country ? <span>{item.country}</span> : null}
+              {distance !== "—" ? <span>{distance}</span> : null}
+              <span>{item.source}</span>
+              <span>{sourceFamilyLabel(item.sourceFamily)}</span>
+              <span>{formatRelative(item.timestamp)}</span>
+            </div>
+            <div className="impact-regional-context-reasons">
+              {item.reasons.map((reason) => (
+                <span
+                  key={reason}
+                  className={`impact-relation-chip impact-regional-reason impact-regional-reason-${reason}`}
+                  title={REGIONAL_REASON_TOOLTIP[reason]}
+                >
+                  {regionalContextReasonLabel(reason)}
+                </span>
+              ))}
+              {item.url ? (
+                <a
+                  className="impact-regional-context-link"
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Source: {sourceLinkLabel(item.url)}
+                </a>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }

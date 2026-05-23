@@ -11,6 +11,8 @@ export type SignalCategoryKey =
   | "unrest"
   | "infrastructure"
   | "news"
+  | "humanitarian"
+  | "disaster"
   | "maritime"
   | "aviation"
   | "modelContext";
@@ -21,6 +23,8 @@ export const SIGNAL_CATEGORY_LABELS: Record<SignalCategoryKey, string> = {
   unrest: "Protests / unrest",
   infrastructure: "Infrastructure",
   news: "News",
+  humanitarian: "Humanitarian",
+  disaster: "Natural disasters",
   maritime: "Shipping / routes",
   aviation: "Flights",
   modelContext: "Model context",
@@ -32,6 +36,8 @@ export const DEFAULT_SIGNAL_CATEGORIES: Record<SignalCategoryKey, boolean> = {
   unrest: true,
   infrastructure: true,
   news: true,
+  humanitarian: true,
+  disaster: true,
   maritime: true,
   aviation: true,
   modelContext: true,
@@ -109,6 +115,28 @@ export function signalCategoryForLayer(layer: IntelLayerKey): SignalCategoryKey 
   if (layer === "vessels" || layer === "carriers") return "maritime";
   if (layer === "flights" || layer === "troopMovements") return "aviation";
   if (layer === "escalationRisk" || layer === "hotspots") return "modelContext";
+  return "news";
+}
+
+const HUMANITARIAN_SOURCE_RE = /\b(reliefweb|ocha|unhcr|wfp|icrc|red cross|red crescent)\b/i;
+const DISASTER_SOURCE_RE =
+  /\b(gdacs|usgs|earthquake|noaa|hurricane|tropical (storm|cyclone)|nasa firms|wildfire|fire information for resource management)\b/i;
+const DISASTER_TITLE_RE =
+  /\b(earthquake|tsunami|aftershock|hurricane|tropical storm|tropical cyclone|tropical depression|wildfire|active fire|flooding|landslide|volcanic|drought)\b/i;
+
+/**
+ * Layer + source-aware signal categorization.
+ * Humanitarian/disaster news-layer points (ReliefWeb / GDACS / USGS / NOAA NHC / NASA FIRMS / IAEA)
+ * keep their existing layer ("news") but surface as their own filter category.
+ */
+export function signalCategoryForPoint(point: IntelPoint): SignalCategoryKey {
+  const layerCategory = signalCategoryForLayer(point.layer);
+  if (layerCategory !== "news") return layerCategory;
+
+  const source = String(point.source ?? "");
+  const title = String(point.title ?? "");
+  if (HUMANITARIAN_SOURCE_RE.test(source)) return "humanitarian";
+  if (DISASTER_SOURCE_RE.test(source) || DISASTER_TITLE_RE.test(title)) return "disaster";
   return "news";
 }
 
@@ -205,7 +233,7 @@ export function buildBackgroundSignals(args: BuildBackgroundSignalsArgs): Impact
     if (!nearest.inScope) continue;
 
     const eventClass = inferEventClass(point);
-    const category = signalCategoryForLayer(point.layer);
+    const category = signalCategoryForPoint(point);
     const isModelContext = category === "modelContext" || eventClass === "model_risk_context";
     const signal: ImpactBackgroundSignal = {
       id: point.id,

@@ -45,6 +45,7 @@ import type {
   SourceFamily,
   UserAsset,
 } from "./types";
+import { buildRegionalContext } from "./regionalContext";
 
 const HOUR_MS = 3600 * 1000;
 
@@ -759,6 +760,13 @@ export function buildExposureAlerts(args: BuildAlertsArgs): ExposureAlert[] {
       capsApplied,
     });
 
+    const regionalContext = buildRegionalContext({
+      asset,
+      clusters,
+      evidence,
+      now,
+    });
+
     alerts.push({
       id: `alert-${asset.id}-${now}`,
       asset,
@@ -779,6 +787,7 @@ export function buildExposureAlerts(args: BuildAlertsArgs): ExposureAlert[] {
       watchNext: buildWatchNext(evidence),
       breakdown,
       evidence,
+      regionalContext: regionalContext.length > 0 ? regionalContext : undefined,
       generatedAt,
       range,
     });
