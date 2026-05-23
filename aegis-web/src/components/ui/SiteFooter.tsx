@@ -8,6 +8,9 @@ type SiteFooterProps = {
   className?: string;
 };
 
+const DISCLAIMER =
+  "Independent student-built prototype. Not a company, commercial service, government system, or official intelligence platform. Not affiliated with any existing Aegis-branded organization. For educational demonstration only.";
+
 export function SiteFooter({ showCta = true, className = "" }: SiteFooterProps) {
   const { openContact } = useContactModal();
 
@@ -27,7 +30,7 @@ export function SiteFooter({ showCta = true, className = "" }: SiteFooterProps) 
           <Link href="/escalation">Escalation index</Link>
           <Link href="/map">Interactive map</Link>
           {showCta ? (
-            <Link href="/escalation" className="text-red-400 hover:text-red-300">
+            <Link href="/escalation" className="site-footer-cta-link">
               Launch demo →
             </Link>
           ) : null}
@@ -51,6 +54,10 @@ export function SiteFooter({ showCta = true, className = "" }: SiteFooterProps) 
           </button>
         </div>
       </div>
+      <details className="site-footer-disclaimer">
+        <summary>Prototype disclaimer</summary>
+        <p>{DISCLAIMER}</p>
+      </details>
       <div className="site-footer-signature">
         © {new Date().getFullYear()} Alexander Armand-Blumberg · AEGIS · Independent research prototype
       </div>

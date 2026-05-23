@@ -40,7 +40,7 @@ export default function AnimatedStat({ value, suffix, label, redSuffix }: Props)
       <div className="stat-num font-bebas text-[36px] tracking-[0.06em] leading-none text-white">
         {displayValue}
         {suffix != null && (
-          <span className={redSuffix ? "text-[#ef4444]" : undefined}>{suffix}</span>
+          <span className={redSuffix ? "stat-plus-accent" : undefined}>{suffix}</span>
         )}
       </div>
       <div className="stat-label mt-1 font-barlow-condensed text-[10px] uppercase tracking-[0.18em] text-[var(--dim)] leading-tight">

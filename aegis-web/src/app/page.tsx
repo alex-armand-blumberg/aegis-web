@@ -147,7 +147,7 @@ export default function Home() {
             description="A global risk intelligence platform that tracks conflict escalation patterns, surfaces early-warning signals, and delivers AI-powered geopolitical analysis — before situations deteriorate."
           />
           <div className="features-grid reveal">
-            <Link href="/escalation" className="feature-card" style={{ "--accent": "#ef4444" } as React.CSSProperties}>
+            <Link href="/escalation" className="feature-card" style={{ "--accent": "#6b8299" } as React.CSSProperties}>
               <div className="feature-icon">📊</div>
               <div className="feature-title">Escalation Index</div>
               <div className="feature-desc">
