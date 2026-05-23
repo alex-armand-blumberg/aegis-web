@@ -346,6 +346,7 @@ const SELECTED_RING_INNER: LayerProps = {
 const SELECTED_STAR_LAYER: LayerProps = {
   id: SELECTED_STAR_LAYER_ID,
   type: "symbol",
+  source: "impact-asset-source",
   filter: ["==", ["get", "selected"], true],
   layout: {
     "text-field": "✦",
@@ -363,6 +364,7 @@ const SELECTED_STAR_LAYER: LayerProps = {
 const SELECTED_LABEL_LAYER: LayerProps = {
   id: SELECTED_LABEL_LAYER_ID,
   type: "symbol",
+  source: "impact-asset-source",
   filter: ["==", ["get", "selected"], true],
   layout: {
     "text-field": ["upcase", ["get", "name"]],
