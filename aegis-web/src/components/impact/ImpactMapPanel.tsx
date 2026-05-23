@@ -364,6 +364,9 @@ export function ImpactMapPanel({
     const properties = feature.properties as Record<string, unknown>;
 
     if (layerId === ASSET_LAYER_ID && typeof properties.assetId === "string") {
+      const [lon, lat] =
+        feature.geometry.type === "Point" ? feature.geometry.coordinates : [event.lngLat.lng, event.lngLat.lat];
+      setLastMapCoord({ lat, lon });
       onSelectAsset(properties.assetId);
       return;
     }
@@ -372,6 +375,9 @@ export function ImpactMapPanel({
       (layerId === EVIDENCE_LAYER_ID || layerId === EVIDENCE_MODEL_LAYER_ID) &&
       typeof selectedAlert?.id === "string"
     ) {
+      const [lon, lat] =
+        feature.geometry.type === "Point" ? feature.geometry.coordinates : [event.lngLat.lng, event.lngLat.lat];
+      setLastMapCoord({ lat, lon });
       onSelectAlert(selectedAlert.id);
     }
   };

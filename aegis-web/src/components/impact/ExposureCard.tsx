@@ -105,6 +105,7 @@ function aiBriefPrompt(alert: ExposureAlert): string {
 }
 
 const EVIDENCE_PREVIEW_LIMIT = 2;
+const EVIDENCE_LINK_LIMIT = 2;
 
 export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }: Props) {
   const [briefStatus, setBriefStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
@@ -226,8 +227,6 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }
           Confidence {alert.confidence}
         </span>
         <span>Updated {formatRelative(alert.generatedAt)}</span>
-        <span>Evidence {alert.evidence.length}</span>
-        <span>Window {alert.range}</span>
       </div>
 
       <div className="impact-detail-tabs" role="tablist" aria-label="Alert detail sections">
@@ -275,10 +274,10 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss, onFlyTo }
             {hiddenCount > 0 ? (
               <button
                 type="button"
-                className="impact-link-btn"
+                className="impact-btn impact-btn-ghost impact-btn-sm"
                 onClick={() => setActiveTab("evidence")}
               >
-                View all evidence ({alert.evidence.length})
+                Show more evidence ({alert.evidence.length})
               </button>
             ) : null}
           </section>
@@ -476,13 +475,16 @@ function EvidenceList({
           )}
           {!compact && e.urls && e.urls.length > 0 ? (
             <ul className="impact-evidence-links">
-              {e.urls.slice(0, 3).map((u) => (
+              {e.urls.slice(0, EVIDENCE_LINK_LIMIT).map((u) => (
                 <li key={u}>
                   <a href={u} target="_blank" rel="noopener noreferrer">
-                    {sourceLinkLabel(u)}
+                    Source: {sourceLinkLabel(u)}
                   </a>
                 </li>
               ))}
+              {e.urls.length > EVIDENCE_LINK_LIMIT ? (
+                <li className="impact-evidence-link-more">+{e.urls.length - EVIDENCE_LINK_LIMIT} more</li>
+              ) : null}
             </ul>
           ) : null}
         </li>

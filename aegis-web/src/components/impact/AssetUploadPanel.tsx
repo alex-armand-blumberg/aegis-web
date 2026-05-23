@@ -125,10 +125,12 @@ function PortfolioExtras({
 }) {
   return (
     <>
-      <details className="impact-disclosure">
+      <details className="impact-disclosure impact-disclosure-sample">
         <summary>Expected CSV format</summary>
-        <pre>{`name,type,country,city,lat,lon,importance,owner,tags,notes
+        <div className="impact-csv-sample-box">
+          <pre className="impact-csv-sample-pre">{`name,type,country,city,lat,lon,importance,owner,tags,notes
 Haifa Supplier,supplier,Israel,Haifa,32.7940,34.9896,high,Demo Team,"electronics;shipping","Fictional demo supplier"`}</pre>
+        </div>
         <ul>
           <li>Required: name, country, lat, lon.</li>
           <li>type defaults to other; importance defaults to medium.</li>
@@ -210,11 +212,18 @@ export function AssetUploadPanel({ assetCount, onAssetsChange }: Props) {
           </label>
         </div>
         <div className="impact-empty-utils">
-          <button type="button" className="impact-link-btn" onClick={actions.handleCopySample}>
+          <button
+            type="button"
+            className="impact-btn impact-btn-ghost impact-btn-sm"
+            onClick={actions.handleCopySample}
+          >
             Copy sample CSV
           </button>
-          <span className="impact-link-sep">·</span>
-          <button type="button" className="impact-link-btn" onClick={actions.handleDownloadSample}>
+          <button
+            type="button"
+            className="impact-btn impact-btn-ghost impact-btn-sm"
+            onClick={actions.handleDownloadSample}
+          >
             Download sample CSV
           </button>
         </div>

@@ -14,6 +14,7 @@ type Props = {
   onSelect: (alertId: string) => void;
   filter: FilterMode;
   onFilterChange: (value: FilterMode) => void;
+  height?: number;
 };
 
 export type FilterMode = "all" | "critical" | "high" | "elevated" | "low";
@@ -48,10 +49,31 @@ function topFamilies(alert: ExposureAlert, limit = 3): SourceFamily[] {
 }
 
 function familyLabel(family: SourceFamily): string {
-  return family.replace(/_/g, " ");
+  const names: Record<SourceFamily, string> = {
+    structured_conflict: "Structured conflict",
+    news: "News reporting",
+    official: "Official statements",
+    humanitarian: "Humanitarian reporting",
+    disaster: "Disaster signals",
+    sanctions: "Sanctions and economic actions",
+    maritime: "Maritime activity",
+    aviation: "Aviation activity",
+    infrastructure: "Infrastructure disruptions",
+    market: "Market stress",
+    model_context: "Model context",
+    unknown: "Unknown source family",
+  };
+  return names[family] ?? family.replace(/_/g, " ");
 }
 
-export function ImpactWatchlist({ alerts, selectedAlertId, onSelect, filter, onFilterChange }: Props) {
+export function ImpactWatchlist({
+  alerts,
+  selectedAlertId,
+  onSelect,
+  filter,
+  onFilterChange,
+  height,
+}: Props) {
   const [sort, setSort] = useState<SortMode>("score");
 
   const filteredSorted = useMemo(() => {
@@ -74,11 +96,12 @@ export function ImpactWatchlist({ alerts, selectedAlertId, onSelect, filter, onF
   }, [alerts, filter, sort]);
 
   return (
-    <div className="impact-watch">
+    <div className="impact-watch" style={height ? { height: `${height}px`, maxHeight: `${height}px` } : undefined}>
       <header className="impact-watch-head">
         <div className="impact-watch-title">
           <span className="impact-eyebrow">Exposure Watchlist</span>
           <p className="impact-watch-sub impact-eyebrow">Ranked by exposure score</p>
+          <p className="impact-watch-driver-hint">Hover a driver icon to see its meaning.</p>
         </div>
         <div className="impact-watch-controls">
           <div className="impact-filter-chips" role="tablist" aria-label="Filter alerts">
@@ -113,6 +136,9 @@ export function ImpactWatchlist({ alerts, selectedAlertId, onSelect, filter, onF
               <option value="score">Score</option>
               <option value="confidence">Confidence</option>
             </select>
+            <span className="impact-sort-active" aria-live="polite">
+              {sort === "score" ? "score ↓" : "confidence ↓"}
+            </span>
           </label>
         </div>
       </header>

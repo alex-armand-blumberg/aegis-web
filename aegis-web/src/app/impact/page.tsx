@@ -44,9 +44,11 @@ const IMPACT_LAYERS = [
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type DragSide = "left" | "right" | null;
+type CenterDrag = null | { originY: number; originHeight: number };
 
 const LEFT_PANEL_WIDTH = { min: 220, max: 520, default: 272, collapsed: 36 } as const;
 const RIGHT_PANEL_WIDTH = { min: 280, max: 620, default: 400, collapsed: 36 } as const;
+const WATCH_HEIGHT = { min: 170, max: 420, default: 220 } as const;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -72,6 +74,19 @@ function loadPanelCollapsed(key: "left" | "right"): boolean {
     return raw === "1";
   } catch {
     return false;
+  }
+}
+
+function loadWatchHeight(): number {
+  if (typeof window === "undefined") return WATCH_HEIGHT.default;
+  try {
+    const raw = window.localStorage.getItem("impact-watch-height");
+    if (!raw) return WATCH_HEIGHT.default;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return WATCH_HEIGHT.default;
+    return clamp(parsed, WATCH_HEIGHT.min, WATCH_HEIGHT.max);
+  } catch {
+    return WATCH_HEIGHT.default;
   }
 }
 
@@ -103,6 +118,8 @@ export default function ImpactPage() {
   const [dragSide, setDragSide] = useState<DragSide>(null);
   const [dragOriginX, setDragOriginX] = useState(0);
   const [dragOriginWidth, setDragOriginWidth] = useState(0);
+  const [watchHeight, setWatchHeight] = useState(() => loadWatchHeight());
+  const [centerDrag, setCenterDrag] = useState<CenterDrag>(null);
 
   useEffect(() => {
     setAssets(loadAssets());
@@ -150,6 +167,15 @@ export default function ImpactPage() {
   }, [rightCollapsed]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("impact-watch-height", String(watchHeight));
+    } catch {
+      // Ignore storage errors to keep dashboard functional.
+    }
+  }, [watchHeight]);
+
+  useEffect(() => {
     if (!dragSide) return;
     const onMouseMove = (event: MouseEvent) => {
       if (dragSide === "left") {
@@ -177,6 +203,25 @@ export default function ImpactPage() {
       document.removeEventListener("mouseup", onMouseUp);
     };
   }, [dragOriginWidth, dragOriginX, dragSide]);
+
+  useEffect(() => {
+    if (!centerDrag) return;
+    const onMouseMove = (event: MouseEvent) => {
+      const next = clamp(
+        centerDrag.originHeight + (centerDrag.originY - event.clientY),
+        WATCH_HEIGHT.min,
+        WATCH_HEIGHT.max
+      );
+      setWatchHeight(next);
+    };
+    const onMouseUp = () => setCenterDrag(null);
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [centerDrag]);
 
   const fetchMap = useCallback(async (r: RangeOption) => {
     setLoadState("loading");
@@ -253,6 +298,16 @@ export default function ImpactPage() {
     }
     return intersect;
   }, [filteredAssets, watchlistFilter, watchlistVisibleAlerts]);
+
+  useEffect(() => {
+    if (!selectedAssetId) return;
+    if (visibleAssetIds.has(selectedAssetId)) return;
+    if (watchlistVisibleAlerts.length > 0) {
+      setSelectedAssetId(watchlistVisibleAlerts[0].asset.id);
+      return;
+    }
+    setSelectedAssetId(null);
+  }, [selectedAssetId, visibleAssetIds, watchlistVisibleAlerts]);
 
   const regionOptions = useMemo(() => {
     const set = new Set<string>();
@@ -460,12 +515,26 @@ export default function ImpactPage() {
               updatedLabel={updatedLabel}
               flyToCoord={flyToCoord}
             />
+            <div
+              className="impact-watch-resize-handle"
+              role="separator"
+              aria-label="Resize exposure watchlist"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                setCenterDrag({ originY: event.clientY, originHeight: watchHeight });
+              }}
+            >
+              <span className="impact-watch-resize-grip" aria-hidden>
+                ↕
+              </span>
+            </div>
             <ImpactWatchlist
               alerts={alerts}
               selectedAlertId={selectedAlert?.id ?? null}
               onSelect={handleSelectAlert}
               filter={watchlistFilter}
               onFilterChange={setWatchlistFilter}
+              height={watchHeight}
             />
           </section>
           <div className="impact-console-divider impact-console-divider-right">
