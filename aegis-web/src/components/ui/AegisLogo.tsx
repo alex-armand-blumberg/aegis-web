@@ -11,9 +11,9 @@ type Props = {
 };
 
 const SIZE = {
-  nav: { width: 52, height: 52 },
-  footer: { width: 58, height: 58 },
-  display: { width: 96, height: 96 },
+  nav: { width: 60, height: 60 },
+  footer: { width: 66, height: 66 },
+  display: { width: 108, height: 108 },
 } as const;
 
 export function AegisLogo({ className = "", href = "/", size = "nav", priority = false }: Props) {

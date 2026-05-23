@@ -571,15 +571,15 @@ nav {
   display: block;
 }
 .aegis-logo-img-nav {
-  height: 52px;
+  height: 60px;
   width: auto;
 }
 .aegis-logo-img-footer {
-  height: 58px;
+  height: 66px;
   width: auto;
 }
 .aegis-logo-img-display {
-  height: 96px;
+  height: 108px;
   width: auto;
 }
 .nav-links {
@@ -985,7 +985,7 @@ nav {
   justify-content: center;
 }
 .methodology-logo img {
-  width: 180px;
+  width: 200px;
   height: auto;
   opacity: 0.95;
 }
