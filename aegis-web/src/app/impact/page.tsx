@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MapApiResponse } from "@/lib/intel/types";
 import { buildMapDataUrl } from "@/lib/instantLoad";
@@ -18,6 +19,10 @@ import { AssetTable } from "@/components/impact/AssetTable";
 import { ImpactWatchlist } from "@/components/impact/ImpactWatchlist";
 import { ExposureCard } from "@/components/impact/ExposureCard";
 import { ImpactMethodologyPanel } from "@/components/impact/ImpactMethodologyPanel";
+
+const ImpactMapPanel = dynamic(() => import("@/components/impact/ImpactMapPanel").then((m) => m.ImpactMapPanel), {
+  ssr: false,
+});
 
 const RANGE_OPTIONS = ["24h", "7d", "30d"] as const;
 type RangeOption = (typeof RANGE_OPTIONS)[number];
@@ -154,7 +159,7 @@ export default function ImpactPage() {
             </span>
           </div>
           <div className="impact-mission-pills">
-            <span className="impact-mission-pill">Phase 1 MVP</span>
+            <span className="impact-mission-pill">Phase 2A map</span>
             <span className="impact-mission-pill">Assets stay local</span>
             <span className="impact-mission-pill">Score ≠ prediction</span>
             <span className="impact-mission-pill">Public sources</span>
@@ -220,28 +225,21 @@ export default function ImpactPage() {
           </aside>
 
           <section className="impact-console-col impact-console-watch">
+            <ImpactMapPanel
+              assets={assets}
+              alerts={alerts}
+              alertsByAsset={alertsByAsset}
+              selectedAssetId={selectedAssetId}
+              selectedAlert={selectedAlert}
+              onSelectAsset={handleSelectAsset}
+              onSelectAlert={handleSelectAlert}
+              range={range}
+            />
             <ImpactWatchlist
               alerts={alerts}
               selectedAlertId={selectedAlert?.id ?? null}
               onSelect={handleSelectAlert}
             />
-            <div className="impact-map-placeholder" aria-label="Phase 2 operational map placeholder">
-              <div className="impact-map-placeholder-grid" aria-hidden />
-              <div className="impact-map-placeholder-body">
-                <span className="impact-eyebrow">Phase 2 · Operational Map</span>
-                <p>
-                  Phase 2 will add an operational map showing asset markers, nearby evidence
-                  clusters, route exposure, and alert geometry. Phase 1 focuses on scoring,
-                  evidence, and analyst workflow.
-                </p>
-                <div className="impact-map-placeholder-chips">
-                  <span className="impact-map-chip">Asset markers</span>
-                  <span className="impact-map-chip">Evidence clusters</span>
-                  <span className="impact-map-chip">Route exposure</span>
-                  <span className="impact-map-chip impact-map-chip-muted">Map layer pending</span>
-                </div>
-              </div>
-            </div>
           </section>
 
           <aside className="impact-console-col impact-console-detail">

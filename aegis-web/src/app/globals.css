@@ -4219,57 +4219,152 @@ footer {
   white-space: nowrap;
 }
 
-/* --- Phase 2 map placeholder --------------------------------------- */
-.impact-map-placeholder {
+/* --- Phase 2A operational map -------------------------------------- */
+.impact-map-panel {
   position: relative;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  background:
-    radial-gradient(circle at 30% 60%, rgba(96, 165, 250, 0.06), transparent 60%),
-    radial-gradient(circle at 70% 35%, rgba(239, 68, 68, 0.05), transparent 60%),
-    rgba(2, 6, 17, 0.55);
-  padding: 16px 18px;
+  background: rgba(2, 6, 17, 0.78);
+  overflow: hidden;
+  min-height: 360px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  overflow: hidden;
 }
-.impact-map-placeholder-grid {
+.impact-map-grid {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(rgba(96, 165, 250, 0.06) 1px, transparent 1px) 0 0 / 44px 44px,
-    linear-gradient(90deg, rgba(96, 165, 250, 0.06) 1px, transparent 1px) 0 0 / 44px 44px;
+    linear-gradient(rgba(148, 163, 184, 0.09) 1px, transparent 1px) 0 0 / 44px 44px,
+    linear-gradient(90deg, rgba(148, 163, 184, 0.09) 1px, transparent 1px) 0 0 / 44px 44px;
   pointer-events: none;
 }
-.impact-map-placeholder-body {
-  position: relative;
+.impact-map-overlay {
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(2, 6, 17, 0.82);
+}
+.impact-map-title-block {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
-.impact-map-placeholder-body p {
-  font-size: 12.5px;
-  color: rgba(203, 213, 225, 0.85);
-  line-height: 1.5;
-  max-width: 70ch;
+.impact-map-title-block p {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(203, 213, 225, 0.82);
+  line-height: 1.35;
 }
-.impact-map-placeholder-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.impact-map-chip {
+.impact-map-telemetry {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: rgba(148, 163, 184, 0.9);
   font-family: var(--font-barlow-condensed);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 10.5px;
-  padding: 3px 9px;
-  border-radius: 4px;
-  border: 1px solid rgba(96, 165, 250, 0.3);
-  background: rgba(2, 6, 17, 0.7);
-  color: #bfdbfe;
+  letter-spacing: 0.08em;
 }
-.impact-map-chip-muted {
-  border-color: rgba(148, 163, 184, 0.3);
-  color: rgba(148, 163, 184, 0.85);
-  background: rgba(2, 6, 17, 0.5);
+.impact-map-canvas {
+  position: relative;
+  min-height: 250px;
+}
+.impact-map-canvas .maplibregl-map {
+  width: 100%;
+  height: 100%;
+  min-height: 250px;
+}
+.impact-map-canvas .maplibregl-ctrl-group {
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  box-shadow: none;
+}
+.impact-map-canvas .maplibregl-ctrl-group button {
+  background-color: transparent;
+  color: rgba(226, 232, 240, 0.9);
+}
+.impact-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(2, 6, 17, 0.8);
+}
+.impact-map-legend-chip {
+  font-family: var(--font-barlow-condensed);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  color: rgba(203, 213, 225, 0.9);
+  background: rgba(15, 23, 42, 0.72);
+}
+.impact-map-legend-chip-model {
+  border-style: dashed;
+  color: rgba(148, 163, 184, 0.95);
+}
+.impact-map-note {
+  padding: 0 12px 10px;
+  font-size: 11.5px;
+  color: rgba(148, 163, 184, 0.9);
+}
+.impact-map-empty,
+.impact-map-fallback {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-height: 360px;
+  padding: 16px 18px;
+}
+.impact-map-empty p,
+.impact-map-fallback p {
+  margin: 0;
+  font-size: 12.5px;
+  color: rgba(203, 213, 225, 0.88);
+  line-height: 1.45;
+  max-width: 62ch;
+}
+.impact-map-fallback-sub {
+  color: rgba(148, 163, 184, 0.88);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+}
+.impact-map-popup .maplibregl-popup-content {
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 17, 0.95);
+  color: #e2e8f0;
+  box-shadow: none;
+  padding: 8px 10px;
+}
+.impact-map-popup .maplibregl-popup-tip {
+  border-top-color: rgba(2, 6, 17, 0.95);
+}
+.impact-map-popup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.impact-map-popup-title {
+  font-size: 12px;
+  color: #f8fafc;
+}
+.impact-map-popup-sub {
+  font-size: 10.5px;
+  color: rgba(148, 163, 184, 0.95);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
 }
 
 /* --- Detail panel (right column) ----------------------------------- */
