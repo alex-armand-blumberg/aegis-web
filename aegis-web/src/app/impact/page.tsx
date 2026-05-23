@@ -13,6 +13,7 @@ import {
 } from "@/lib/impact/storage";
 import type { AlertFeedback, ExposureAlert, UserAsset } from "@/lib/impact/types";
 import { MarketingNav } from "@/components/ui/MarketingNav";
+import { SiteFooter } from "@/components/ui/SiteFooter";
 import { AssetUploadPanel, PortfolioManagePanel } from "@/components/impact/AssetUploadPanel";
 import { AssetTable } from "@/components/impact/AssetTable";
 import { ImpactWatchlist, type FilterMode } from "@/components/impact/ImpactWatchlist";
@@ -595,6 +596,8 @@ export default function ImpactPage() {
           <ImpactMethodologyPanel updatedLabel={updatedLabel} />
         </footer>
       </main>
+
+      <SiteFooter />
     </div>
   );
 }
