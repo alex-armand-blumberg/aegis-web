@@ -194,15 +194,42 @@ export default function Home() {
               onMouseEnter={warmImpact}
               onFocus={warmImpact}
             >
-              <div className="feature-icon">◆</div>
-              <div className="feature-title">Impact Layer</div>
-              <div className="feature-desc">
-                Map public geopolitical signals against user-defined assets,
-                suppliers, facilities, routes, and regions, then generate
-                explainable exposure alerts with source-backed evidence and an
-                optional AI analyst brief.
+              <div className="feature-card-impact-inner">
+                <div className="feature-card-impact-main">
+                  <div className="feature-icon">◆</div>
+                  <div className="feature-title">Impact Layer</div>
+                  <div className="feature-desc">
+                    Connect operational geography to what you actually care about. Upload assets,
+                    suppliers, facilities, routes, and regions, then let AEGIS score live public-source
+                    signals against each location — surfacing explainable exposure alerts before disruption
+                    reaches your supply chain, workforce, or critical infrastructure.
+                  </div>
+                  <span className="feature-tag">Phase 1 · Beta</span>
+                </div>
+                <div className="feature-card-impact-highlights">
+                  <div className="feature-card-impact-highlight">
+                    <div className="feature-card-impact-highlight-title">Asset watchlists</div>
+                    <div className="feature-card-impact-highlight-desc">
+                      Define facilities, vendors, and corridors in CSV or sample data, then monitor them
+                      against the same conflict feeds that power the map.
+                    </div>
+                  </div>
+                  <div className="feature-card-impact-highlight">
+                    <div className="feature-card-impact-highlight-title">Source-backed alerts</div>
+                    <div className="feature-card-impact-highlight-desc">
+                      Every exposure score ships with ranked drivers, linked evidence, and confidence
+                      metadata so analysts can trace why an alert fired.
+                    </div>
+                  </div>
+                  <div className="feature-card-impact-highlight">
+                    <div className="feature-card-impact-highlight-title">Analyst brief</div>
+                    <div className="feature-card-impact-highlight-desc">
+                      Optional AI summary interprets the alert in plain language — connecting index
+                      movement, nearby events, and asset context in one view.
+                    </div>
+                  </div>
+                </div>
               </div>
-              <span className="feature-tag">Phase 1 · Beta</span>
             </Link>
           </div>
         </div>

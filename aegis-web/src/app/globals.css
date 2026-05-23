@@ -571,15 +571,15 @@ nav {
   display: block;
 }
 .aegis-logo-img-nav {
-  height: 36px;
+  height: 52px;
   width: auto;
 }
 .aegis-logo-img-footer {
-  height: 40px;
+  height: 58px;
   width: auto;
 }
 .aegis-logo-img-display {
-  height: 56px;
+  height: 96px;
   width: auto;
 }
 .nav-links {
@@ -845,11 +845,47 @@ nav {
 }
 .features-grid .feature-card-impact {
   grid-column: 1 / -1;
-  width: calc(100% / 3);
-  max-width: calc(100% / 3);
-  justify-self: center;
+  width: 100%;
+  max-width: none;
+  justify-self: stretch;
   border-right: none;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 40px 44px;
+}
+.feature-card-impact-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 40px 48px;
+  align-items: start;
+}
+.feature-card-impact-main .feature-desc {
+  max-width: 52ch;
+}
+.feature-card-impact-highlights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  padding-top: 4px;
+}
+.feature-card-impact-highlight {
+  padding: 16px 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.45);
+}
+.feature-card-impact-highlight-title {
+  font-family: var(--font-barlow-condensed), "Barlow Condensed", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.92);
+  margin-bottom: 8px;
+}
+.feature-card-impact-highlight-desc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(226, 232, 240, 0.52);
 }
 .feature-icon {
   font-size: 22px;
@@ -949,9 +985,9 @@ nav {
   justify-content: center;
 }
 .methodology-logo img {
-  width: 140px;
+  width: 180px;
   height: auto;
-  opacity: 0.9;
+  opacity: 0.95;
 }
 @media (max-width: 960px) {
   .methodology-header {
@@ -1121,8 +1157,16 @@ footer {
   .features-grid .feature-card-impact {
     width: 100%;
     max-width: none;
-    grid-column: auto;
-    border-top: none;
+    grid-column: 1 / -1;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 32px 28px;
+  }
+  .feature-card-impact-inner {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .feature-card-impact-highlights {
+    grid-template-columns: 1fr;
   }
   #about .inner {
     grid-template-columns: 1fr;
