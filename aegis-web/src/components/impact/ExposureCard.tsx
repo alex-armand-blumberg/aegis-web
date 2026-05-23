@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   AlertFeedback,
   EvidenceItem,
@@ -103,13 +103,16 @@ function aiBriefPrompt(alert: ExposureAlert): string {
   return lines.join("\n");
 }
 
-const EVIDENCE_PREVIEW_LIMIT = 4;
+const EVIDENCE_PREVIEW_LIMIT = 2;
 
 export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) {
   const [briefStatus, setBriefStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
   const [briefContent, setBriefContent] = useState<string | null>(null);
   const [briefError, setBriefError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "evidence" | "details">("overview");
+  const [activeTab, setActiveTab] = useState<"summary" | "evidence" | "details">("summary");
+  const [showUncertainty, setShowUncertainty] = useState(false);
+  const [showBrief, setShowBrief] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
 
   const handleBrief = useCallback(async () => {
     if (!alert) return;
@@ -158,14 +161,19 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
     );
   }
 
+  useEffect(() => {
+    setActiveTab("summary");
+    setShowUncertainty(false);
+    setShowBrief(false);
+    setShowFeedback(false);
+  }, [alert.id]);
+
   const bars = breakdownBars(alert.breakdown);
   const capsCount = alert.breakdown.capsApplied.length;
   const previewEvidence = alert.evidence.slice(0, EVIDENCE_PREVIEW_LIMIT);
   const hiddenCount = Math.max(0, alert.evidence.length - EVIDENCE_PREVIEW_LIMIT);
   const country = countryDisplay(alert.asset.country);
-  const driverFamilies = Array.from(
-    new Set(alert.evidence.flatMap((item) => item.sourceFamilies).slice(0, 5))
-  );
+  const primaryWatchNext = alert.watchNext[0] ?? null;
 
   return (
     <article className="impact-detail" data-level={alert.level}>
@@ -211,9 +219,6 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
         </span>
         <span>Updated {formatRelative(alert.generatedAt)}</span>
         <span>Evidence {alert.evidence.length}</span>
-        <span>
-          {capsCount} cap{capsCount === 1 ? "" : "s"}
-        </span>
         <span>Window {alert.range}</span>
       </div>
 
@@ -221,11 +226,11 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
         <button
           type="button"
           role="tab"
-          aria-selected={activeTab === "overview"}
-          className={`impact-detail-tab${activeTab === "overview" ? " is-active" : ""}`}
-          onClick={() => setActiveTab("overview")}
+          aria-selected={activeTab === "summary"}
+          className={`impact-detail-tab${activeTab === "summary" ? " is-active" : ""}`}
+          onClick={() => setActiveTab("summary")}
         >
-          Overview
+          Summary
         </button>
         <button
           type="button"
@@ -247,37 +252,18 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
         </button>
       </div>
 
-      {activeTab === "overview" ? (
-        <>
+      {activeTab === "summary" ? (
+        <div className="impact-detail-summary">
           <section className="impact-detail-section">
             <p className="impact-detail-headline">{alert.headline}</p>
             <p className="impact-detail-line">
-              <span className="impact-inline-label">Why it matters.</span> {alert.whyItMatters}
+              {alert.whyItMatters}
             </p>
-            {driverFamilies.length > 0 ? (
-              <div className="impact-detail-drivers">
-                {driverFamilies.map((family) => (
-                  <span key={family} className="impact-driver-pill">
-                    {family.replace(/_/g, " ")}
-                  </span>
-                ))}
-              </div>
-            ) : null}
           </section>
 
           <section className="impact-detail-section">
             <span className="impact-eyebrow">Evidence summary</span>
-            <div className="impact-evidence-summary-meta">
-              <span>
-                {alert.evidence.length} evidence cluster
-                {alert.evidence.length === 1 ? "" : "s"} · {capsCount} cap
-                {capsCount === 1 ? "" : "s"} applied
-              </span>
-              <span className={`impact-conf-chip impact-conf-${alert.confidence}`}>
-                {alert.confidence}
-              </span>
-            </div>
-            <EvidenceList items={previewEvidence} compact />
+            <EvidenceList items={previewEvidence} compact preview />
             {hiddenCount > 0 ? (
               <button
                 type="button"
@@ -289,20 +275,62 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
             ) : null}
           </section>
 
-          <section className="impact-detail-section">
-            <span className="impact-eyebrow">Uncertainty</span>
-            <p className="impact-detail-line">{alert.uncertainty}</p>
-          </section>
+          {primaryWatchNext ? (
+            <section className="impact-detail-section">
+              <span className="impact-eyebrow">Watch next</span>
+              <p className="impact-detail-line">{primaryWatchNext}</p>
+            </section>
+          ) : null}
 
-          <section className="impact-detail-section">
-            <span className="impact-eyebrow">What to watch next</span>
-            <ul className="impact-watch-next">
-              {alert.watchNext.map((w, i) => (
-                <li key={`${i}-${w.slice(0, 12)}`}>{w}</li>
-              ))}
-            </ul>
-          </section>
-        </>
+          <details
+            className="impact-detail-section impact-detail-disclosure"
+            open={showUncertainty}
+            onToggle={(event) => setShowUncertainty(event.currentTarget.open)}
+          >
+            <summary>Show uncertainty</summary>
+            <p className="impact-detail-line">{alert.uncertainty}</p>
+          </details>
+
+          <details
+            className="impact-detail-section impact-detail-disclosure"
+            open={showBrief}
+            onToggle={(event) => setShowBrief(event.currentTarget.open)}
+          >
+            <summary>Show AI brief</summary>
+            <section className="impact-detail-section impact-brief-section impact-brief-inline">
+              <header className="impact-brief-head">
+                <span className="impact-eyebrow">Analyst brief (AI)</span>
+                <button
+                  type="button"
+                  className="impact-btn impact-btn-secondary impact-btn-sm"
+                  onClick={handleBrief}
+                  disabled={briefStatus === "loading"}
+                >
+                  {briefStatus === "loading"
+                    ? "Generating…"
+                    : briefStatus === "ok"
+                    ? "Regenerate brief"
+                    : "Generate brief"}
+                </button>
+              </header>
+              {briefStatus === "error" && briefError ? (
+                <p className="impact-brief-error" role="alert">
+                  {briefError}
+                </p>
+              ) : null}
+              {briefStatus === "ok" && briefContent ? <BriefRenderer text={briefContent} /> : null}
+            </section>
+          </details>
+
+          <details
+            className="impact-detail-section impact-detail-disclosure"
+            open={showFeedback}
+            onToggle={(event) => setShowFeedback(event.currentTarget.open)}
+          >
+            <summary>Feedback</summary>
+            <FeedbackControls alert={alert} existingFeedback={feedback} onFeedback={onFeedback} />
+          </details>
+        </div>
       ) : null}
 
       {activeTab === "evidence" ? (
@@ -313,7 +341,7 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
 
       {activeTab === "details" ? (
         <>
-          <details className="impact-detail-section impact-collapsible" open>
+          <details className="impact-detail-section impact-collapsible">
             <summary>
               <span className="impact-eyebrow">Score breakdown</span>
               <span className="impact-collapsible-hint">Score is not a probability</span>
@@ -353,6 +381,14 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
             </details>
           ) : null}
 
+          <details className="impact-detail-section impact-collapsible">
+            <summary>
+              <span className="impact-eyebrow">Uncertainty</span>
+              <span className="impact-collapsible-hint">Expanded analyst context</span>
+            </summary>
+            <p className="impact-detail-line">{alert.uncertainty}</p>
+          </details>
+
           <section className="impact-detail-section">
             <p className="impact-detail-line">
               <span className="impact-inline-label">What changed.</span> {alert.whatChanged}
@@ -360,37 +396,19 @@ export function ExposureCard({ alert, feedback, onFeedback, onDismiss }: Props) 
           </section>
         </>
       ) : null}
-
-      <section className="impact-detail-section impact-brief-section">
-        <header className="impact-brief-head">
-          <span className="impact-eyebrow">Analyst brief (AI)</span>
-          <button
-            type="button"
-            className="impact-btn impact-btn-secondary impact-btn-sm"
-            onClick={handleBrief}
-            disabled={briefStatus === "loading"}
-          >
-            {briefStatus === "loading"
-              ? "Generating…"
-              : briefStatus === "ok"
-              ? "Regenerate brief"
-              : "Generate brief"}
-          </button>
-        </header>
-        {briefStatus === "error" && briefError ? (
-          <p className="impact-brief-error" role="alert">
-            {briefError}
-          </p>
-        ) : null}
-        {briefStatus === "ok" && briefContent ? <BriefRenderer text={briefContent} /> : null}
-      </section>
-
-      <FeedbackControls alert={alert} existingFeedback={feedback} onFeedback={onFeedback} />
     </article>
   );
 }
 
-function EvidenceList({ items, compact = false }: { items: EvidenceItem[]; compact?: boolean }) {
+function EvidenceList({
+  items,
+  compact = false,
+  preview = false,
+}: {
+  items: EvidenceItem[];
+  compact?: boolean;
+  preview?: boolean;
+}) {
   if (items.length === 0) {
     return (
       <p className="impact-evidence-empty">
@@ -399,7 +417,9 @@ function EvidenceList({ items, compact = false }: { items: EvidenceItem[]; compa
     );
   }
   return (
-    <ol className={`impact-evidence-list${compact ? " impact-evidence-list-compact" : ""}`}>
+    <ol
+      className={`impact-evidence-list${compact ? " impact-evidence-list-compact" : ""}${preview ? " impact-evidence-list-preview" : ""}`}
+    >
       {items.map((e) => (
         <li key={e.id} className="impact-evidence-item">
           <div className="impact-evidence-head">
@@ -408,13 +428,21 @@ function EvidenceList({ items, compact = false }: { items: EvidenceItem[]; compa
               {e.severity}
             </span>
           </div>
-          <div className="impact-evidence-meta">
-            <span>{e.eventClass.replace(/_/g, " ")}</span>
-            <span>{e.sources.slice(0, 2).join(", ") || "—"}</span>
-            <span>{formatTimestamp(e.timestamp)}</span>
-            {!compact ? <span>{formatDistance(e.distanceKm)}</span> : null}
-            <span>{(e.sourceReliability * 100).toFixed(0)}% rel</span>
-          </div>
+          {preview ? (
+            <div className="impact-evidence-preview-meta">
+              <span>{e.sources[0] || "Unknown source"}</span>
+              <span>·</span>
+              <span>{formatRelative(e.timestamp)}</span>
+            </div>
+          ) : (
+            <div className="impact-evidence-meta">
+              <span>{e.eventClass.replace(/_/g, " ")}</span>
+              <span>{e.sources.slice(0, 2).join(", ") || "—"}</span>
+              <span>{formatTimestamp(e.timestamp)}</span>
+              {!compact ? <span>{formatDistance(e.distanceKm)}</span> : null}
+              <span>{(e.sourceReliability * 100).toFixed(0)}% rel</span>
+            </div>
+          )}
           {!compact && e.urls && e.urls.length > 0 ? (
             <ul className="impact-evidence-links">
               {e.urls.slice(0, 3).map((u) => (
