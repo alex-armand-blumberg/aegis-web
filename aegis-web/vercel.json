@@ -6,6 +6,10 @@
       "schedule": "0 0 * * *"
     },
     {
+      "path": "/api/internal/impact/ingest?source=ucdp",
+      "schedule": "0 5 * * *"
+    },
+    {
       "path": "/api/internal/warm?scope=escalation&batch=1&batches=4",
       "schedule": "0 1 * * *"
     },

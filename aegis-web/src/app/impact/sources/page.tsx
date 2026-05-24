@@ -1,18 +1,18 @@
 "use client";
 
 import { Suspense } from "react";
-import { ImpactAppGate } from "./shared/ImpactAppGate";
-import { ImpactDashboard } from "./dashboard/ImpactDashboard";
+import { ImpactAppGate } from "../shared/ImpactAppGate";
+import { SourcesView } from "./SourcesView";
 
-function ImpactPageContent() {
+function SourcesPageContent() {
   return (
     <ImpactAppGate>
-      {({ selectedAssetIds }) => <ImpactDashboard selectedAssetIds={selectedAssetIds} />}
+      {({ selectedAssetIds }) => <SourcesView selectedAssetIds={selectedAssetIds} />}
     </ImpactAppGate>
   );
 }
 
-export default function ImpactPage() {
+export default function SourcesPage() {
   return (
     <Suspense
       fallback={
@@ -25,7 +25,7 @@ export default function ImpactPage() {
         </div>
       }
     >
-      <ImpactPageContent />
+      <SourcesPageContent />
     </Suspense>
   );
 }
