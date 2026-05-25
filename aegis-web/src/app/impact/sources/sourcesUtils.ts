@@ -313,7 +313,9 @@ export function statusDotClass(status: ProviderStatus): string {
 }
 
 export function rolesLabel(roles: SourceRole[]): string {
-  return roles.join(" · ");
+  return roles
+    .map((r) => (r === "db" ? "DB storage" : r === "map pin" ? "map pin" : r))
+    .join(" · ");
 }
 
 export function buildPlannedSourceRows(): PlannedSourceRow[] {

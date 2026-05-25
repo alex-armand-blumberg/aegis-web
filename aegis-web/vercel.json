@@ -1,5 +1,14 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "_proUpgradeCrons": [
+    "Uncomment and add to 'crons' array when upgrading from Vercel Hobby (Hobby limit: 2 crons).",
+    "Both ingest and warm routes require CRON_SECRET in production.",
+    "Vercel automatically injects Authorization: Bearer $CRON_SECRET for cron-triggered calls.",
+    "{ path: '/api/internal/warm?scope=escalation&batch=1&batches=4', schedule: '0 1 * * *' }",
+    "{ path: '/api/internal/warm?scope=escalation&batch=2&batches=4', schedule: '0 2 * * *' }",
+    "{ path: '/api/internal/warm?scope=escalation&batch=3&batches=4', schedule: '0 3 * * *' }",
+    "{ path: '/api/internal/warm?scope=escalation&batch=4&batches=4', schedule: '0 4 * * *' }"
+  ],
   "crons": [
     {
       "path": "/api/internal/warm?scope=map",
@@ -8,22 +17,6 @@
     {
       "path": "/api/internal/impact/ingest?source=ucdp",
       "schedule": "0 5 * * *"
-    },
-    {
-      "path": "/api/internal/warm?scope=escalation&batch=1&batches=4",
-      "schedule": "0 1 * * *"
-    },
-    {
-      "path": "/api/internal/warm?scope=escalation&batch=2&batches=4",
-      "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/internal/warm?scope=escalation&batch=3&batches=4",
-      "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/internal/warm?scope=escalation&batch=4&batches=4",
-      "schedule": "0 4 * * *"
     }
   ]
 }

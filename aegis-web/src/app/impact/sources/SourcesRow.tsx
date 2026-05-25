@@ -16,7 +16,7 @@ function roleBadgeVariant(roles: SourceRole[]): RoleBadgeVariant | null {
   if (roles.includes("chat")) return null;
   if (roles.includes("map pin")) return "map-backbone";
   if (roles.includes("evidence")) return "corroboration";
-  if (roles.includes("context") || roles.includes("future DB")) return "context";
+  if (roles.includes("context") || roles.includes("db")) return "context";
   return null;
 }
 

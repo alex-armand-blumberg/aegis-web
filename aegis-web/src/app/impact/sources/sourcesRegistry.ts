@@ -3,7 +3,7 @@ export type SourceRole =
   | "evidence"
   | "context"
   | "chat"
-  | "future DB";
+  | "db";
 
 export type SourceCostNote = "free" | "paid" | "optional" | "licensed";
 
@@ -25,8 +25,8 @@ export const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     id: "acled",
     displayName: "ACLED ArcGIS",
     matchPatterns: ["acled"],
-    roles: ["evidence", "context"],
-    tierHint: "Typically structured context",
+    roles: ["context"],
+    tierHint: "Regional/historical baseline context. Event-level API has 365-day publication lag — not live tactical evidence. ArcGIS public layer provides monthly aggregates only.",
   },
   {
     id: "ucdp",
@@ -52,8 +52,8 @@ export const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     id: "gdelt",
     displayName: "GDELT",
     matchPatterns: ["gdelt"],
-    roles: ["evidence", "context"],
-    tierHint: "Typically news / article",
+    roles: ["context"],
+    tierHint: "Tier 3 news/article-level corroboration. Not direct proof. Use as context only.",
   },
   {
     id: "opensky",
@@ -68,23 +68,24 @@ export const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     ],
     envOptional: true,
     costNote: "free",
-    tierHint: "Typically context",
+    tierHint: "Observable civilian airspace context only. Not reliable military-flight detection. Use for wording like 'civilian traffic appears normal/sparse', never as evidence of military operations.",
   },
   {
     id: "google-news",
     displayName: "Google News RSS",
     matchPatterns: ["google news"],
-    roles: ["evidence", "context"],
-    tierHint: "Typically news / article",
+    roles: ["context"],
+    tierHint: "Tier 3 article-level corroboration only. Not direct proof. Map pins require tier1/2 sources.",
   },
   {
     id: "rss-network",
     displayName: "RSS network adapter",
     matchPatterns: ["rss network", "trusted publisher"],
-    roles: ["evidence", "context"],
+    roles: ["context"],
     envVars: ["MAP_RSS_MAX_CONCURRENCY"],
     envOptional: true,
     costNote: "free",
+    tierHint: "Tier 3 article-level corroboration only.",
   },
   {
     id: "relay-seed",
@@ -117,6 +118,7 @@ export const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     envVars: ["AISSTREAM_SNAPSHOT_URL", "AISSTREAM_SNAPSHOT_URLS"],
     envOptional: true,
     costNote: "optional",
+    tierHint: "Maritime vessel-traffic context only (Railway relay snapshot). Not conflict evidence. Use for shipping-lane and port-area vessel density context only.",
   },
   {
     id: "sam-gov",
@@ -155,6 +157,7 @@ export const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     envVars: ["RELIEFWEB_APPNAME"],
     envOptional: true,
     costNote: "free",
+    tierHint: "Tier 2 humanitarian/crisis context. Useful for disaster, displacement, and aid-access signals. Not exact tactical event pins.",
   },
   {
     id: "strategic-pack",
@@ -228,10 +231,11 @@ export const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     id: "neon",
     displayName: "Neon Postgres",
     matchPatterns: ["neon"],
-    roles: ["future DB"],
+    roles: ["db"],
     envVars: ["DATABASE_URL"],
     envOptional: true,
     costNote: "paid",
+    tierHint: "Live — stores ingested impact_events (UCDP). Daily cron at 05:00 UTC. DB status visible in Sources tab.",
   },
   {
     id: "argus",
@@ -245,7 +249,7 @@ export const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     displayName: "Network / Flow",
     matchPatterns: ["network", "flow graph"],
     roles: ["context"],
-    planned: true,
+    tierHint: "Live — asset-centered relationship graph at /impact/network.",
   },
 ];
 
