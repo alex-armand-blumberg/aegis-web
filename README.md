@@ -2,6 +2,10 @@
 
 AEGIS is an asset-centered geopolitical intelligence and escalation monitoring platform designed to analyze global instability, infrastructure exposure, conflict escalation, and emerging strategic risk.
 
+## Live Platform
+
+[Launch AEGIS](https://aegis-hq.com)
+
 Built with Next.js and TypeScript, the platform combines geospatial visualization, structured event ingestion, evidence pipelines, and analyst-facing workflows into a unified operational intelligence interface.
 
 ---
