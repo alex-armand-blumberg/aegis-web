@@ -1,34 +1,97 @@
-AEGIS Web — Escalation & Geostrategic Intelligence
-==================================================
+# AEGIS — Geopolitical Early-Warning & Strategic Intelligence Platform
 
-This is the Next.js implementation of **AEGIS — Advanced Early-Warning & Geostrategic Intelligence System**, rebuilt from the original Streamlit demo.
+AEGIS is an asset-centered geopolitical intelligence and escalation monitoring platform designed to analyze global instability, infrastructure exposure, conflict escalation, and emerging strategic risk.
 
-It exposes:
+Built with Next.js and TypeScript, the platform combines geospatial visualization, structured event ingestion, evidence pipelines, and analyst-facing workflows into a unified operational intelligence interface.
 
-- A Palantir-style landing page with video background.
-- An **Escalation Index** page backed by ACLED data and TypeScript index computation.
-- An **Interactive Map** view using ACLED’s public ArcGIS layer.
-- AI analysis endpoints backed by Groq (Llama 3).
+---
 
-## Running locally
+## Core Capabilities
+
+- Asset-centered Impact analysis focused on exposure, escalation relevance, and regional context
+- Interactive geospatial monitoring using layered global event and intelligence data
+- Multi-source ingestion pipelines combining structured conflict, disaster, humanitarian, and contextual intelligence feeds
+- Evidence and corroboration workflows designed to improve explainability and reduce noise
+- Analyst-oriented interfaces for reviewing escalation signals, regional developments, and strategic context
+- Integrated AI-assisted analysis workflows for summarization, interpretation, and operational support
+- Production deployment pipeline using GitHub + Vercel
+
+---
+
+## Current Architecture
+
+The current implementation includes:
+
+- Next.js + TypeScript frontend application
+- Interactive mapping and geospatial visualization
+- Structured source ingestion pipelines
+- Neon/Postgres-backed data infrastructure
+- UCDP conflict ingestion support
+- Analyst chat and evidence interfaces
+- Source quality and relevance scoring systems
+- Modular ingestion architecture for future intelligence and data providers
+
+---
+
+## Platform Focus
+
+AEGIS is currently focused on:
+
+- Geopolitical escalation analysis
+- Infrastructure and asset risk monitoring
+- Explainable intelligence workflows
+- Geospatial intelligence UX experimentation
+- Structured event correlation and contextual analysis
+
+The platform is under active development and continuous architectural expansion.
+
+---
+
+## Running Locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Then open `http://localhost:3000`.
+Then open:
 
-### Environment variables
+```bash
+http://localhost:3000
+```
 
-Copy `.env.example` to `.env.local` and set:
+---
 
-- `GROQ_API_KEY` — Groq API key for AI insight endpoints.
+## Environment Variables
+
+Copy `.env.example` to `.env.local` and configure the required environment variables for your deployment environment.
+
+---
 
 ## Deployment
 
-1. Push this project to GitHub.
-2. Create a new project on Vercel and import the repo.
-3. In Vercel project settings, add `GROQ_API_KEY` as an environment variable.
-4. Point the `aegis-hq.com` domain at the Vercel project.
+1. Push the project to GitHub
+2. Import the repository into Vercel
+3. Configure required environment variables
+4. Deploy the application
 
+---
+
+## Technology Stack
+
+- Next.js
+- TypeScript
+- React
+- MapLibre / Geospatial Visualization
+- Neon Postgres
+- Vercel
+- Groq API
+- TailwindCSS
+
+---
+
+## Disclaimer
+
+AEGIS is an independent research and engineering project focused on geopolitical analysis, escalation monitoring, and operational intelligence workflows.
+
+The platform is experimental and should not be treated as an authoritative intelligence or forecasting system.
