@@ -12,19 +12,19 @@ Built with Next.js and TypeScript, the platform combines geospatial visualizatio
 
 ## Platform Preview
 
-![Graph View](public/screenshots/graph-view.png)
+![Graph View](public/graph-view.png)
 
 *Asset relationship and event-correlation network view.*
 
 ---
 
-![Dashboard View](public/screenshots/dashboard-view.png)
+![Dashboard View](public/dashboard-view.png)
 
 *Asset-centered operational dashboard with regional risk monitoring and corroborating event evidence.*
 
 ---
 
-![Analyst View](public/screenshots/analyst-view.png)
+![Analyst View](public/analyst-view.png)
 
 *Analyst reasoning workflow evaluating source reliability, evidence quality, and intelligence gaps.*
 
