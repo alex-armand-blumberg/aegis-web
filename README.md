@@ -14,7 +14,6 @@ Built with Next.js and TypeScript, the platform combines geospatial visualizatio
 - Evidence and corroboration workflows designed to improve explainability and reduce noise
 - Analyst-oriented interfaces for reviewing escalation signals, regional developments, and strategic context
 - Integrated AI-assisted analysis workflows for summarization, interpretation, and operational support
-- Production deployment pipeline using GitHub + Vercel
 
 ---
 
