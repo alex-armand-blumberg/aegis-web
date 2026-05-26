@@ -30,6 +30,14 @@ Built with Next.js and TypeScript, the platform combines geospatial visualizatio
 
 ---
 
+## System Architecture
+
+![System Architecture](public/system-architecture.png)
+
+*High-level architecture overview of AEGIS ingestion, correlation, storage, and analyst workflows.*
+
+---
+
 ## Core Capabilities
 
 - Asset-centered Impact analysis focused on exposure, escalation relevance, and regional context
