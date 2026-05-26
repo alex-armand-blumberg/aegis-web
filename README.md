@@ -105,6 +105,22 @@ Copy `.env.example` to `.env.local` and configure the required environment varia
 
 ---
 
+## Integrated Data Sources
+
+AEGIS is designed around multi-source geopolitical and operational intelligence ingestion, including:
+
+- UCDP conflict event data
+- GDELT global event monitoring
+- NASA FIRMS wildfire and thermal anomaly data
+- ReliefWeb humanitarian situation reporting
+- USGS earthquake monitoring
+- NOAA severe weather and storm feeds
+- LiveUAmap regional conflict reporting
+- OpenSky airspace and aviation telemetry
+- Structured regional and contextual intelligence pipelines
+
+---
+
 ## Disclaimer
 
 AEGIS is an independent research and engineering project focused on geopolitical analysis, escalation monitoring, and operational intelligence workflows.
