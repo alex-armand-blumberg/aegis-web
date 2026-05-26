@@ -93,6 +93,18 @@ Copy `.env.example` to `.env.local` and configure the required environment varia
 
 ---
 
+## Roadmap
+
+- Advanced map clustering and layered visualization
+- Expanded infrastructure and supply chain risk modeling
+- Regional baseline conflict and instability overlays
+- Improved evidence explainability and source confidence scoring
+- AI-assisted escalation analysis and forecasting workflows
+- Additional structured intelligence source integrations
+- Enhanced analyst collaboration and operational workflows
+
+---
+
 ## Disclaimer
 
 AEGIS is an independent research and engineering project focused on geopolitical analysis, escalation monitoring, and operational intelligence workflows.
