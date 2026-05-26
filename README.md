@@ -56,20 +56,6 @@ The current implementation includes:
 
 ---
 
-## Platform Focus
-
-AEGIS is currently focused on:
-
-- Geopolitical escalation analysis
-- Infrastructure and asset risk monitoring
-- Explainable intelligence workflows
-- Geospatial intelligence UX experimentation
-- Structured event correlation and contextual analysis
-
-The platform is under active development and continuous architectural expansion.
-
----
-
 ## Running Locally
 
 ```bash
@@ -122,22 +108,6 @@ Copy `.env.example` to `.env.local` and configure the required environment varia
 - AI-assisted escalation analysis and forecasting workflows
 - Additional structured intelligence source integrations
 - Enhanced analyst collaboration and operational workflows
-
----
-
-## Integrated Data Sources
-
-AEGIS is designed around multi-source geopolitical and operational intelligence ingestion, including:
-
-- UCDP conflict event data
-- GDELT global event monitoring
-- NASA FIRMS wildfire and thermal anomaly data
-- ReliefWeb humanitarian situation reporting
-- USGS earthquake monitoring
-- NOAA severe weather and storm feeds
-- LiveUAmap regional conflict reporting
-- OpenSky airspace and aviation telemetry
-- Structured regional and contextual intelligence pipelines
 
 ---
 
